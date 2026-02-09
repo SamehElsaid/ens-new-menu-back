@@ -1,0 +1,19 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    env_file:
+      - .env.production
+    ports:
+      - "4021:4021"
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      UPLOAD_DIR: ${UPLOAD_DIR:-/uploads} # default /uploads
+    volumes:
+      - uploads_data:${UPLOAD_DIR:-/uploads}
+
+volumes:
+  uploads_data:
+    name: uploads_data
