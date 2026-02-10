@@ -92,12 +92,15 @@ app.use(
         }
       }
 
-      // Allow ensmenu.com + *.ensmenu.com
+      // Allow production domains
       try {
         const url = new URL(origin);
         if (
           url.hostname === "ensmenu.com" ||
-          url.hostname.endsWith(".ensmenu.com")
+          url.hostname.endsWith(".ensmenu.com") ||
+          // ENS Egypt domain: ensmenu.ens.eg + subdomains
+          url.hostname === "ensmenu.ens.eg" ||
+          url.hostname.endsWith(".ensmenu.ens.eg")
         ) {
           return callback(null, true);
         }
