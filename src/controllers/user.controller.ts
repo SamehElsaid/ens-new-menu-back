@@ -1,7 +1,12 @@
 import { Request, Response } from 'express';
+import path from 'path';
+import fs from 'fs/promises';
+import sharp from 'sharp';
+import { v4 as uuidv4 } from 'uuid';
 import { getPool, sql } from '../config/database';
 import bcrypt from 'bcryptjs';
 import { logger } from '../utils/logger';
+import { getImageUrl } from '../utils/urlHelper';
 
 // Get user profile
 export async function getProfile(req: Request, res: Response): Promise<void> {
@@ -33,11 +38,28 @@ export async function getProfile(req: Request, res: Response): Promise<void> {
   }
 }
 
-// Update user profile
+// Update user profile (supports JSON or multipart/form-data with optional profileImage file)
 export async function updateProfile(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
-    const { name, phone, phoneNumber, country, dateOfBirth, gender, address, profileImage } = req.body;
+    const { name, phone, phoneNumber, country, dateOfBirth, gender, address, profileImage: profileImageBody } = req.body;
+
+    // If client sent multipart with a file, save it and get URL (same as /api/upload type=profile-images)
+    let profileImageUrl: string | null = null;
+    if ((req as any).file?.buffer) {
+      const file = (req as any).file;
+      const uploadDir = path.join(process.cwd(), 'uploads', 'profile-images');
+      await fs.mkdir(uploadDir, { recursive: true });
+      const filename = `${uuidv4()}.webp`;
+      const filePath = path.join(uploadDir, filename);
+      await sharp(file.buffer)
+        .resize(400, 400, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 85 })
+        .toFile(filePath);
+      profileImageUrl = getImageUrl(`/uploads/profile-images/${filename}`);
+    }
+
+    const profileImage = profileImageUrl ?? (typeof profileImageBody === 'string' ? profileImageBody : undefined);
 
     const pool = await getPool();
 
@@ -48,9 +70,9 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
       updates.push('name = @name');
       request.input('name', sql.NVarChar, name);
     }
-    
+
     // Accept both 'phone' and 'phoneNumber' for compatibility
-    const phoneValue = phone || phoneNumber;
+    const phoneValue = phone ?? phoneNumber;
     if (phoneValue !== undefined) {
       updates.push('phoneNumber = @phoneNumber');
       request.input('phoneNumber', sql.NVarChar, phoneValue || null);

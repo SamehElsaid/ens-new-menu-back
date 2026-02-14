@@ -265,6 +265,34 @@ export async function login(req: Request, res: Response): Promise<void> {
     await LoginAttemptsService.recordAttempt(email, ipAddress, true, userAgent);
     await LoginAttemptsService.resetFailedAttempts(email);
 
+    // Get user profile with subscription (same shape as getMe)
+    const profileResult = await pool
+      .request()
+      .input("userId", sql.Int, user.id)
+      .query(`
+        SELECT 
+          u.id, u.email, u.name, u.role, u.phoneNumber, u.country,
+          u.dateOfBirth, u.gender, u.address, u.profileImage,
+          u.isEmailVerified, u.createdAt,
+          s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
+        FROM Users u
+        LEFT JOIN Subscriptions s ON u.id = s.userId
+          AND s.status = 'active'
+          AND (s.endDate IS NULL OR s.endDate > GETDATE())
+        LEFT JOIN Plans p ON s.planId = p.id
+        WHERE u.id = @userId
+      `);
+
+    const profile = profileResult.recordset[0];
+    const planType = profile?.billingCycle || "free";
+    const subscription = {
+      planId: profile?.planId ?? null,
+      planName: profile?.planName ?? "Free",
+      billingCycle: profile?.billingCycle ?? "free",
+      maxMenus: profile?.maxMenus ?? 1,
+      maxProductsPerMenu: profile?.maxProductsPerMenu ?? 50,
+    };
+
     // Generate tokens
     const tokenPayload = {
       id: user.id,
@@ -288,11 +316,20 @@ export async function login(req: Request, res: Response): Promise<void> {
     res.json({
       message: "Login successful",
       user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        profileImage: user.profileImage,
+        id: profile.id,
+        email: profile.email,
+        name: profile.name,
+        role: profile.role,
+        phoneNumber: profile.phoneNumber,
+        country: profile.country,
+        dateOfBirth: profile.dateOfBirth,
+        gender: profile.gender,
+        address: profile.address,
+        profileImage: profile.profileImage,
+        isEmailVerified: profile.isEmailVerified,
+        createdAt: profile.createdAt,
+        planType,
+        subscription,
       },
       accessToken,
       refreshToken,

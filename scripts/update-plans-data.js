@@ -103,14 +103,19 @@ async function updatePlansData() {
 
     for (const planData of plansData) {
       const featuresJson = JSON.stringify(planData.features);
+      const featuresEnJson = planData.featuresEn
+        ? JSON.stringify(planData.featuresEn)
+        : null;
 
-      // Try to update by current name or old name
+      // Try to update by current name or old name (run migration 021 for descriptionEn/featuresEn)
       const result = await pool
         .request()
         .input("name", sql.NVarChar, planData.name)
         .input("oldName", sql.NVarChar, planData.oldName || planData.name)
         .input("description", sql.NVarChar, planData.description)
+        .input("descriptionEn", sql.NVarChar, planData.descriptionEn || null)
         .input("features", sql.NVarChar, featuresJson)
+        .input("featuresEn", sql.NVarChar, featuresEnJson)
         .input("priceMonthly", sql.Decimal(10, 2), planData.priceMonthly || 0)
         .input("priceYearly", sql.Decimal(10, 2), planData.priceYearly || 0)
         .input("maxMenus", sql.Int, planData.maxMenus)
@@ -122,7 +127,9 @@ async function updatePlansData() {
           SET 
             name = @name,
             description = @description,
+            descriptionEn = @descriptionEn,
             features = @features,
+            featuresEn = @featuresEn,
             priceMonthly = @priceMonthly,
             priceYearly = @priceYearly,
             maxMenus = @maxMenus,
