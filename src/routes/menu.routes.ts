@@ -96,8 +96,8 @@ router.put(
   menuController.updateMenu
 );
 
-// PATCH /api/menus/:id/status - Toggle menu status
-router.patch(
+// PUT /api/menus/:id/status - Toggle menu status
+router.put(
   "/:id/status",
   [param("id").isInt()],
   menuController.toggleMenuStatus

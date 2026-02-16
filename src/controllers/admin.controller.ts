@@ -568,6 +568,7 @@ export async function getGlobalAds(req: Request, res: Response): Promise<void> {
   try {
     const pool = await getPool();
 
+    // Get ads list
     const result = await pool.request().query(`
       SELECT 
         id, title, titleAr, content, contentAr, imageUrl, linkUrl,
@@ -578,7 +579,26 @@ export async function getGlobalAds(req: Request, res: Response): Promise<void> {
       ORDER BY displayOrder ASC, createdAt DESC
     `);
 
-    res.json({ ads: result.recordset });
+    // Get statistics
+    const statsResult = await pool.request().query(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN isActive = 1 THEN 1 ELSE 0 END) as totalActive,
+        SUM(clickCount) as totalClicks
+      FROM Ads
+      WHERE adType = 'global'
+    `);
+
+    const stats = statsResult.recordset[0];
+
+    res.json({
+      ads: result.recordset,
+      statistics: {
+        total: stats.total || 0,
+        totalActive: stats.totalActive || 0,
+        totalClicks: stats.totalClicks || 0,
+      },
+    });
   } catch (error) {
     logger.error("Get global ads error:", error);
     res.status(500).json({ error: "Failed to get ads" });
@@ -828,20 +848,84 @@ export async function createAdmin(req: Request, res: Response): Promise<void> {
   }
 }
 
-// Get All Admins
+// Get All Admins with pagination and statistics
 export async function getAllAdmins(req: Request, res: Response): Promise<void> {
   try {
-    const pool = await getPool();
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      sortBy = "createdAt",
+      sortOrder = "DESC",
+    } = req.query;
 
-    const result = await pool.request().query(`
+    const pool = await getPool();
+    const offset = (Number(page) - 1) * Number(limit);
+
+    let whereConditions = ["u.role = 'admin'"];
+    const inputs: any = {
+      limit: Number(limit),
+      offset: offset,
+    };
+
+    if (search) {
+      whereConditions.push(
+        "(u.name LIKE '%' + @search + '%' OR u.email LIKE '%' + @search + '%')"
+      );
+      inputs.search = String(search);
+    }
+
+    const whereClause = whereConditions.join(" AND ");
+
+    const query = `
       SELECT 
-        id, name, email, createdAt, lastLoginAt, profileImage
+        u.id, u.name, u.email, u.createdAt, u.lastLoginAt, u.profileImage
+      FROM Users u
+      WHERE ${whereClause}
+      ORDER BY u.${sortBy} ${sortOrder}
+      OFFSET @offset ROWS
+      FETCH NEXT @limit ROWS ONLY
+    `;
+
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM Users u
+      WHERE ${whereClause}
+    `;
+
+    const request = pool.request();
+    Object.keys(inputs).forEach((key) => {
+      request.input(key, inputs[key]);
+    });
+
+    // Get statistics: total admins and last login of any admin
+    const statsQuery = `
+      SELECT 
+        COUNT(*) as totalAdmins,
+        MAX(lastLoginAt) as lastLoginOfAdmin
       FROM Users
       WHERE role = 'admin'
-      ORDER BY createdAt DESC
-    `);
+    `;
 
-    res.json({ admins: result.recordset });
+    const [adminsResult, countResult, statsResult] = await Promise.all([
+      request.query(query),
+      request.query(countQuery),
+      pool.request().query(statsQuery),
+    ]);
+
+    res.json({
+      admins: adminsResult.recordset,
+      pagination: {
+        currentPage: Number(page),
+        totalPages: Math.ceil(countResult.recordset[0].total / Number(limit)),
+        totalItems: countResult.recordset[0].total,
+        itemsPerPage: Number(limit),
+      },
+      statistics: {
+        totalAdmins: statsResult.recordset[0].totalAdmins,
+        lastLoginOfAdmin: statsResult.recordset[0].lastLoginOfAdmin,
+      },
+    });
   } catch (error) {
     logger.error("Get all admins error:", error);
     res.status(500).json({ error: "Failed to get admins" });
