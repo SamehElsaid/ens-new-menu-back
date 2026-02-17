@@ -13,6 +13,7 @@ import {
   updateGlobalAd,
   deleteGlobalAd,
   createAdmin,
+  deleteAdmin,
   getAllAdmins,
   getAdAnalytics,
   updateUserSubscription,
@@ -53,5 +54,6 @@ router.get('/ads/:id/analytics', getAdAnalytics);
 // Admin Management
 router.get('/admins', getAllAdmins);
 router.post('/admins', createAdmin);
+router.delete('/admins/:id', deleteAdmin);
 
 export default router;

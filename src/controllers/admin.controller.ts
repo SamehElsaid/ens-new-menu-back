@@ -3,11 +3,12 @@ import { getPool, sql } from "../config/database";
 import { logger } from "../utils/logger";
 import bcrypt from "bcryptjs";
 import * as notificationService from "../services/notificationService";
+import { SubscriptionDowngradeService } from "../services/subscriptionDowngrade.service";
 
 // Get Admin Dashboard Statistics
 export async function getAdminStats(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const pool = await getPool();
@@ -147,7 +148,7 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
 
     if (search) {
       whereConditions.push(
-        "(u.name LIKE '%' + @search + '%' OR u.email LIKE '%' + @search + '%')"
+        "(u.name LIKE '%' + @search + '%' OR u.email LIKE '%' + @search + '%')",
       );
       inputs.search = String(search);
     }
@@ -239,7 +240,7 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
 // Get Single User Details
 export async function getUserDetails(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { id } = req.params;
@@ -305,7 +306,7 @@ export async function getUserDetails(
 // Suspend/Unsuspend User
 export async function toggleUserSuspension(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { id } = req.params;
@@ -608,7 +609,7 @@ export async function getGlobalAds(req: Request, res: Response): Promise<void> {
 // Create Global Ad
 export async function createGlobalAd(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const {
@@ -672,7 +673,7 @@ export async function createGlobalAd(
 // Update Global Ad
 export async function updateGlobalAd(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { id } = req.params;
@@ -775,7 +776,7 @@ export async function updateGlobalAd(
 // Delete Global Ad
 export async function deleteGlobalAd(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { id } = req.params;
@@ -848,6 +849,44 @@ export async function createAdmin(req: Request, res: Response): Promise<void> {
   }
 }
 
+// Delete Admin
+export async function deleteAdmin(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    const currentUserId = req.user?.userId;
+
+    if (currentUserId !== undefined && Number(id) === currentUserId) {
+      res.status(403).json({ error: "Cannot delete your own admin account" });
+      return;
+    }
+
+    const pool = await getPool();
+
+    const userResult = await pool.request().input("userId", sql.Int, id).query(`
+        SELECT id, role FROM Users WHERE id = @userId
+      `);
+
+    if (userResult.recordset.length === 0) {
+      res.status(404).json({ error: "Admin not found" });
+      return;
+    }
+
+    if (userResult.recordset[0].role !== "admin") {
+      res.status(404).json({ error: "Admin not found" });
+      return;
+    }
+
+    await pool.request().input("userId", sql.Int, id).query(`
+      DELETE FROM Users WHERE id = @userId
+    `);
+
+    res.json({ message: "Administrator deleted successfully" });
+  } catch (error) {
+    logger.error("Delete admin error:", error);
+    res.status(500).json({ error: "Failed to delete administrator" });
+  }
+}
+
 // Get All Admins with pagination and statistics
 export async function getAllAdmins(req: Request, res: Response): Promise<void> {
   try {
@@ -870,7 +909,7 @@ export async function getAllAdmins(req: Request, res: Response): Promise<void> {
 
     if (search) {
       whereConditions.push(
-        "(u.name LIKE '%' + @search + '%' OR u.email LIKE '%' + @search + '%')"
+        "(u.name LIKE '%' + @search + '%' OR u.email LIKE '%' + @search + '%')",
       );
       inputs.search = String(search);
     }
@@ -935,7 +974,7 @@ export async function getAllAdmins(req: Request, res: Response): Promise<void> {
 // Get Ad Analytics
 export async function getAdAnalytics(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { id } = req.params;
@@ -970,7 +1009,7 @@ export async function getAdAnalytics(
 // Update User Subscription
 export async function updateUserSubscription(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { id } = req.params;
@@ -990,11 +1029,9 @@ export async function updateUserSubscription(
 
     // Validate billing cycle
     if (!["monthly", "yearly", "free"].includes(billingCycle)) {
-      res
-        .status(400)
-        .json({
-          error: "Invalid billing cycle. Must be monthly, yearly, or free",
-        });
+      res.status(400).json({
+        error: "Invalid billing cycle. Must be monthly, yearly, or free",
+      });
       return;
     }
 
@@ -1060,22 +1097,38 @@ export async function updateUserSubscription(
         VALUES (@userId, @planId, @billingCycle, @startDate, @endDate, @status, 1)
       `);
 
-    // Send subscription created notification
-    if (
-      status === "active" &&
-      subscriptionEndDate &&
-      planResult.recordset[0].name !== "Free"
-    ) {
+    const planName = planResult.recordset[0].name;
+    const isFreePlan =
+      typeof planName === "string" && planName.toLowerCase() === "free";
+
+    // عند التبديل لخطة Free: تطبيق حدود الخطة (إيقاف المنيوهات الزائدة عن الحد)
+    if (isFreePlan) {
+      try {
+        await SubscriptionDowngradeService.handleDowngradeToFree(parseInt(id));
+        logger.info(
+          `Applied free plan limits for user ${id} after subscription change`,
+        );
+      } catch (error) {
+        logger.error(
+          "Failed to apply free plan limits after subscription change:",
+          error,
+        );
+        // لا نُفشّل الطلب؛ الاشتراك تم تحديثه، فقط تطبيق الحدود فشل
+      }
+    }
+
+    // Send subscription created notification (only for paid plans)
+    if (status === "active" && subscriptionEndDate && !isFreePlan) {
       try {
         await notificationService.notifySubscriptionCreated(
           parseInt(id),
-          planResult.recordset[0].name,
-          subscriptionEndDate
+          planName,
+          subscriptionEndDate,
         );
       } catch (error) {
         logger.error(
           "Failed to send subscription created notification:",
-          error
+          error,
         );
         // Don't fail the request if notification fails
       }
@@ -1087,7 +1140,7 @@ export async function updateUserSubscription(
         id: insertResult.recordset[0].id,
         userId: id,
         planId,
-        planName: planResult.recordset[0].name,
+        planName,
         billingCycle,
         startDate: subscriptionStartDate,
         endDate: subscriptionEndDate,
@@ -1103,7 +1156,7 @@ export async function updateUserSubscription(
 // Get All Plans (for subscription dropdown)
 export async function getPlansForSubscription(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const pool = await getPool();
@@ -1124,7 +1177,7 @@ export async function getPlansForSubscription(
 // Apply Free Plan Limits to User (Manual)
 export async function applyFreePlanLimits(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { id } = req.params;
@@ -1150,9 +1203,8 @@ export async function applyFreePlanLimits(
     const user = userResult.recordset[0];
 
     // Import and use the downgrade service
-    const { SubscriptionDowngradeService } = await import(
-      "../services/subscriptionDowngrade.service"
-    );
+    const { SubscriptionDowngradeService } =
+      await import("../services/subscriptionDowngrade.service");
 
     // Get info before applying limits
     const beforeResult = await pool.request().input("userId", sql.Int, id)
