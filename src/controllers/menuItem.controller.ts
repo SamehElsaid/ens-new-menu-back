@@ -94,14 +94,27 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
       selectFields.push('mi.discountPercent');
     }
     
-    selectFields.push('mi.image', 'mi.available', 'mi.sortOrder', 'mit.name', 'mit.description');
+    selectFields.push(
+      'mi.image',
+      'mi.available',
+      'mi.sortOrder',
+      'mit.name',
+      'mit.description',
+      'mit_ar.description as description_ar',
+      'mit_en.description as description_en',
+      'mit_ar.name as name_ar',
+      'mit_en.name as name_en'
+    );
     
     if (hasCategoriesTable && hasCategoryId) {
       selectFields.push('ct.name as categoryName');
     }
 
     // Build JOIN clauses
-    let joinClause = 'LEFT JOIN MenuItemTranslations mit ON mi.id = mit.menuItemId AND mit.locale = @locale';
+    let joinClause = `
+          LEFT JOIN MenuItemTranslations mit ON mi.id = mit.menuItemId AND mit.locale = @locale
+          LEFT JOIN MenuItemTranslations mit_ar ON mi.id = mit_ar.menuItemId AND mit_ar.locale = 'ar'
+          LEFT JOIN MenuItemTranslations mit_en ON mi.id = mit_en.menuItemId AND mit_en.locale = 'en'`;
     if (hasCategoriesTable && hasCategoryId) {
       joinClause += '\n          LEFT JOIN Categories c ON mi.categoryId = c.id\n          LEFT JOIN CategoryTranslations ct ON c.id = ct.categoryId AND ct.locale = @locale';
     }
