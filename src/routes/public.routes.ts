@@ -2,6 +2,7 @@ import { Router } from "express";
 import { body, query } from "express-validator";
 import {
   getPublicMenu,
+  getAllPublicMenus,
   submitRating,
   getRecentRatings,
   getActiveAds,
@@ -15,6 +16,9 @@ const router = Router();
 
 // Apply rate limiting to all public routes
 router.use(publicLimiter);
+
+// GET /api/public/menus - Get all menus (no token)
+router.get("/menus", getAllPublicMenus);
 
 // GET /api/public/menu/:slug - Get menu by slug
 router.get(

@@ -2,6 +2,21 @@ import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
 import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 
+// Get all menus (no auth) - returns slug only as array
+export const getAllPublicMenus = async (req: Request, res: Response) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().query(`
+      SELECT m.slug FROM Menus m ORDER BY m.createdAt DESC
+    `);
+    const slugs = result.recordset.map((r: { slug: string }) => r.slug);
+    res.json(slugs);
+  } catch (error) {
+    console.error("Get all public menus error:", error);
+    res.status(500).json({ error: "Failed to get menus" });
+  }
+};
+
 // Get public menu by slug
 export const getPublicMenu = async (req: Request, res: Response) => {
   try {
