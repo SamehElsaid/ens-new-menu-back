@@ -105,6 +105,17 @@ export async function signup(req: Request, res: Response): Promise<void> {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // Get Free plan ID by name (don't assume id=1)
+    const freePlanResult = await pool
+      .request()
+      .query("SELECT id FROM Plans WHERE name = 'Free'");
+    if (!freePlanResult.recordset.length) {
+      logger.error("Free plan not found in Plans table");
+      res.status(500).json({ error: "Free plan not configured" });
+      return;
+    }
+    const freePlanId = freePlanResult.recordset[0].id;
+
     // Create user with email already verified (no email confirmation required)
     await executeTransaction(async (transaction) => {
       // Insert user with isEmailVerified = true
@@ -122,11 +133,11 @@ export async function signup(req: Request, res: Response): Promise<void> {
 
       const userId = userResult.recordset[0].id;
 
-      // Create free subscription
+      // Create free subscription (use Free plan ID from DB)
       await transaction
         .request()
         .input("userId", sql.Int, userId)
-        .input("planId", sql.Int, 1) // Free plan
+        .input("planId", sql.Int, freePlanId)
         .input("billingCycle", sql.NVarChar, "free").query(`
           INSERT INTO Subscriptions (userId, planId, billingCycle, status)
           VALUES (@userId, @planId, @billingCycle, 'active')

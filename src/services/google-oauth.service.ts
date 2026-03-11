@@ -251,6 +251,16 @@ export class GoogleOAuthService {
         };
       }
 
+      // Get Free plan ID by name (don't assume id=1)
+      const freePlanResult = await pool.request().query(`
+        SELECT id FROM Plans WHERE name = 'Free'
+      `);
+      if (!freePlanResult.recordset.length) {
+        logger.error('Free plan not found in Plans table');
+        throw new Error('Free plan not configured');
+      }
+      const freePlanId = freePlanResult.recordset[0].id;
+
       // Create new user with Google account
       const result = await executeTransaction(async (transaction) => {
         // Insert new user (password is NULL for social login)
@@ -285,11 +295,11 @@ export class GoogleOAuthService {
             VALUES (@userId, @provider, @providerId, @providerEmail, @providerName, @providerPhoto)
           `);
 
-        // Create free subscription for new user
+        // Create free subscription for new user (use Free plan ID from DB)
         await transaction
           .request()
           .input('userId', sql.Int, newUserId)
-          .input('planId', sql.Int, 1) // Free plan
+          .input('planId', sql.Int, freePlanId)
           .input('billingCycle', sql.NVarChar, 'free')
           .query(`
             INSERT INTO Subscriptions (userId, planId, billingCycle, status)
