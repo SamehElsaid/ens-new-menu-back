@@ -211,16 +211,32 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
         SELECT 
           (SELECT COUNT(*) FROM MenuItems WHERE menuId = @menuId) as totalItems,
           (SELECT COUNT(*) FROM MenuItems WHERE menuId = @menuId AND available = 1) as activeItems,
-          (SELECT COUNT(*) FROM Categories WHERE menuId = @menuId) as categories
+          (SELECT COUNT(*) FROM Categories WHERE menuId = @menuId) as categories,
+          (SELECT COUNT(*) FROM MenuStaff WHERE menuId = @menuId) as staffCount,
+          (SELECT COUNT(*) FROM MenuTables WHERE menuId = @menuId) as tablesCount
       `);
 
     const stats = statsResult.recordset[0];
+
+    // Get staff & tables lists
+    const [staffResult, tablesResult] = await Promise.all([
+      pool.request().input("menuId", sql.Int, parseInt(id)).query(`
+        SELECT * FROM MenuStaff WHERE menuId = @menuId ORDER BY id DESC
+      `),
+      pool.request().input("menuId", sql.Int, parseInt(id)).query(`
+        SELECT * FROM MenuTables WHERE menuId = @menuId ORDER BY id DESC
+      `),
+    ]);
 
     res.json({
       menu: menu,
       itemsCount: stats.totalItems || 0,
       activeItemsCount: stats.activeItems || 0,
       categoriesCount: stats.categories || 0,
+      staffCount: stats.staffCount || 0,
+      tablesCount: stats.tablesCount || 0,
+      menuStaff: staffResult.recordset,
+      menuTables: tablesResult.recordset,
       views: 0,
     });
   } catch (error) {

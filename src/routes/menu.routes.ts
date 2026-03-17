@@ -7,6 +7,8 @@ import { checkMenuLimit } from "../middleware/planLimits";
 import menuItemRoutes from "./menuItem.routes";
 import branchRoutes from "./branch.routes";
 import menuCustomizationRoutes from "./menuCustomization.routes";
+import menuStaffRoutes from "./menuStaff.routes";
+import menuTablesRoutes from "./menuTables.routes";
 
 const router = Router();
 
@@ -110,5 +112,7 @@ router.delete("/:id", [param("id").isInt()], menuController.deleteMenu);
 router.use("/:menuId/items", menuItemRoutes);
 router.use("/:menuId/branches", branchRoutes);
 router.use("/:menuId/customizations", menuCustomizationRoutes);
+router.use("/:menuId/staff", menuStaffRoutes);
+router.use("/:menuId/tables", menuTablesRoutes);
 
 export default router;
