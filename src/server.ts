@@ -2,9 +2,13 @@
 import "./env";
 
 import express, { Application } from "express";
+import http from "http";
 import cors from "cors";
 import helmet from "helmet";
 import path from "path";
+
+import { corsOriginDelegate } from "./config/corsOrigins";
+import { attachStaffNotificationsSocket } from "./socket/staffNotifications.socket";
 
 import { getPool, closePool } from "./config/database";
 import { testEmailConnection } from "./config/email";
@@ -72,47 +76,7 @@ app.use((req, res, next) => {
 // ✅ CORS (subdomains + curl + frontend safe)
 app.use(
   cors({
-    origin: (origin, callback) => {
-      // Allow curl, Postman, server-to-server
-      if (!origin) return callback(null, true);
-
-      // Allow localhost in development (including subdomains like test.localhost)
-      if (process.env.NODE_ENV === "development") {
-        try {
-          const url = new URL(origin);
-          if (
-            url.hostname === "localhost" ||
-            url.hostname.endsWith(".localhost") ||
-            url.hostname === "127.0.0.1"
-          ) {
-            return callback(null, true);
-          }
-        } catch {
-          // Invalid URL, reject
-          return callback(null, false);
-        }
-      }
-
-      // Allow production domains
-      try {
-        const url = new URL(origin);
-        if (
-          url.hostname === "ensmenu.com" ||
-          url.hostname.endsWith(".ensmenu.com") ||
-          // ENS Egypt domain: ensmenu.ens.eg + subdomains
-          url.hostname === "ensmenu.ens.eg" ||
-          url.hostname.endsWith(".ensmenu.ens.eg")
-        ) {
-          return callback(null, true);
-        }
-      } catch {
-        logger.warn("Invalid CORS origin:", origin);
-        return callback(null, false);
-      }
-
-      logger.warn(`🔴 CORS blocked: ${origin}`);
-      return callback(null, false);
-    },
+    origin: corsOriginDelegate,
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
@@ -194,7 +158,10 @@ async function startServer() {
     CleanupService.start();
     startSubscriptionScheduler();
 
-    app.listen(PORT, () => {
+    const httpServer = http.createServer(app);
+    attachStaffNotificationsSocket(httpServer);
+
+    httpServer.listen(PORT, () => {
       logger.info(`🚀 Server running on port ${PORT}`);
       logger.info(`🌍 Environment: ${process.env.NODE_ENV}`);
     });
