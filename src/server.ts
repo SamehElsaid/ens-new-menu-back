@@ -26,6 +26,7 @@ import adminRoutes from "./routes/admin.routes";
 import uploadRoutes from "./routes/upload.routes";
 import adsRoutes from "./routes/ads.routes";
 import notificationRoutes from "./routes/notification.routes";
+import staffAuthRoutes from "./routes/staffAuth.routes";
 
 // ------------------------------------------------------------------
 
@@ -165,6 +166,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api", adsRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/staff-auth", staffAuthRoutes);
 
 // ------------------------------------------------------------------
 // 404 + Error handlers

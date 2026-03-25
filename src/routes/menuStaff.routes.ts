@@ -27,6 +27,7 @@ router.post(
     body("role").optional().isString().trim().isLength({ max: 100 }),
     body("phone").optional().isString().trim().isLength({ max: 50 }),
     body("email").optional().isEmail().normalizeEmail(),
+    body("password").optional().isString().isLength({ min: 6, max: 128 }),
     body("isActive").optional().isBoolean(),
   ]),
   staffController.createStaff
@@ -42,6 +43,7 @@ router.put(
     body("role").optional().isString().trim().isLength({ max: 100 }),
     body("phone").optional().isString().trim().isLength({ max: 50 }),
     body("email").optional().isEmail().normalizeEmail(),
+    body("password").optional().isString().isLength({ min: 6, max: 128 }),
     body("isActive").optional().isBoolean(),
   ]),
   staffController.updateStaff

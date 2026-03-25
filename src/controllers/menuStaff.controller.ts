@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import bcrypt from "bcryptjs";
 import { getPool, sql, executeTransaction } from "../config/database";
 import { logger } from "../utils/logger";
 
@@ -24,7 +25,7 @@ export async function getStaff(req: Request, res: Response): Promise<void> {
       .request()
       .input("menuId", sql.Int, parseInt(menuId))
       .query(`
-        SELECT *
+        SELECT id, menuId, name, role, phone, email, isActive, createdAt
         FROM MenuStaff
         WHERE menuId = @menuId
         ORDER BY id DESC
@@ -53,7 +54,7 @@ export async function getStaffById(
       .input("menuId", sql.Int, parseInt(menuId))
       .input("userId", sql.Int, userId)
       .query(`
-        SELECT s.*
+        SELECT s.id, s.menuId, s.name, s.role, s.phone, s.email, s.isActive, s.createdAt
         FROM MenuStaff s
         JOIN Menus m ON s.menuId = m.id
         WHERE s.id = @staffId AND s.menuId = @menuId AND m.userId = @userId
@@ -78,7 +79,7 @@ export async function createStaff(
   try {
     const userId = req.user!.userId;
     const { menuId } = req.params;
-    const { name, role, phone, email, isActive = true } = req.body;
+    const { name, role, phone, email, password, isActive = true } = req.body;
 
     const pool = await getPool();
 
@@ -93,18 +94,40 @@ export async function createStaff(
       return;
     }
 
+    if (email) {
+      const dupCheck = await pool
+        .request()
+        .input("email", sql.NVarChar, email.toLowerCase())
+        .input("menuId", sql.Int, parseInt(menuId))
+        .query(
+          "SELECT id FROM MenuStaff WHERE email = @email AND menuId = @menuId"
+        );
+      if (dupCheck.recordset.length > 0) {
+        res
+          .status(400)
+          .json({ error: "Email already exists for this menu" });
+        return;
+      }
+    }
+
+    const hashedPassword = password
+      ? await bcrypt.hash(password, 12)
+      : null;
+
     const result = await pool
       .request()
       .input("menuId", sql.Int, parseInt(menuId))
       .input("name", sql.NVarChar, name)
       .input("role", sql.NVarChar, role || null)
       .input("phone", sql.NVarChar, phone || null)
-      .input("email", sql.NVarChar, email || null)
+      .input("email", sql.NVarChar, email ? email.toLowerCase() : null)
+      .input("password", sql.NVarChar, hashedPassword)
       .input("isActive", sql.Bit, isActive ? 1 : 0)
       .query(`
-        INSERT INTO MenuStaff (menuId, name, role, phone, email, isActive)
-        OUTPUT INSERTED.*
-        VALUES (@menuId, @name, @role, @phone, @email, @isActive)
+        INSERT INTO MenuStaff (menuId, name, role, phone, email, password, isActive)
+        OUTPUT INSERTED.id, INSERTED.menuId, INSERTED.name, INSERTED.role,
+               INSERTED.phone, INSERTED.email, INSERTED.isActive, INSERTED.createdAt
+        VALUES (@menuId, @name, @role, @phone, @email, @password, @isActive)
       `);
 
     res.status(201).json({
@@ -124,7 +147,7 @@ export async function updateStaff(
   try {
     const userId = req.user!.userId;
     const { menuId, staffId } = req.params;
-    const { name, role, phone, email, isActive } = req.body;
+    const { name, role, phone, email, password, isActive } = req.body;
 
     const pool = await getPool();
 
@@ -162,7 +185,12 @@ export async function updateStaff(
     }
     if (email !== undefined) {
       updates.push("email = @email");
-      request.input("email", sql.NVarChar, email || null);
+      request.input("email", sql.NVarChar, email ? email.toLowerCase() : null);
+    }
+    if (password !== undefined) {
+      updates.push("password = @password");
+      const hashed = await bcrypt.hash(password, 12);
+      request.input("password", sql.NVarChar, hashed);
     }
     if (isActive !== undefined) {
       updates.push("isActive = @isActive");
