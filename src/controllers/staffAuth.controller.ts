@@ -1,6 +1,13 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { getPool, sql } from "../config/database";
+import {
+  getMenuStaffColumnMeta,
+  getStaffIsActive,
+  getStaffPasswordHash,
+  normalizeStaffRow,
+  quoteMenuStaffIdent,
+} from "../config/menuStaffColumns";
 import { logger } from "../utils/logger";
 import { generateAccessToken, generateRefreshToken } from "../utils/tokenHelper";
 import { RefreshTokenService } from "../services/refreshToken.service";
@@ -43,15 +50,24 @@ export async function staffLogin(
       return;
     }
 
-    // Find the staff member by email + menuId
+    const staffMeta = await getMenuStaffColumnMeta();
+    if (!staffMeta.emailKey) {
+      res.status(500).json({
+        error: "إعدادات جدول الموظفين غير مكتملة",
+        errorEn: "MenuStaff table has no email column",
+      });
+      return;
+    }
+
+    const emailCol = quoteMenuStaffIdent(staffMeta.emailKey);
     const staffResult = await pool
       .request()
       .input("email", sql.NVarChar, email.toLowerCase().trim())
       .input("menuId", sql.Int, menu.id)
       .query(`
-        SELECT id, menuId, name, role, phone, email, password, isActive
+        SELECT *
         FROM MenuStaff
-        WHERE email = @email AND menuId = @menuId
+        WHERE ${emailCol} = @email AND menuId = @menuId
       `);
 
     if (staffResult.recordset.length === 0) {
@@ -62,9 +78,9 @@ export async function staffLogin(
       return;
     }
 
-    const staff = staffResult.recordset[0];
+    const staff = staffResult.recordset[0] as Record<string, unknown>;
 
-    if (!staff.isActive) {
+    if (!getStaffIsActive(staff, staffMeta)) {
       res.status(403).json({
         error: "تم إيقاف حسابك. تواصل مع إدارة المطعم.",
         errorEn: "Your account is deactivated. Contact the restaurant manager.",
@@ -72,7 +88,8 @@ export async function staffLogin(
       return;
     }
 
-    if (!staff.password) {
+    const storedHash = getStaffPasswordHash(staff, staffMeta);
+    if (!storedHash) {
       res.status(401).json({
         error: "لم يتم تعيين كلمة مرور لحسابك. تواصل مع إدارة المطعم.",
         errorEn: "No password set for your account. Contact the restaurant manager.",
@@ -80,7 +97,7 @@ export async function staffLogin(
       return;
     }
 
-    const isValidPassword = await bcrypt.compare(password, staff.password);
+    const isValidPassword = await bcrypt.compare(password, storedHash);
     if (!isValidPassword) {
       res.status(401).json({
         error: "كلمة المرور غير صحيحة",
@@ -89,10 +106,11 @@ export async function staffLogin(
       return;
     }
 
+    const norm = normalizeStaffRow(staff, staffMeta);
     const tokenPayload = {
-      id: staff.id,
-      userId: staff.id,
-      email: staff.email,
+      id: staff.id as number,
+      userId: staff.id as number,
+      email: norm.email as string,
       role: "staff",
     };
 
@@ -102,7 +120,7 @@ export async function staffLogin(
     const refreshTokenExpiry = new Date();
     refreshTokenExpiry.setFullYear(refreshTokenExpiry.getFullYear() + 1);
     await RefreshTokenService.storeToken(
-      staff.id,
+      tokenPayload.userId,
       refreshToken,
       refreshTokenExpiry
     );
@@ -110,12 +128,12 @@ export async function staffLogin(
     res.json({
       message: "Login successful",
       staff: {
-        id: staff.id,
-        name: staff.name,
-        email: staff.email,
-        role: staff.role,
-        phone: staff.phone,
-        menuId: staff.menuId,
+        id: norm.id,
+        name: norm.name,
+        email: norm.email,
+        role: norm.role,
+        phone: norm.phone,
+        menuId: norm.menuId,
       },
       menu: {
         id: menu.id,
@@ -141,12 +159,14 @@ export async function getStaffMe(
 
     const pool = await getPool();
 
+    const meta = await getMenuStaffColumnMeta();
+
     const result = await pool
       .request()
       .input("staffId", sql.Int, staffId)
       .query(`
         SELECT
-          s.id, s.menuId, s.name, s.role, s.phone, s.email, s.isActive, s.createdAt,
+          s.*,
           m.slug as menuSlug,
           ar.name as menuNameAr, en.name as menuNameEn
         FROM MenuStaff s
@@ -161,7 +181,8 @@ export async function getStaffMe(
       return;
     }
 
-    const staff = result.recordset[0];
+    const row = result.recordset[0] as Record<string, unknown>;
+    const staff = normalizeStaffRow(row, meta);
 
     res.json({
       staff: {
@@ -175,9 +196,9 @@ export async function getStaffMe(
       },
       menu: {
         id: staff.menuId,
-        slug: staff.menuSlug,
-        nameAr: staff.menuNameAr,
-        nameEn: staff.menuNameEn,
+        slug: row.menuSlug,
+        nameAr: row.menuNameAr,
+        nameEn: row.menuNameEn,
       },
     });
   } catch (error) {

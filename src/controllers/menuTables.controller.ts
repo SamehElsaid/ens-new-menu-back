@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
+import { getMenuTablesColumnMeta } from "../config/menuTablesColumns";
 import { logger } from "../utils/logger";
 
 export async function getTables(req: Request, res: Response): Promise<void> {
@@ -93,17 +94,35 @@ export async function createTable(
       return;
     }
 
-    const result = await pool
+    const meta = await getMenuTablesColumnMeta();
+    const { activeColumnQuoted: activeQ, seatsColumnQuoted: seatsQ } = meta;
+
+    const insertCols = ["menuId", "tableNumber"];
+    const insertVals = ["@menuId", "@tableNumber"];
+    const insertReq = pool
       .request()
       .input("menuId", sql.Int, parseInt(menuId))
-      .input("tableNumber", sql.NVarChar, tableNumber)
-      .input("seats", sql.Int, seats || null)
-      .input("isActive", sql.Bit, isActive ? 1 : 0)
-      .query(`
-        INSERT INTO MenuTables (menuId, tableNumber, seats, isActive)
+      .input("tableNumber", sql.NVarChar, tableNumber);
+
+    if (seatsQ) {
+      insertCols.push(seatsQ);
+      insertVals.push("@seats");
+      insertReq.input("seats", sql.Int, seats ?? null);
+    }
+
+    if (activeQ) {
+      insertCols.push(activeQ);
+      insertVals.push("@isActive");
+      insertReq.input("isActive", sql.Bit, isActive ? 1 : 0);
+    }
+
+    const insertSql = `
+        INSERT INTO MenuTables (${insertCols.join(", ")})
         OUTPUT INSERTED.*
-        VALUES (@menuId, @tableNumber, @seats, @isActive)
-      `);
+        VALUES (${insertVals.join(", ")})
+      `;
+
+    const result = await insertReq.query(insertSql);
 
     res.status(201).json({
       message: "Table created successfully",
@@ -148,16 +167,18 @@ export async function updateTable(
       .request()
       .input("tableId", sql.Int, parseInt(tableId));
 
+    const meta = await getMenuTablesColumnMeta();
+
     if (tableNumber !== undefined) {
       updates.push("tableNumber = @tableNumber");
       request.input("tableNumber", sql.NVarChar, tableNumber);
     }
-    if (seats !== undefined) {
-      updates.push("seats = @seats");
+    if (seats !== undefined && meta.seatsColumnQuoted) {
+      updates.push(`${meta.seatsColumnQuoted} = @seats`);
       request.input("seats", sql.Int, seats);
     }
-    if (isActive !== undefined) {
-      updates.push("isActive = @isActive");
+    if (isActive !== undefined && meta.activeColumnQuoted) {
+      updates.push(`${meta.activeColumnQuoted} = @isActive`);
       request.input("isActive", sql.Bit, isActive ? 1 : 0);
     }
 

@@ -1,6 +1,7 @@
 import { Server as HttpServer } from "http";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { getPool, sql } from "../config/database";
+import { getMenuTablesColumnMeta } from "../config/menuTablesColumns";
 import { logger } from "../utils/logger";
 import { verifyAccessToken } from "../utils/tokenHelper";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
@@ -133,12 +134,16 @@ export function attachStaffNotificationsSocket(httpServer: HttpServer): SocketIO
             );
           const hasTables = Number(tablesCount.recordset[0]?.c) > 0;
           if (hasTables) {
+            const tableMeta = await getMenuTablesColumnMeta();
+            const activeSql = tableMeta.activeColumnQuoted
+              ? ` AND ${tableMeta.activeColumnQuoted} = 1`
+              : "";
             const match = await pool
               .request()
               .input("menuId", sql.Int, menuId)
               .input("tableNumber", sql.NVarChar, safeTable)
               .query(
-                `SELECT id FROM MenuTables WHERE menuId = @menuId AND tableNumber = @tableNumber AND isActive = 1`
+                `SELECT id FROM MenuTables WHERE menuId = @menuId AND tableNumber = @tableNumber${activeSql}`
               );
             if (match.recordset.length === 0) {
               reply({ ok: false, error: "INVALID_TABLE" });
