@@ -12,6 +12,7 @@ import { logger } from "../utils/logger";
 import { generateAccessToken, generateRefreshToken } from "../utils/tokenHelper";
 import { RefreshTokenService } from "../services/refreshToken.service";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
+import { ROLES } from "../config/constants";
 
 export async function staffLogin(
   req: Request,
@@ -111,7 +112,7 @@ export async function staffLogin(
       id: staff.id as number,
       userId: staff.id as number,
       email: norm.email as string,
-      role: "staff",
+      role: ROLES.STAFF,
     };
 
     const accessToken = generateAccessToken(tokenPayload);

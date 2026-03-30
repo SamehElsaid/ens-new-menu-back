@@ -66,6 +66,7 @@ export const UPLOAD_CONFIG = {
 export const ROLES = {
   USER: 'user',
   ADMIN: 'admin',
+  STAFF: 'staff',
 };
 
 export const LOCALES = ['ar', 'en'] as const;

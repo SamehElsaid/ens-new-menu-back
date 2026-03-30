@@ -90,6 +90,16 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
   });
 }
 
+export async function requireStaff(req: Request, res: Response, next: NextFunction): Promise<void> {
+  await verifyToken(req, res, () => {
+    if (req.user?.role !== ROLES.STAFF) {
+      res.status(403).json({ error: "Staff access required" });
+      return;
+    }
+    next();
+  });
+}
+
 export async function requireEmailVerified(
   req: Request,
   res: Response,

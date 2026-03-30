@@ -6,6 +6,11 @@ import { logger } from "../utils/logger";
 import { verifyAccessToken } from "../utils/tokenHelper";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { corsOriginDelegate } from "../config/corsOrigins";
+import { ROLES } from "../config/constants";
+import {
+  createStaffTableCall,
+  getPendingStaffTableCalls,
+} from "../services/staffTableCall.service";
 
 const roomForMenu = (menuId: number) => `menu:${menuId}`;
 
@@ -55,7 +60,7 @@ export function attachStaffNotificationsSocket(httpServer: HttpServer): SocketIO
         }
 
         const decoded = verifyAccessToken(raw);
-        if (decoded.role !== "staff") {
+        if (decoded.role !== ROLES.STAFF) {
           reply({ ok: false, error: "NOT_STAFF" });
           return;
         }
@@ -78,6 +83,16 @@ export function attachStaffNotificationsSocket(httpServer: HttpServer): SocketIO
         await socket.join(roomForMenu(menuId));
         (socket.data as { staffMenuId?: number }).staffMenuId = menuId;
         reply({ ok: true, menuId });
+
+        const pending = await getPendingStaffTableCalls(menuId, 100);
+        socket.emit("staff:pending_calls", {
+          calls: pending.map((c) => ({
+            id: c.id,
+            menuId: c.menuId,
+            tableNumber: c.tableNumber,
+            at: c.createdAt.toISOString(),
+          })),
+        });
       } catch (e) {
         logger.warn("staff:join failed", e);
         reply({ ok: false, error: "AUTH_FAILED" });
@@ -151,10 +166,17 @@ export function attachStaffNotificationsSocket(httpServer: HttpServer): SocketIO
             }
           }
 
+          const persisted = await createStaffTableCall(menuId, safeTable);
+          if (!persisted) {
+            reply({ ok: false, error: "SERVER_ERROR" });
+            return;
+          }
+
           io.to(roomForMenu(menuId)).emit("staff:table_call", {
+            id: persisted.id,
             menuId,
             tableNumber: safeTable,
-            at: new Date().toISOString(),
+            at: persisted.createdAt.toISOString(),
           });
           reply({ ok: true });
         } catch (e) {

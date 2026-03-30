@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { body } from "express-validator";
+import { body, param } from "express-validator";
 import * as staffAuthController from "../controllers/staffAuth.controller";
+import * as staffTableCallController from "../controllers/staffTableCall.controller";
 import { validate } from "../middleware/validation";
-import { requireAuth } from "../middleware/auth.middleware";
+import { requireAuth, requireStaff } from "../middleware/auth.middleware";
 import { authLimiter } from "../middleware/rateLimiter";
 
 const router = Router();
@@ -21,6 +22,17 @@ router.post(
 
 // GET /api/staff-auth/me
 router.get("/me", requireAuth, staffAuthController.getStaffMe);
+
+// GET /api/staff-auth/table-calls — pending persisted calls (staff only)
+router.get("/table-calls", requireStaff, staffTableCallController.listPendingStaffTableCalls);
+
+// PATCH /api/staff-auth/table-calls/:id/acknowledge
+router.patch(
+  "/table-calls/:id/acknowledge",
+  requireStaff,
+  validate([param("id").isInt()]),
+  staffTableCallController.acknowledgeTableCall
+);
 
 // POST /api/staff-auth/logout
 router.post("/logout", requireAuth, staffAuthController.staffLogout);
