@@ -1,21 +1,15 @@
 import { Server as HttpServer } from "http";
 import { Server as SocketIOServer, Socket } from "socket.io";
 import { getPool, sql } from "../config/database";
-import { getMenuTablesColumnMeta } from "../config/menuTablesColumns";
 import { logger } from "../utils/logger";
 import { verifyAccessToken } from "../utils/tokenHelper";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { corsOriginDelegate } from "../config/corsOrigins";
 import { ROLES } from "../config/constants";
-import {
-  createStaffTableCall,
-  getPendingStaffTableCalls,
-} from "../services/staffTableCall.service";
+import { getPendingStaffTableCalls, processGuestStaffCall } from "../services/staffTableCall.service";
+import { broadcastStaffTableCall } from "./staffIoBroadcast";
 
 const roomForMenu = (menuId: number) => `menu:${menuId}`;
-
-const lastGuestCall = new Map<string, number>();
-const GUEST_CALL_COOLDOWN_MS = 8000;
 
 function clientIp(socket: Socket): string {
   const forwarded = socket.handshake.headers["x-forwarded-for"];
@@ -113,70 +107,19 @@ export function attachStaffNotificationsSocket(httpServer: HttpServer): SocketIO
         try {
           const menuId = Number(payload?.menuId);
           const tableNumber = String(payload?.tableNumber ?? "").trim();
-          if (!Number.isFinite(menuId) || menuId <= 0 || !tableNumber) {
-            reply({ ok: false, error: "INVALID_PAYLOAD" });
+          const key = `${clientIp(socket)}:${menuId}`;
+          const result = await processGuestStaffCall(menuId, tableNumber, key);
+
+          if (!result.ok) {
+            reply({ ok: false, error: result.error });
             return;
           }
 
-          const safeTable = tableNumber.slice(0, 50);
-          const ip = clientIp(socket);
-          const key = `${ip}:${menuId}`;
-          const now = Date.now();
-          const last = lastGuestCall.get(key);
-          if (last !== undefined && now - last < GUEST_CALL_COOLDOWN_MS) {
-            reply({ ok: false, error: "RATE_LIMIT" });
-            return;
-          }
-          lastGuestCall.set(key, now);
-
-          const pool = await getPool();
-          const menuCheck = await pool
-            .request()
-            .input("id", sql.Int, menuId)
-            .query(`SELECT id, isActive FROM Menus WHERE id = @id`);
-
-          const m = menuCheck.recordset[0];
-          if (!m || !m.isActive) {
-            reply({ ok: false, error: "MENU_NOT_FOUND" });
-            return;
-          }
-
-          const tablesCount = await pool
-            .request()
-            .input("menuId", sql.Int, menuId)
-            .query(
-              `SELECT COUNT(*) as c FROM MenuTables WHERE menuId = @menuId`
-            );
-          const hasTables = Number(tablesCount.recordset[0]?.c) > 0;
-          if (hasTables) {
-            const tableMeta = await getMenuTablesColumnMeta();
-            const activeSql = tableMeta.activeColumnQuoted
-              ? ` AND ${tableMeta.activeColumnQuoted} = 1`
-              : "";
-            const match = await pool
-              .request()
-              .input("menuId", sql.Int, menuId)
-              .input("tableNumber", sql.NVarChar, safeTable)
-              .query(
-                `SELECT id FROM MenuTables WHERE menuId = @menuId AND tableNumber = @tableNumber${activeSql}`
-              );
-            if (match.recordset.length === 0) {
-              reply({ ok: false, error: "INVALID_TABLE" });
-              return;
-            }
-          }
-
-          const persisted = await createStaffTableCall(menuId, safeTable);
-          if (!persisted) {
-            reply({ ok: false, error: "SERVER_ERROR" });
-            return;
-          }
-
-          io.to(roomForMenu(menuId)).emit("staff:table_call", {
-            id: persisted.id,
-            menuId,
-            tableNumber: safeTable,
-            at: persisted.createdAt.toISOString(),
+          broadcastStaffTableCall(result.menuId, {
+            id: result.id,
+            menuId: result.menuId,
+            tableNumber: result.tableNumber,
+            at: result.createdAt.toISOString(),
           });
           reply({ ok: true });
         } catch (e) {
