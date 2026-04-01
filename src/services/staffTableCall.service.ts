@@ -3,7 +3,99 @@
  */
 
 import { getPool, sql } from "../config/database";
+import { getMenuTablesColumnMeta } from "../config/menuTablesColumns";
 import { logger } from "../utils/logger";
+
+const lastGuestCallByKey = new Map<string, number>();
+export const GUEST_CALL_COOLDOWN_MS = 8000;
+
+export type GuestStaffCallError =
+  | "INVALID_PAYLOAD"
+  | "RATE_LIMIT"
+  | "MENU_NOT_FOUND"
+  | "INVALID_TABLE"
+  | "SERVER_ERROR";
+
+/**
+ * Shared guest "call staff" logic (Socket.IO + HTTP).
+ * @param rateLimitKey e.g. `${ip}:${menuId}` — one cooldown bucket per client + menu
+ */
+export async function processGuestStaffCall(
+  menuId: number,
+  tableNumber: string,
+  rateLimitKey: string
+): Promise<
+  | { ok: true; id: number; menuId: number; tableNumber: string; createdAt: Date }
+  | { ok: false; error: GuestStaffCallError }
+> {
+  if (!Number.isFinite(menuId) || menuId <= 0) {
+    return { ok: false, error: "INVALID_PAYLOAD" };
+  }
+  const safeTable = String(tableNumber ?? "").trim().slice(0, 50);
+  if (!safeTable) {
+    return { ok: false, error: "INVALID_PAYLOAD" };
+  }
+
+  const now = Date.now();
+  const last = lastGuestCallByKey.get(rateLimitKey);
+  if (last !== undefined && now - last < GUEST_CALL_COOLDOWN_MS) {
+    return { ok: false, error: "RATE_LIMIT" };
+  }
+  lastGuestCallByKey.set(rateLimitKey, now);
+
+  try {
+    const pool = await getPool();
+    const menuCheck = await pool
+      .request()
+      .input("id", sql.Int, menuId)
+      .query(`SELECT id, isActive FROM Menus WHERE id = @id`);
+
+    const m = menuCheck.recordset[0];
+    if (!m || !m.isActive) {
+      return { ok: false, error: "MENU_NOT_FOUND" };
+    }
+
+    const tablesCount = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .query(
+        `SELECT COUNT(*) as c FROM MenuTables WHERE menuId = @menuId`
+      );
+    const hasTables = Number(tablesCount.recordset[0]?.c) > 0;
+    if (hasTables) {
+      const tableMeta = await getMenuTablesColumnMeta();
+      const activeSql = tableMeta.activeColumnQuoted
+        ? ` AND ${tableMeta.activeColumnQuoted} = 1`
+        : "";
+      const match = await pool
+        .request()
+        .input("menuId", sql.Int, menuId)
+        .input("tableNumber", sql.NVarChar, safeTable)
+        .query(
+          `SELECT id FROM MenuTables WHERE menuId = @menuId AND tableNumber = @tableNumber${activeSql}`
+        );
+      if (match.recordset.length === 0) {
+        return { ok: false, error: "INVALID_TABLE" };
+      }
+    }
+
+    const persisted = await createStaffTableCall(menuId, safeTable);
+    if (!persisted) {
+      return { ok: false, error: "SERVER_ERROR" };
+    }
+
+    return {
+      ok: true,
+      id: persisted.id,
+      menuId,
+      tableNumber: safeTable,
+      createdAt: persisted.createdAt,
+    };
+  } catch (error) {
+    logger.error("processGuestStaffCall error:", error);
+    return { ok: false, error: "SERVER_ERROR" };
+  }
+}
 
 export type StaffTableCallRow = {
   id: number;

@@ -5,7 +5,7 @@ import { logger } from "../utils/logger";
  */
 export function corsOriginDelegate(
   origin: string | undefined,
-  callback: (err: Error | null, allow?: boolean) => void
+  callback: (err: Error | null, allow?: boolean) => void,
 ): void {
   if (!origin) {
     callback(null, true);
@@ -23,7 +23,11 @@ export function corsOriginDelegate(
         callback(null, true);
         return;
       }
-    } catch {
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      logger.warn(
+        `CORS rejected: invalid origin URL (development) — origin=${JSON.stringify(origin)} — ${detail}`
+      );
       callback(null, false);
       return;
     }
@@ -40,12 +44,17 @@ export function corsOriginDelegate(
       callback(null, true);
       return;
     }
-  } catch {
-    logger.warn("Invalid CORS origin:", origin);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    logger.warn(
+      `CORS rejected: invalid origin URL — origin=${JSON.stringify(origin)} — ${detail}`
+    );
     callback(null, false);
     return;
   }
 
-  logger.warn(`🔴 CORS blocked: ${origin}`);
+  logger.warn(
+    `CORS rejected: origin not allowed — origin=${JSON.stringify(origin)} (use CORS_EXTRA_ORIGINS or an *.ensmenu.com / *.ensmenu.ens.eg host)`
+  );
   callback(null, false);
 }

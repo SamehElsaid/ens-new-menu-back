@@ -9,6 +9,7 @@ import path from "path";
 
 import { corsOriginDelegate } from "./config/corsOrigins";
 import { attachStaffNotificationsSocket } from "./socket/staffNotifications.socket";
+import { setStaffNotificationsIo } from "./socket/staffIoBroadcast";
 
 import { getPool, closePool } from "./config/database";
 import { testEmailConnection } from "./config/email";
@@ -159,7 +160,8 @@ async function startServer() {
     startSubscriptionScheduler();
 
     const httpServer = http.createServer(app);
-    attachStaffNotificationsSocket(httpServer);
+    const staffIo = attachStaffNotificationsSocket(httpServer);
+    setStaffNotificationsIo(staffIo);
 
     httpServer.listen(PORT, () => {
       logger.info(`🚀 Server running on port ${PORT}`);

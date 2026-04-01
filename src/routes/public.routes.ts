@@ -9,6 +9,7 @@ import {
   getMenuCustomAds,
   getPublicPlans,
 } from "../controllers/public.controller";
+import { postGuestStaffCall } from "../controllers/guestStaffCall.controller";
 import { validate } from "../middleware/validation";
 import { publicLimiter } from "../middleware/rateLimiter";
 
@@ -70,5 +71,15 @@ router.get(
 
 // GET /api/public/plans - Get all active plans
 router.get("/plans", getPublicPlans);
+
+// POST /api/public/staff-call — guest "call staff" (same rules as Socket guest:call_staff)
+router.post(
+  "/staff-call",
+  validate([
+    body("menuId").isInt({ min: 1 }).toInt(),
+    body("tableNumber").isString().trim().notEmpty().isLength({ min: 1, max: 50 }),
+  ]),
+  postGuestStaffCall
+);
 
 export default router;
