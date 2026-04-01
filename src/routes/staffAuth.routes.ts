@@ -23,6 +23,13 @@ router.post(
 // GET /api/staff-auth/me
 router.get("/me", requireAuth, staffAuthController.getStaffMe);
 
+// GET /api/staff-auth/table-calls/history — all calls (table + requestedAt + acknowledgedAt)
+router.get(
+  "/table-calls/history",
+  requireStaff,
+  staffTableCallController.listStaffTableCallsHistory,
+);
+
 // GET /api/staff-auth/table-calls — pending persisted calls (staff only)
 router.get("/table-calls", requireStaff, staffTableCallController.listPendingStaffTableCalls);
 

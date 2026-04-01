@@ -3,8 +3,44 @@ import {
   acknowledgeStaffTableCall,
   getMenuIdForStaff,
   getPendingStaffTableCalls,
+  getStaffTableCallsHistory,
 } from "../services/staffTableCall.service";
 import { logger } from "../utils/logger";
+
+/**
+ * GET /api/staff-auth/table-calls/history — all calls for menu (table + times), newest first
+ */
+export async function listStaffTableCallsHistory(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const staffId = req.user!.userId;
+    const menuId = await getMenuIdForStaff(staffId);
+    if (menuId === null) {
+      res.status(403).json({ error: "Staff menu not found" });
+      return;
+    }
+
+    const limit = parseInt(String(req.query.limit ?? "200"), 10) || 200;
+    const rows = await getStaffTableCallsHistory(menuId, limit);
+
+    res.json({
+      calls: rows.map((c) => ({
+        id: c.id,
+        menuId: c.menuId,
+        tableNumber: c.tableNumber,
+        requestedAt: c.createdAt.toISOString(),
+        acknowledgedAt: c.acknowledgedAt
+          ? c.acknowledgedAt.toISOString()
+          : null,
+      })),
+    });
+  } catch (error) {
+    logger.error("listStaffTableCallsHistory error:", error);
+    res.status(500).json({ error: "Failed to list table calls history" });
+  }
+}
 
 /**
  * GET /api/staff-auth/table-calls — pending calls for logged-in staff's menu

@@ -1,25 +1,22 @@
 import { Server as HttpServer } from "http";
-import { Server as SocketIOServer, Socket } from "socket.io";
+import { Server as SocketIOServer } from "socket.io";
 import { getPool, sql } from "../config/database";
 import { logger } from "../utils/logger";
 import { verifyAccessToken } from "../utils/tokenHelper";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { corsOriginDelegate } from "../config/corsOrigins";
 import { ROLES } from "../config/constants";
-import { getPendingStaffTableCalls, processGuestStaffCall } from "../services/staffTableCall.service";
+import {
+  getPendingStaffTableCalls,
+  processGuestStaffCall,
+} from "../services/staffTableCall.service";
 import { broadcastStaffTableCall } from "./staffIoBroadcast";
 
 const roomForMenu = (menuId: number) => `menu:${menuId}`;
 
-function clientIp(socket: Socket): string {
-  const forwarded = socket.handshake.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.length > 0) {
-    return forwarded.split(",")[0]!.trim();
-  }
-  return socket.handshake.address || "unknown";
-}
-
-export function attachStaffNotificationsSocket(httpServer: HttpServer): SocketIOServer {
+export function attachStaffNotificationsSocket(
+  httpServer: HttpServer,
+): SocketIOServer {
   const io = new SocketIOServer(httpServer, {
     path: "/socket.io/",
     cors: {
@@ -63,9 +60,7 @@ export function attachStaffNotificationsSocket(httpServer: HttpServer): SocketIO
         const r = await pool
           .request()
           .input("id", sql.Int, decoded.userId)
-          .query(
-            `SELECT menuId, isActive FROM MenuStaff WHERE id = @id`
-          );
+          .query(`SELECT menuId, isActive FROM MenuStaff WHERE id = @id`);
 
         const row = r.recordset[0];
         if (!row || !row.isActive) {
@@ -107,8 +102,7 @@ export function attachStaffNotificationsSocket(httpServer: HttpServer): SocketIO
         try {
           const menuId = Number(payload?.menuId);
           const tableNumber = String(payload?.tableNumber ?? "").trim();
-          const key = `${clientIp(socket)}:${menuId}`;
-          const result = await processGuestStaffCall(menuId, tableNumber, key);
+          const result = await processGuestStaffCall(menuId, tableNumber);
 
           if (!result.ok) {
             reply({ ok: false, error: result.error });
@@ -126,7 +120,7 @@ export function attachStaffNotificationsSocket(httpServer: HttpServer): SocketIO
           logger.error("guest:call_staff error:", e);
           reply({ ok: false, error: "SERVER_ERROR" });
         }
-      }
+      },
     );
   });
 
