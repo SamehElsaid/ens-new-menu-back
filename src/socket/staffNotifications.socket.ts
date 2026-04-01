@@ -1,12 +1,12 @@
 import { Server as HttpServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
-import { getPool, sql } from "../config/database";
 import { logger } from "../utils/logger";
 import { verifyAccessToken } from "../utils/tokenHelper";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { corsOriginDelegate } from "../config/corsOrigins";
 import { ROLES } from "../config/constants";
 import {
+  getMenuIdForStaff,
   getPendingStaffTableCalls,
   processGuestStaffCall,
 } from "../services/staffTableCall.service";
@@ -56,19 +56,11 @@ export function attachStaffNotificationsSocket(
           return;
         }
 
-        const pool = await getPool();
-        const r = await pool
-          .request()
-          .input("id", sql.Int, decoded.userId)
-          .query(`SELECT menuId, isActive FROM MenuStaff WHERE id = @id`);
-
-        const row = r.recordset[0];
-        if (!row || !row.isActive) {
+        const menuId = await getMenuIdForStaff(decoded.userId);
+        if (menuId === null) {
           reply({ ok: false, error: "STAFF_NOT_FOUND" });
           return;
         }
-
-        const menuId = row.menuId as number;
         await socket.join(roomForMenu(menuId));
         (socket.data as { staffMenuId?: number }).staffMenuId = menuId;
         reply({ ok: true, menuId });

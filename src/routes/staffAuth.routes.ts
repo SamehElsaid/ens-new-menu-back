@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { body, param } from "express-validator";
+import { body, param, query } from "express-validator";
 import * as staffAuthController from "../controllers/staffAuth.controller";
 import * as staffTableCallController from "../controllers/staffTableCall.controller";
 import { validate } from "../middleware/validation";
@@ -27,6 +27,10 @@ router.get("/me", requireAuth, staffAuthController.getStaffMe);
 router.get(
   "/table-calls/history",
   requireStaff,
+  validate([
+    query("page").optional().isInt({ min: 1 }).toInt(),
+    query("limit").optional().isInt({ min: 1, max: 500 }).toInt(),
+  ]),
   staffTableCallController.listStaffTableCallsHistory,
 );
 

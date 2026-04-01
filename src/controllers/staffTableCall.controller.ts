@@ -22,11 +22,16 @@ export async function listStaffTableCallsHistory(
       return;
     }
 
-    const limit = parseInt(String(req.query.limit ?? "200"), 10) || 200;
-    const rows = await getStaffTableCallsHistory(menuId, limit);
+    const page = parseInt(String(req.query.page ?? "1"), 10) || 1;
+    const limit = parseInt(String(req.query.limit ?? "20"), 10) || 20;
+    const history = await getStaffTableCallsHistory(menuId, page, limit);
 
     res.json({
-      calls: rows.map((c) => ({
+      total: history.total,
+      page: history.page,
+      limit: history.limit,
+      totalPages: Math.ceil(history.total / history.limit),
+      calls: history.rows.map((c) => ({
         id: c.id,
         menuId: c.menuId,
         tableNumber: c.tableNumber,

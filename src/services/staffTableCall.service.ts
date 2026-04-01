@@ -4,6 +4,10 @@
 
 import { getPool, sql } from "../config/database";
 import { getMenuTablesColumnMeta } from "../config/menuTablesColumns";
+import {
+  getMenuStaffColumnMeta,
+  getStaffIsActive,
+} from "../config/menuStaffColumns";
 import { logger } from "../utils/logger";
 
 export type GuestStaffCallError =
@@ -101,17 +105,40 @@ export type StaffTableCallHistoryRow = StaffTableCallRow & {
   acknowledgedAt: Date | null;
 };
 
+export type StaffTableCallHistoryPage = {
+  rows: StaffTableCallHistoryRow[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
 export async function getMenuIdForStaff(
   staffId: number,
 ): Promise<number | null> {
   try {
+    const meta = await getMenuStaffColumnMeta();
     const pool = await getPool();
     const r = await pool
       .request()
       .input("id", sql.Int, staffId)
-      .query(`SELECT menuId FROM MenuStaff WHERE id = @id AND isActive = 1`);
-    const menuId = r.recordset[0]?.menuId;
-    return typeof menuId === "number" ? menuId : null;
+      .query(`SELECT * FROM MenuStaff WHERE id = @id`);
+
+    const row = r.recordset[0] as Record<string, unknown> | undefined;
+    if (!row) {
+      return null;
+    }
+    if (!getStaffIsActive(row, meta)) {
+      return null;
+    }
+
+    const raw = row.menuId;
+    const menuId =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string"
+          ? parseInt(raw, 10)
+          : NaN;
+    return Number.isFinite(menuId) && menuId > 0 ? menuId : null;
   } catch (error) {
     logger.error("getMenuIdForStaff error:", error);
     return null;
@@ -182,16 +209,32 @@ export async function getPendingStaffTableCalls(
  */
 export async function getStaffTableCallsHistory(
   menuId: number,
-  limit = 200,
-): Promise<StaffTableCallHistoryRow[]> {
+  page = 1,
+  limit = 20,
+): Promise<StaffTableCallHistoryPage> {
   try {
     const pool = await getPool();
-    const safeLimit = Math.min(Math.max(limit, 1), 500);
-    const result = await pool
+    const safePage = Math.max(1, Math.floor(page));
+    const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 500);
+    const offset = (safePage - 1) * safeLimit;
+
+    const totalResult = await pool
       .request()
       .input("menuId", sql.Int, menuId)
-      .input("limit", sql.Int, safeLimit).query(`
-        SELECT TOP (@limit)
+      .query(`
+        SELECT COUNT(*) as total
+        FROM StaffTableCalls
+        WHERE menuId = @menuId
+      `);
+    const total = Number(totalResult.recordset[0]?.total ?? 0);
+
+    const rowsResult = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("offset", sql.Int, offset)
+      .input("limit", sql.Int, safeLimit)
+      .query(`
+        SELECT
           id,
           menuId,
           tableNumber,
@@ -200,17 +243,31 @@ export async function getStaffTableCallsHistory(
         FROM StaffTableCalls
         WHERE menuId = @menuId
         ORDER BY createdAt DESC
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
-    return (result.recordset as StaffTableCallHistoryRow[]).map((row) => ({
+
+    const rows = (rowsResult.recordset as StaffTableCallHistoryRow[]).map((row) => ({
       id: row.id,
       menuId: row.menuId,
       tableNumber: String(row.tableNumber),
       createdAt: row.createdAt,
       acknowledgedAt: row.acknowledgedAt ?? null,
     }));
+
+    return {
+      rows,
+      total,
+      page: safePage,
+      limit: safeLimit,
+    };
   } catch (error) {
     logger.error("getStaffTableCallsHistory error:", error);
-    return [];
+    return {
+      rows: [],
+      total: 0,
+      page: Math.max(1, Math.floor(page)),
+      limit: Math.min(Math.max(Math.floor(limit), 1), 500),
+    };
   }
 }
 
