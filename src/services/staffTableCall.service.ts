@@ -4,6 +4,10 @@
 
 import { getPool, sql } from "../config/database";
 import { getMenuTablesColumnMeta } from "../config/menuTablesColumns";
+import {
+  getMenuStaffColumnMeta,
+  getStaffIsActive,
+} from "../config/menuStaffColumns";
 import { logger } from "../utils/logger";
 
 export type GuestStaffCallError =
@@ -105,13 +109,29 @@ export async function getMenuIdForStaff(
   staffId: number,
 ): Promise<number | null> {
   try {
+    const meta = await getMenuStaffColumnMeta();
     const pool = await getPool();
     const r = await pool
       .request()
       .input("id", sql.Int, staffId)
-      .query(`SELECT menuId FROM MenuStaff WHERE id = @id AND isActive = 1`);
-    const menuId = r.recordset[0]?.menuId;
-    return typeof menuId === "number" ? menuId : null;
+      .query(`SELECT * FROM MenuStaff WHERE id = @id`);
+
+    const row = r.recordset[0] as Record<string, unknown> | undefined;
+    if (!row) {
+      return null;
+    }
+    if (!getStaffIsActive(row, meta)) {
+      return null;
+    }
+
+    const raw = row.menuId;
+    const menuId =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string"
+          ? parseInt(raw, 10)
+          : NaN;
+    return Number.isFinite(menuId) && menuId > 0 ? menuId : null;
   } catch (error) {
     logger.error("getMenuIdForStaff error:", error);
     return null;
