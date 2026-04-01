@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 import { getPool, sql } from "../config/database";
 import {
   getMenuStaffColumnMeta,
@@ -9,7 +10,7 @@ import {
   quoteMenuStaffIdent,
 } from "../config/menuStaffColumns";
 import { logger } from "../utils/logger";
-import { generateAccessToken, generateRefreshToken } from "../utils/tokenHelper";
+import { generateRefreshToken, generateStaffAccessToken } from "../utils/tokenHelper";
 import { RefreshTokenService } from "../services/refreshToken.service";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { ROLES } from "../config/constants";
@@ -115,7 +116,7 @@ export async function staffLogin(
       role: ROLES.STAFF,
     };
 
-    const accessToken = generateAccessToken(tokenPayload);
+    const accessToken = generateStaffAccessToken(tokenPayload);
     let refreshToken: string | null = generateRefreshToken(tokenPayload);
 
     const refreshTokenExpiry = new Date();
@@ -243,8 +244,13 @@ export async function staffLogout(
     const accessToken = authHeader?.substring(7);
 
     if (accessToken) {
+      const decoded = jwt.decode(accessToken) as { exp?: number } | null;
       const accessTokenExpiry = new Date();
-      accessTokenExpiry.setMinutes(accessTokenExpiry.getMinutes() + 15);
+      if (decoded?.exp) {
+        accessTokenExpiry.setTime(decoded.exp * 1000);
+      } else {
+        accessTokenExpiry.setFullYear(accessTokenExpiry.getFullYear() + 100);
+      }
       await TokenBlacklistService.addToBlacklist(
         accessToken,
         staffId,
