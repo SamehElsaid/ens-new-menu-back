@@ -15,7 +15,17 @@ import { publicLimiter } from "../middleware/rateLimiter";
 
 const router = Router();
 
-// Apply rate limiting to all public routes
+// POST /api/public/staff-call — بدون publicLimiter (طلب نداء الطاقم فقط)
+router.post(
+  "/staff-call",
+  validate([
+    body("menuId").isInt({ min: 1 }).toInt(),
+    body("tableNumber").isString().trim().notEmpty().isLength({ min: 1, max: 50 }),
+  ]),
+  postGuestStaffCall,
+);
+
+// Apply rate limiting to the rest of public routes
 router.use(publicLimiter);
 
 // GET /api/public/menus - Get all menus (no token)
@@ -71,15 +81,5 @@ router.get(
 
 // GET /api/public/plans - Get all active plans
 router.get("/plans", getPublicPlans);
-
-// POST /api/public/staff-call — guest "call staff" (same rules as Socket guest:call_staff)
-router.post(
-  "/staff-call",
-  validate([
-    body("menuId").isInt({ min: 1 }).toInt(),
-    body("tableNumber").isString().trim().notEmpty().isLength({ min: 1, max: 50 }),
-  ]),
-  postGuestStaffCall
-);
 
 export default router;
