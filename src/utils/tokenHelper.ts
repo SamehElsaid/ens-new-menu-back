@@ -49,6 +49,11 @@ export function generateAccessToken(payload: TokenPayload): string {
   } as jwt.SignOptions);
 }
 
+/** Staff access tokens: no `exp` claim so the session stays valid until explicit logout. */
+export function generateStaffAccessToken(payload: TokenPayload): string {
+  return jwt.sign(payload, process.env.JWT_ACCESS_SECRET!);
+}
+
 export function generateRefreshToken(payload: TokenPayload): string {
   // No expiry by default; set JWT_REFRESH_EXPIRY (e.g. "7d") if you want expiry
   const expiresIn = process.env.JWT_REFRESH_EXPIRY;
