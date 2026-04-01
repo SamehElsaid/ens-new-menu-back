@@ -1,5 +1,31 @@
 import { logger } from "../utils/logger";
 
+/** Comma-separated full origin strings, e.g. `https://app.example.com,capacitor://localhost` */
+function parseExtraOrigins(): Set<string> {
+  const raw = process.env.CORS_EXTRA_ORIGINS?.trim();
+  if (!raw) return new Set();
+  return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+}
+
+/**
+ * Capacitor / Ionic WebViews and Metro often send localhost-style origins even in production builds.
+ * Browsers never spoof Origin, so allowing these is standard for hybrid mobile + local dev.
+ */
+function isLocalOrHybridWebViewOrigin(url: URL): boolean {
+  const { protocol, hostname } = url;
+  const localHost =
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname === "127.0.0.1";
+  if (!localHost) return false;
+  return (
+    protocol === "http:" ||
+    protocol === "https:" ||
+    protocol === "capacitor:" ||
+    protocol === "ionic:"
+  );
+}
+
 /**
  * Shared origin check for Express CORS and Socket.IO.
  */
@@ -12,25 +38,9 @@ export function corsOriginDelegate(
     return;
   }
 
-  if (process.env.NODE_ENV === "development") {
-    try {
-      const url = new URL(origin);
-      if (
-        url.hostname === "localhost" ||
-        url.hostname.endsWith(".localhost") ||
-        url.hostname === "127.0.0.1"
-      ) {
-        callback(null, true);
-        return;
-      }
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      logger.warn(
-        `CORS rejected: invalid origin URL (development) — origin=${JSON.stringify(origin)} — ${detail}`
-      );
-      callback(null, false);
-      return;
-    }
+  if (parseExtraOrigins().has(origin)) {
+    callback(null, true);
+    return;
   }
 
   try {
@@ -44,6 +54,10 @@ export function corsOriginDelegate(
       callback(null, true);
       return;
     }
+    if (isLocalOrHybridWebViewOrigin(url)) {
+      callback(null, true);
+      return;
+    }
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     logger.warn(
@@ -54,7 +68,7 @@ export function corsOriginDelegate(
   }
 
   logger.warn(
-    `CORS rejected: origin not allowed — origin=${JSON.stringify(origin)} (use CORS_EXTRA_ORIGINS or an *.ensmenu.com / *.ensmenu.ens.eg host)`
+    `CORS rejected: origin not allowed — origin=${JSON.stringify(origin)} (set CORS_EXTRA_ORIGINS or use *.ensmenu.com / *.ensmenu.ens.eg / hybrid localhost origin)`
   );
   callback(null, false);
 }
