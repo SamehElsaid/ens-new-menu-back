@@ -116,15 +116,38 @@ export async function staffLogin(
     };
 
     const accessToken = generateAccessToken(tokenPayload);
-    const refreshToken = generateRefreshToken(tokenPayload);
+    let refreshToken: string | null = generateRefreshToken(tokenPayload);
 
     const refreshTokenExpiry = new Date();
     refreshTokenExpiry.setFullYear(refreshTokenExpiry.getFullYear() + 1);
-    await RefreshTokenService.storeToken(
-      tokenPayload.userId,
-      refreshToken,
-      refreshTokenExpiry
-    );
+
+    // RefreshTokens.userId has FK to Users.id. MenuStaff IDs may not exist there.
+    const userExistsResult = await pool
+      .request()
+      .input("userId", sql.Int, tokenPayload.userId)
+      .query("SELECT TOP 1 id FROM Users WHERE id = @userId");
+
+    if (userExistsResult.recordset.length > 0) {
+      try {
+        await RefreshTokenService.storeToken(
+          tokenPayload.userId,
+          refreshToken,
+          refreshTokenExpiry
+        );
+      } catch (storeError) {
+        // Do not block successful staff login because of refresh-token persistence.
+        logger.warn("Staff refresh token was not persisted; login continues", {
+          staffId: tokenPayload.userId,
+          error: storeError instanceof Error ? storeError.message : String(storeError),
+        });
+        refreshToken = null;
+      }
+    } else {
+      logger.warn("Skipping staff refresh token persistence: no matching Users row", {
+        staffId: tokenPayload.userId,
+      });
+      refreshToken = null;
+    }
 
     res.json({
       message: "Login successful",

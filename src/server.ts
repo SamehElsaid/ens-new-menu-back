@@ -122,6 +122,9 @@ app.get("/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/auth", googleAuthRoutes);
 app.use("/api/public", publicRoutes);
+app.use("/api/staff-auth", staffAuthRoutes);
+// Backward-compatible alias for clients that accidentally prefix /api twice.
+app.use("/api/api/staff-auth", staffAuthRoutes);
 app.use("/api/menus", menuRoutes);
 app.use("/api/menus", menuItemsRoutes);
 app.use("/api", categoryRoutes);
@@ -130,7 +133,6 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api", adsRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/staff-auth", staffAuthRoutes);
 
 // ------------------------------------------------------------------
 // 404 + Error handlers
