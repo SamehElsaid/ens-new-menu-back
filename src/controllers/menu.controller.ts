@@ -6,6 +6,7 @@ import {
   validateSlug,
 } from "../utils/slugGenerator";
 import { logger } from "../utils/logger";
+import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
@@ -236,7 +237,9 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       staffCount: stats.staffCount || 0,
       tablesCount: stats.tablesCount || 0,
       menuStaff: staffResult.recordset,
-      menuTables: tablesResult.recordset,
+      menuTables: (tablesResult.recordset as Record<string, unknown>[]).map(
+        (row) => normalizeMenuTableRow(row),
+      ),
       views: 0,
     });
   } catch (error) {

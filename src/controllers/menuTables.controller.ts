@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
 import { getMenuTablesColumnMeta } from "../config/menuTablesColumns";
 import { logger } from "../utils/logger";
+import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
 
 export async function getTables(req: Request, res: Response): Promise<void> {
   try {
@@ -31,7 +32,10 @@ export async function getTables(req: Request, res: Response): Promise<void> {
         ORDER BY id DESC
       `);
 
-    res.json({ tables: result.recordset });
+    const tables = (result.recordset as Record<string, unknown>[]).map(
+      (row) => normalizeMenuTableRow(row),
+    );
+    res.json({ tables });
   } catch (error) {
     logger.error("Get menu tables error:", error);
     res.status(500).json({ error: "Failed to get tables" });
@@ -65,7 +69,11 @@ export async function getTableById(
       return;
     }
 
-    res.json({ table: result.recordset[0] });
+    res.json({
+      table: normalizeMenuTableRow(
+        result.recordset[0] as Record<string, unknown>,
+      ),
+    });
   } catch (error) {
     logger.error("Get table by ID error:", error);
     res.status(500).json({ error: "Failed to get table" });
@@ -126,7 +134,7 @@ export async function createTable(
 
     res.status(201).json({
       message: "Table created successfully",
-      table: result.recordset[0],
+      table: normalizeMenuTableRow(result.recordset[0] as Record<string, unknown>),
     });
   } catch (error) {
     logger.error("Create table error:", error);
