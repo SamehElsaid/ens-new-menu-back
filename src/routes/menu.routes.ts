@@ -75,7 +75,7 @@ router.put(
       .optional({ nullable: true, checkFalsy: true })
       .isString()
       .isLength({ max: 500 }),
-    body("theme").optional().isIn(["default", "neon", "coffee", "sky", "emerald"]),
+    body("theme").optional().isIn(["default", "neon", "coffee", "sky", "emerald", "noir"]),
     body("currency").optional().isString().isLength({ min: 3, max: 3 }),
     body("isActive").optional().isBoolean(),
     body("addressEn")
