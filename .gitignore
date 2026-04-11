@@ -15,8 +15,11 @@ uploads/*
 # Environment files
 
 .env.development
-
+.env.production
 .env.test
+
+# env files (can opt-in for committing if needed)
+.env*
 
 
 # Logs (keep directory structure)

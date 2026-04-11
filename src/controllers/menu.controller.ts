@@ -7,6 +7,7 @@ import {
 } from "../utils/slugGenerator";
 import { logger } from "../utils/logger";
 import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
+import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
@@ -218,6 +219,24 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       `);
 
     const stats = statsResult.recordset[0];
+
+    const freeUser = await isUserOnFreePlan(userId);
+
+    // Staff & tables are Pro-only — omit lists and counts for Free (dashboard)
+    if (freeUser) {
+      res.json({
+        menu: menu,
+        itemsCount: stats.totalItems || 0,
+        activeItemsCount: stats.activeItems || 0,
+        categoriesCount: stats.categories || 0,
+        staffCount: 0,
+        tablesCount: 0,
+        menuStaff: [],
+        menuTables: [],
+        views: 0,
+      });
+      return;
+    }
 
     // Get staff & tables lists
     const [staffResult, tablesResult] = await Promise.all([

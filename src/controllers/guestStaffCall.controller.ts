@@ -7,6 +7,8 @@ function statusForError(error: string): number {
   switch (error) {
     case "MENU_NOT_FOUND":
       return 404;
+    case "FEATURE_REQUIRES_PRO":
+      return 403;
     case "INVALID_PAYLOAD":
     case "INVALID_TABLE":
       return 400;
@@ -30,9 +32,14 @@ export async function postGuestStaffCall(
     const result = await processGuestStaffCall(menuId, tableNumber);
 
     if (!result.ok) {
-      res
-        .status(statusForError(result.error))
-        .json({ ok: false, error: result.error });
+      const status = statusForError(result.error);
+      const body: Record<string, unknown> = { ok: false, error: result.error };
+      if (result.error === "FEATURE_REQUIRES_PRO") {
+        body.code = "PRO_REQUIRED";
+        body.errorAr =
+          "نداء الطاقم والطاولات متاح لخطط Pro فقط. راجع صاحب المنيو للترقية.";
+      }
+      res.status(status).json(body);
       return;
     }
 

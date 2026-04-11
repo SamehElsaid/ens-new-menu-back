@@ -14,6 +14,10 @@ import { generateRefreshToken, generateStaffAccessToken } from "../utils/tokenHe
 import { RefreshTokenService } from "../services/refreshToken.service";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { ROLES } from "../config/constants";
+import {
+  isUserOnFreePlan,
+  menuOwnerHasProPlan,
+} from "../services/subscriptionPlan.service";
 
 export async function staffLogin(
   req: Request,
@@ -29,7 +33,7 @@ export async function staffLogin(
       .request()
       .input("slug", sql.NVarChar, menuSlug.toLowerCase().trim())
       .query(`
-        SELECT m.id, m.slug, m.isActive,
+        SELECT m.id, m.slug, m.isActive, m.userId,
                ar.name as nameAr, en.name as nameEn
         FROM Menus m
         LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
@@ -48,6 +52,17 @@ export async function staffLogin(
       res.status(403).json({
         error: "هذا المطعم غير مفعل حالياً",
         errorEn: "This restaurant is currently inactive",
+      });
+      return;
+    }
+
+    if (await isUserOnFreePlan(menu.userId as number)) {
+      res.status(403).json({
+        code: "PRO_REQUIRED",
+        error:
+          "Staff access requires a Pro plan. Ask the owner to upgrade.",
+        errorAr:
+          "دخول الطاقم يتطلب خطة Pro. اطلب من صاحب المنيو الترقية.",
       });
       return;
     }
@@ -203,6 +218,16 @@ export async function getStaffMe(
 
     if (result.recordset.length === 0) {
       res.status(404).json({ error: "Staff member not found" });
+      return;
+    }
+
+    const staffMenuId = result.recordset[0].menuId as number;
+    if (!(await menuOwnerHasProPlan(staffMenuId))) {
+      res.status(403).json({
+        code: "PRO_REQUIRED",
+        error: "Staff features require a Pro plan.",
+        errorAr: "ميزات الطاقم تتطلب خطة Pro.",
+      });
       return;
     }
 

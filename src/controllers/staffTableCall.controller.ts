@@ -5,7 +5,20 @@ import {
   getPendingStaffTableCalls,
   getStaffTableCallsHistory,
 } from "../services/staffTableCall.service";
+import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
 import { logger } from "../utils/logger";
+
+const proRequired = (): {
+  status: 403;
+  body: Record<string, string>;
+} => ({
+  status: 403,
+  body: {
+    code: "PRO_REQUIRED",
+    error: "This feature requires a Pro plan.",
+    errorAr: "هذه الميزة تتطلب خطة Pro.",
+  },
+});
 
 /**
  * GET /api/staff-auth/table-calls/history — all calls for menu (table + times), newest first
@@ -19,6 +32,12 @@ export async function listStaffTableCallsHistory(
     const menuId = await getMenuIdForStaff(staffId);
     if (menuId === null) {
       res.status(403).json({ error: "Staff menu not found" });
+      return;
+    }
+
+    if (!(await menuOwnerHasProPlan(menuId))) {
+      const r = proRequired();
+      res.status(r.status).json(r.body);
       return;
     }
 
@@ -62,6 +81,12 @@ export async function listPendingStaffTableCalls(
       return;
     }
 
+    if (!(await menuOwnerHasProPlan(menuId))) {
+      const r = proRequired();
+      res.status(r.status).json(r.body);
+      return;
+    }
+
     const limit = parseInt(String(req.query.limit ?? "100"), 10) || 100;
     const rows = await getPendingStaffTableCalls(menuId, limit);
 
@@ -91,6 +116,12 @@ export async function acknowledgeTableCall(
     const menuId = await getMenuIdForStaff(staffId);
     if (menuId === null) {
       res.status(403).json({ error: "Staff menu not found" });
+      return;
+    }
+
+    if (!(await menuOwnerHasProPlan(menuId))) {
+      const r = proRequired();
+      res.status(r.status).json(r.body);
       return;
     }
 

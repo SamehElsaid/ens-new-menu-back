@@ -3,10 +3,12 @@ import { body, param } from "express-validator";
 import * as staffController from "../controllers/menuStaff.controller";
 import { validate } from "../middleware/validation";
 import { requireAuth } from "../middleware/auth.middleware";
+import { requireProPlan } from "../middleware/planLimits";
 
 const router = Router({ mergeParams: true });
 
 router.use(requireAuth);
+router.use(requireProPlan);
 
 // GET /api/menus/:menuId/staff
 router.get("/", [param("menuId").isInt()], staffController.getStaff);

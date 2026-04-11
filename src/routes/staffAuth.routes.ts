@@ -17,7 +17,7 @@ router.post(
     body("password").notEmpty().isLength({ min: 6 }),
     body("menuSlug").notEmpty().trim().isLength({ max: 200 }),
   ]),
-  staffAuthController.staffLogin
+  staffAuthController.staffLogin,
 );
 
 // GET /api/staff-auth/me
@@ -35,14 +35,18 @@ router.get(
 );
 
 // GET /api/staff-auth/table-calls — pending persisted calls (staff only)
-router.get("/table-calls", requireStaff, staffTableCallController.listPendingStaffTableCalls);
+router.get(
+  "/table-calls",
+  requireStaff,
+  staffTableCallController.listPendingStaffTableCalls,
+);
 
 // PATCH /api/staff-auth/table-calls/:id/acknowledge
 router.patch(
   "/table-calls/:id/acknowledge",
   requireStaff,
   validate([param("id").isInt()]),
-  staffTableCallController.acknowledgeTableCall
+  staffTableCallController.acknowledgeTableCall,
 );
 
 // POST /api/staff-auth/logout

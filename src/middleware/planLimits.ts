@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { getPool, sql } from "../config/database";
-import { PLANS } from "../config/constants";
+import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
 
 export async function checkMenuLimit(
   req: Request,
@@ -117,5 +117,28 @@ export async function checkProductLimit(
     next();
   } catch (error) {
     res.status(500).json({ error: "Failed to check product limit" });
+  }
+}
+
+/** Staff & tables APIs — Pro (paid) plans only; Free users get PRO_REQUIRED. */
+export async function requireProPlan(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    if (await isUserOnFreePlan(userId)) {
+      res.status(403).json({
+        code: "PRO_REQUIRED",
+        error: "This feature is available on Pro plans only. Please upgrade.",
+        errorAr:
+          "هذه الميزة متاحة لخطط Pro فقط. اذهب إلى الترقية للمتابعة.",
+      });
+      return;
+    }
+    next();
+  } catch {
+    res.status(500).json({ error: "Failed to verify subscription" });
   }
 }

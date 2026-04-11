@@ -9,11 +9,13 @@ import {
   getStaffIsActive,
 } from "../config/menuStaffColumns";
 import { logger } from "../utils/logger";
+import { isUserOnFreePlan } from "./subscriptionPlan.service";
 
 export type GuestStaffCallError =
   | "INVALID_PAYLOAD"
   | "MENU_NOT_FOUND"
   | "INVALID_TABLE"
+  | "FEATURE_REQUIRES_PRO"
   | "SERVER_ERROR";
 
 /**
@@ -47,11 +49,16 @@ export async function processGuestStaffCall(
     const menuCheck = await pool
       .request()
       .input("id", sql.Int, menuId)
-      .query(`SELECT id, isActive FROM Menus WHERE id = @id`);
+      .query(`SELECT id, isActive, userId FROM Menus WHERE id = @id`);
 
     const m = menuCheck.recordset[0];
     if (!m || !m.isActive) {
       return { ok: false, error: "MENU_NOT_FOUND" };
+    }
+
+    const ownerId = m.userId as number;
+    if (await isUserOnFreePlan(ownerId)) {
+      return { ok: false, error: "FEATURE_REQUIRES_PRO" };
     }
 
     const tablesCount = await pool

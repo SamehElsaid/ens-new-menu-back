@@ -40,7 +40,7 @@ router.post(
     body("descriptionEn").optional().isString().trim().isLength({ max: 1000 }),
     body("slug").optional().isString().trim().isLength({ max: 200 }),
     body("logo").optional().isString().isLength({ max: 500 }),
-    body("theme").optional().isIn(["default", "neon", "coffee", "sky"]),
+    body("theme").optional().isIn(["default", "neon", "coffee", "sky", "emerald"]),
   ]),
   menuController.createMenu
 );
@@ -75,7 +75,7 @@ router.put(
       .optional({ nullable: true, checkFalsy: true })
       .isString()
       .isLength({ max: 500 }),
-    body("theme").optional().isIn(["default", "neon", "coffee", "sky"]),
+    body("theme").optional().isIn(["default", "neon", "coffee", "sky", "emerald"]),
     body("currency").optional().isString().isLength({ min: 3, max: 3 }),
     body("isActive").optional().isBoolean(),
     body("addressEn")

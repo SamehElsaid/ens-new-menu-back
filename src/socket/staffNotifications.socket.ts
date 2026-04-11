@@ -10,6 +10,7 @@ import {
   getPendingStaffTableCalls,
   processGuestStaffCall,
 } from "../services/staffTableCall.service";
+import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
 import { broadcastStaffTableCall } from "./staffIoBroadcast";
 
 const roomForMenu = (menuId: number) => `menu:${menuId}`;
@@ -59,6 +60,10 @@ export function attachStaffNotificationsSocket(
         const menuId = await getMenuIdForStaff(decoded.userId);
         if (menuId === null) {
           reply({ ok: false, error: "STAFF_NOT_FOUND" });
+          return;
+        }
+        if (!(await menuOwnerHasProPlan(menuId))) {
+          reply({ ok: false, error: "PRO_REQUIRED" });
           return;
         }
         await socket.join(roomForMenu(menuId));

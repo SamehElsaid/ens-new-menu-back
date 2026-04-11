@@ -35,6 +35,7 @@
     "express-rate-limit": "^7.1.5",
     "express-validator": "^7.0.1",
     "file-type": "^18.7.0",
+    "firebase-admin": "^13.7.0",
     "google-auth-library": "^10.5.0",
     "helmet": "^7.1.0",
     "inngest": "^3.48.1",

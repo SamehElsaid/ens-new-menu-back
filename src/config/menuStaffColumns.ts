@@ -34,7 +34,9 @@ export async function getMenuStaffColumnMeta(): Promise<MenuStaffColumnMeta> {
     FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_NAME = 'MenuStaff'
   `);
-  const names = (r.recordset as { COLUMN_NAME: string }[]).map((row) => row.COLUMN_NAME);
+  const names = (r.recordset as { COLUMN_NAME: string }[]).map(
+    (row) => row.COLUMN_NAME,
+  );
 
   const pick = (...candidates: string[]): string | null => {
     for (const c of candidates) {
@@ -44,14 +46,15 @@ export async function getMenuStaffColumnMeta(): Promise<MenuStaffColumnMeta> {
     return null;
   };
 
-  const nameKey = pick("name", "fullName", "staffName", "displayName") ?? "name";
+  const nameKey =
+    pick("name", "fullName", "staffName", "displayName") ?? "name";
   const emailKey = pick("email", "emailAddress");
   const passwordKey = pick(
     "password",
     "passwordHash",
     "hashedPassword",
     "userPassword",
-    "pwd"
+    "pwd",
   );
   const activeName = pick("isActive", "active", "available", "isAvailable");
   const roleName = pick("role", "staffRole");
@@ -80,7 +83,7 @@ export function resetMenuStaffColumnMetaCache(): void {
 /** Password hash value from a MenuStaff row (column name varies by DB). */
 export function getStaffPasswordHash(
   row: Record<string, unknown>,
-  meta: MenuStaffColumnMeta
+  meta: MenuStaffColumnMeta,
 ): string | null {
   if (!meta.passwordKey) return null;
   const v = row[meta.passwordKey];
@@ -91,11 +94,11 @@ export function getStaffPasswordHash(
 /** Active flag from row using resolved column name. */
 export function getStaffIsActive(
   row: Record<string, unknown>,
-  meta: MenuStaffColumnMeta
+  meta: MenuStaffColumnMeta,
 ): boolean {
   if (!meta.activeKey) return true;
   const key = Object.keys(row).find(
-    (k) => k.toLowerCase() === meta.activeKey!.toLowerCase()
+    (k) => k.toLowerCase() === meta.activeKey!.toLowerCase(),
   );
   if (!key) return true;
   const v = row[key];
@@ -105,11 +108,13 @@ export function getStaffIsActive(
 /** Map DB row to stable API shape (isActive, name, role, phone, email, …). */
 export function normalizeStaffRow(
   row: Record<string, unknown>,
-  meta: MenuStaffColumnMeta
+  meta: MenuStaffColumnMeta,
 ): Record<string, unknown> {
   const pick = (key: string | null | undefined) => {
     if (!key) return null;
-    const k = Object.keys(row).find((n) => n.toLowerCase() === key.toLowerCase());
+    const k = Object.keys(row).find(
+      (n) => n.toLowerCase() === key.toLowerCase(),
+    );
     return k != null ? row[k] : null;
   };
 
