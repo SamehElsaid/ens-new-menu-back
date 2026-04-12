@@ -63,14 +63,6 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    if (theme === "noir") {
-      res.status(400).json({
-        error:
-          "The Noir template is not available for new menus yet.",
-      });
-      return;
-    }
-
     // Generate unique slug from custom slug or Arabic name
     const slug = customSlug
       ? await generateUniqueSlug(customSlug)
@@ -302,27 +294,6 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       phone,
       workingHours,
     } = req.body;
-
-    if (theme !== undefined && theme === "noir") {
-      const pool = await getPool();
-      const existingTheme = await pool
-        .request()
-        .input("id", sql.Int, menuId)
-        .input("userId", sql.Int, userId)
-        .query("SELECT theme FROM Menus WHERE id = @id AND userId = @userId");
-      if (existingTheme.recordset.length === 0) {
-        res.status(404).json({ error: "Menu not found or access denied" });
-        return;
-      }
-      const currentTheme = existingTheme.recordset[0].theme as string;
-      if (currentTheme !== "noir") {
-        res.status(400).json({
-          error:
-            "The Noir template is not available for selection yet.",
-        });
-        return;
-      }
-    }
 
     await executeTransaction(async (transaction) => {
       // Verify ownership

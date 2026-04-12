@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { body, query, param } from "express-validator";
 import * as menuController from "../controllers/menu.controller";
+import { ALLOWED_MENU_THEMES } from "../constants/menuThemes";
 import { validate } from "../middleware/validation";
 import { requireAuth } from "../middleware/auth.middleware";
 import { checkMenuLimit } from "../middleware/planLimits";
@@ -19,14 +20,14 @@ router.use(requireAuth);
 router.get(
   "/check-slug",
   [query("slug").notEmpty().trim().isLength({ min: 3, max: 100 })],
-  menuController.checkSlugAvailability
+  menuController.checkSlugAvailability,
 );
 
 // GET /api/menus - Get user's menus
 router.get(
   "/",
   [query("locale").optional().isIn(["ar", "en"])],
-  menuController.getUserMenus
+  menuController.getUserMenus,
 );
 
 // POST /api/menus - Create new menu
@@ -40,9 +41,12 @@ router.post(
     body("descriptionEn").optional().isString().trim().isLength({ max: 1000 }),
     body("slug").optional().isString().trim().isLength({ max: 200 }),
     body("logo").optional().isString().isLength({ max: 500 }),
-    body("theme").optional().isIn(["default", "neon", "coffee", "sky", "emerald"]),
+    body("theme")
+      .optional()
+      .trim()
+      .isIn([...ALLOWED_MENU_THEMES]),
   ]),
-  menuController.createMenu
+  menuController.createMenu,
 );
 
 // GET /api/menus/:id - Get menu by ID
@@ -75,7 +79,10 @@ router.put(
       .optional({ nullable: true, checkFalsy: true })
       .isString()
       .isLength({ max: 500 }),
-    body("theme").optional().isIn(["default", "neon", "coffee", "sky", "emerald", "noir"]),
+    body("theme")
+      .optional()
+      .trim()
+      .isIn([...ALLOWED_MENU_THEMES]),
     body("currency").optional().isString().isLength({ min: 3, max: 3 }),
     body("isActive").optional().isBoolean(),
     body("addressEn")
@@ -95,14 +102,14 @@ router.put(
       .isLength({ max: 50 }),
     body("workingHours").optional(),
   ]),
-  menuController.updateMenu
+  menuController.updateMenu,
 );
 
 // PUT /api/menus/:id/status - Toggle menu status
 router.put(
   "/:id/status",
   [param("id").isInt()],
-  menuController.toggleMenuStatus
+  menuController.toggleMenuStatus,
 );
 
 // DELETE /api/menus/:id - Delete menu
