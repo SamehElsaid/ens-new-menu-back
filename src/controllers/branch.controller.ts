@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { getPool, sql, executeTransaction } from '../config/database';
 import { logger } from '../utils/logger';
+import { sendApiError } from '../utils/apiErrorResponse';
+import { ApiErrors } from '../i18n/apiErrors';
 
 // Get menu branches
 export async function getBranches(req: Request, res: Response): Promise<void> {
@@ -19,7 +21,7 @@ export async function getBranches(req: Request, res: Response): Promise<void> {
       .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: 'Menu not found' });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
@@ -41,7 +43,7 @@ export async function getBranches(req: Request, res: Response): Promise<void> {
     res.json({ branches: result.recordset });
   } catch (error) {
     logger.error('Get branches error:', error);
-    res.status(500).json({ error: 'Failed to get branches' });
+    sendApiError(res, req, 500, ApiErrors.failedGetBranches);
   }
 }
 
@@ -77,7 +79,7 @@ export async function createBranch(req: Request, res: Response): Promise<void> {
       .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: 'Menu not found' });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
@@ -137,7 +139,7 @@ export async function createBranch(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error('Create branch error:', error);
-    res.status(500).json({ error: 'Failed to create branch' });
+    sendApiError(res, req, 500, ApiErrors.failedCreateBranch);
   }
 }
 
@@ -260,7 +262,7 @@ export async function updateBranch(req: Request, res: Response): Promise<void> {
     res.json({ message: 'Branch updated successfully' });
   } catch (error) {
     logger.error('Update branch error:', error);
-    res.status(500).json({ error: 'Failed to update branch' });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateBranch);
   }
 }
 
@@ -285,14 +287,14 @@ export async function deleteBranch(req: Request, res: Response): Promise<void> {
       `);
 
     if (result.rowsAffected[0] === 0) {
-      res.status(404).json({ error: 'Branch not found' });
+      sendApiError(res, req, 404, ApiErrors.branchNotFound);
       return;
     }
 
     res.json({ message: 'Branch deleted successfully' });
   } catch (error) {
     logger.error('Delete branch error:', error);
-    res.status(500).json({ error: 'Failed to delete branch' });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteBranch);
   }
 }
 

@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { decryptDataApi } from "../utils/decrypt";
 import { logger } from "../utils/logger";
+import { pickLocalized, sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 require('dotenv').config();
 
@@ -47,7 +49,7 @@ export function decryptApiKey(req: Request, res: Response, next: NextFunction) {
             path: req.path,
             method: req.method,
         });
-        return res.status(401).json({ error: "No token provided", message: "No token provided" });
+        return sendApiError(res, req, 401, ApiErrors.noToken);
     }
 
     // If x-api-key is present, decrypt it
@@ -70,7 +72,7 @@ export function decryptApiKey(req: Request, res: Response, next: NextFunction) {
                     path: req.path,
                     method: req.method,
                 });
-                return res.status(401).json({ error: "Invalid token format" });
+                return sendApiError(res, req, 401, ApiErrors.invalidTokenFormat);
             }
 
             const sentTimestamp = parseFloat(match[1]);
@@ -82,7 +84,7 @@ export function decryptApiKey(req: Request, res: Response, next: NextFunction) {
                     method: req.method,
                     timeDifference: Math.abs(currentTimestamp - sentTimestamp),
                 });
-                return res.status(405).json({ error: "Token expired" });
+                return sendApiError(res, req, 405, ApiErrors.tokenExpired);
             }
             // console.log(apiKey, "decryptedData", encryptionKey);
 
@@ -95,9 +97,13 @@ export function decryptApiKey(req: Request, res: Response, next: NextFunction) {
                 path: req.path,
                 method: req.method,
             });
-            return res.status(401).json({ 
-                error: "Failed to decrypt or validate API key",
-                message: error instanceof Error ? error.message : String(error)
+            const tech = error instanceof Error ? error.message : String(error);
+            const en = `${ApiErrors.apiKeyDecryptFailed.en}: ${tech}`;
+            const ar = `${ApiErrors.apiKeyDecryptFailed.ar}: ${tech}`;
+            return res.status(401).json({
+                error: pickLocalized(req, { en, ar }),
+                errorAr: ar,
+                errorEn: en,
             });
         }
     }

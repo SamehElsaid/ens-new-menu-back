@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from "express";
 import { getPool, sql } from "../config/database";
 import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 export async function checkMenuLimit(
   req: Request,
@@ -24,9 +26,7 @@ export async function checkMenuLimit(
       `);
 
     if (subResult.recordset.length === 0) {
-      res.status(403).json({
-        error: "No active subscription found. Please subscribe to a plan.",
-      });
+      sendApiError(res, req, 403, ApiErrors.noActiveSubscription);
       return;
     }
 
@@ -43,8 +43,9 @@ export async function checkMenuLimit(
     const currentCount = countResult.recordset[0].count;
 
     if (currentCount >= maxMenus) {
-      res.status(403).json({
-        error: `You have reached the maximum number of menus (${maxMenus}) for your ${planName} plan.`,
+      const en = `You have reached the maximum number of menus (${maxMenus}) for your ${planName} plan.`;
+      const ar = `لقد وصلت للحد الأقصى من القوائم (${maxMenus}) لخطة ${planName}.`;
+      sendApiError(res, req, 403, { en, ar }, {
         currentCount,
         maxMenus,
         planName,
@@ -54,7 +55,7 @@ export async function checkMenuLimit(
 
     next();
   } catch (error) {
-    res.status(500).json({ error: "Failed to check menu limit" });
+    sendApiError(res, req, 500, ApiErrors.failedCheckMenuLimit);
   }
 }
 
@@ -84,7 +85,7 @@ export async function checkProductLimit(
       `);
 
     if (planResult.recordset.length === 0) {
-      res.status(404).json({ error: "Menu not found or access denied" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
       return;
     }
 
@@ -105,8 +106,9 @@ export async function checkProductLimit(
     const currentCount = countResult.recordset[0].count;
 
     if (currentCount >= maxProductsPerMenu) {
-      res.status(403).json({
-        error: `You have reached the maximum number of products (${maxProductsPerMenu}) for your ${planName} plan.`,
+      const en = `You have reached the maximum number of products (${maxProductsPerMenu}) for your ${planName} plan.`;
+      const ar = `لقد وصلت للحد الأقصى من المنتجات (${maxProductsPerMenu}) لخطة ${planName}.`;
+      sendApiError(res, req, 403, { en, ar }, {
         currentCount,
         maxProductsPerMenu,
         planName,
@@ -116,7 +118,7 @@ export async function checkProductLimit(
 
     next();
   } catch (error) {
-    res.status(500).json({ error: "Failed to check product limit" });
+    sendApiError(res, req, 500, ApiErrors.failedCheckProductLimit);
   }
 }
 
@@ -129,16 +131,14 @@ export async function requireProPlan(
   try {
     const userId = req.user!.userId;
     if (await isUserOnFreePlan(userId)) {
-      res.status(403).json({
-        code: "PRO_REQUIRED",
-        error: "This feature is available on Pro plans only. Please upgrade.",
-        errorAr:
-          "هذه الميزة متاحة لخطط Pro فقط. اذهب إلى الترقية للمتابعة.",
-      });
+      sendApiError(res, req, 403, {
+        en: ApiErrors.proFeatureOnly.en,
+        ar: ApiErrors.proFeatureOnly.ar,
+      }, { code: "PRO_REQUIRED" });
       return;
     }
     next();
   } catch {
-    res.status(500).json({ error: "Failed to verify subscription" });
+    sendApiError(res, req, 500, ApiErrors.failedVerifySubscription);
   }
 }

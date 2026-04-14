@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { verifyAccessToken, TokenPayload } from '../utils/tokenHelper';
 import { ROLES } from '../config/constants';
+import { sendApiError } from '../utils/apiErrorResponse';
+import { ApiErrors } from '../i18n/apiErrors';
 import { TokenBlacklistService } from '../services/tokenBlacklist.service';
 import { getPool } from '../config/database';
 import { logger } from '../utils/logger';
@@ -19,7 +21,7 @@ export async function verifyToken(req: Request, res: Response, next: NextFunctio
   const authHeader = req.headers.authorization;
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'No token provided' });
+    sendApiError(res, req, 401, ApiErrors.noToken);
     return;
   }
 
@@ -29,7 +31,7 @@ export async function verifyToken(req: Request, res: Response, next: NextFunctio
     // Check if token is blacklisted
     const isBlacklisted = await TokenBlacklistService.isBlacklisted(token);
     if (isBlacklisted) {
-      res.status(401).json({ error: 'Token has been revoked' });
+      sendApiError(res, req, 401, ApiErrors.tokenRevoked);
       return;
     }
 
@@ -42,7 +44,9 @@ export async function verifyToken(req: Request, res: Response, next: NextFunctio
     next();
   } catch (error) {
     const status = error instanceof jwt.TokenExpiredError ? 405 : 401;
-    res.status(status).json({ error: status === 405 ? 'Token expired' : 'Invalid or expired token' });
+    const msg =
+      status === 405 ? ApiErrors.tokenExpired : ApiErrors.invalidToken;
+    sendApiError(res, req, status, msg);
   }
 }
 
@@ -83,7 +87,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   await verifyToken(req, res, () => {
     if (req.user?.role !== ROLES.ADMIN) {
-      res.status(403).json({ error: 'Admin access required' });
+      sendApiError(res, req, 403, ApiErrors.adminRequired);
       return;
     }
     next();
@@ -93,7 +97,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
 export async function requireStaff(req: Request, res: Response, next: NextFunction): Promise<void> {
   await verifyToken(req, res, () => {
     if (req.user?.role !== ROLES.STAFF) {
-      res.status(403).json({ error: "Staff access required" });
+      sendApiError(res, req, 403, ApiErrors.staffRequired);
       return;
     }
     next();

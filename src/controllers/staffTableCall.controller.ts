@@ -7,18 +7,8 @@ import {
 } from "../services/staffTableCall.service";
 import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
 import { logger } from "../utils/logger";
-
-const proRequired = (): {
-  status: 403;
-  body: Record<string, string>;
-} => ({
-  status: 403,
-  body: {
-    code: "PRO_REQUIRED",
-    error: "This feature requires a Pro plan.",
-    errorAr: "هذه الميزة تتطلب خطة Pro.",
-  },
-});
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 /**
  * GET /api/staff-auth/table-calls/history — all calls for menu (table + times), newest first
@@ -31,13 +21,14 @@ export async function listStaffTableCallsHistory(
     const staffId = req.user!.userId;
     const menuId = await getMenuIdForStaff(staffId);
     if (menuId === null) {
-      res.status(403).json({ error: "Staff menu not found" });
+      sendApiError(res, req, 403, ApiErrors.staffMenuNotFound);
       return;
     }
 
     if (!(await menuOwnerHasProPlan(menuId))) {
-      const r = proRequired();
-      res.status(r.status).json(r.body);
+      sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+        code: "PRO_REQUIRED",
+      });
       return;
     }
 
@@ -62,7 +53,7 @@ export async function listStaffTableCallsHistory(
     });
   } catch (error) {
     logger.error("listStaffTableCallsHistory error:", error);
-    res.status(500).json({ error: "Failed to list table calls history" });
+    sendApiError(res, req, 500, ApiErrors.failedListTableCallsHistory);
   }
 }
 
@@ -77,13 +68,14 @@ export async function listPendingStaffTableCalls(
     const staffId = req.user!.userId;
     const menuId = await getMenuIdForStaff(staffId);
     if (menuId === null) {
-      res.status(403).json({ error: "Staff menu not found" });
+      sendApiError(res, req, 403, ApiErrors.staffMenuNotFound);
       return;
     }
 
     if (!(await menuOwnerHasProPlan(menuId))) {
-      const r = proRequired();
-      res.status(r.status).json(r.body);
+      sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+        code: "PRO_REQUIRED",
+      });
       return;
     }
 
@@ -100,7 +92,7 @@ export async function listPendingStaffTableCalls(
     });
   } catch (error) {
     logger.error("listPendingStaffTableCalls error:", error);
-    res.status(500).json({ error: "Failed to list table calls" });
+    sendApiError(res, req, 500, ApiErrors.failedListTableCalls);
   }
 }
 
@@ -115,33 +107,32 @@ export async function acknowledgeTableCall(
     const staffId = req.user!.userId;
     const menuId = await getMenuIdForStaff(staffId);
     if (menuId === null) {
-      res.status(403).json({ error: "Staff menu not found" });
+      sendApiError(res, req, 403, ApiErrors.staffMenuNotFound);
       return;
     }
 
     if (!(await menuOwnerHasProPlan(menuId))) {
-      const r = proRequired();
-      res.status(r.status).json(r.body);
+      sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+        code: "PRO_REQUIRED",
+      });
       return;
     }
 
     const callId = parseInt(req.params.id, 10);
     if (!Number.isFinite(callId) || callId <= 0) {
-      res.status(400).json({ error: "Invalid call id" });
+      sendApiError(res, req, 400, ApiErrors.invalidCallId);
       return;
     }
 
     const ok = await acknowledgeStaffTableCall(callId, menuId);
     if (!ok) {
-      res.status(404).json({
-        error: "Call not found, wrong menu, or already acknowledged",
-      });
+      sendApiError(res, req, 404, ApiErrors.callNotFoundOrAcknowledged);
       return;
     }
 
     res.json({ message: "Acknowledged" });
   } catch (error) {
     logger.error("acknowledgeTableCall error:", error);
-    res.status(500).json({ error: "Failed to acknowledge call" });
+    sendApiError(res, req, 500, ApiErrors.failedAcknowledgeCall);
   }
 }

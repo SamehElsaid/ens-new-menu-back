@@ -4,6 +4,8 @@ import { logger } from "../utils/logger";
 import bcrypt from "bcryptjs";
 import * as notificationService from "../services/notificationService";
 import { SubscriptionDowngradeService } from "../services/subscriptionDowngrade.service";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 // Get Admin Dashboard Statistics
 export async function getAdminStats(
@@ -120,7 +122,7 @@ export async function getAdminStats(
     });
   } catch (error) {
     logger.error("Get admin stats error:", error);
-    res.status(500).json({ error: "Failed to get admin statistics" });
+    sendApiError(res, req, 500, ApiErrors.failedGetAdminStats);
   }
 }
 
@@ -233,7 +235,7 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error("Get all users error:", error);
-    res.status(500).json({ error: "Failed to get users" });
+    sendApiError(res, req, 500, ApiErrors.failedGetUsers);
   }
 }
 
@@ -262,7 +264,7 @@ export async function getUserDetails(
       `);
 
     if (userResult.recordset.length === 0) {
-      res.status(404).json({ error: "User not found" });
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
 
@@ -299,7 +301,7 @@ export async function getUserDetails(
     });
   } catch (error) {
     logger.error("Get user details error:", error);
-    res.status(500).json({ error: "Failed to get user details" });
+    sendApiError(res, req, 500, ApiErrors.failedGetUserDetails);
   }
 }
 
@@ -319,7 +321,7 @@ export async function toggleUserSuspension(
       `);
 
     if (userResult.recordset.length === 0) {
-      res.status(404).json({ error: "User not found" });
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
 
@@ -348,7 +350,7 @@ export async function toggleUserSuspension(
     });
   } catch (error) {
     logger.error("Toggle user suspension error:", error);
-    res.status(500).json({ error: "Failed to update user suspension status" });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateUserSuspension);
   }
 }
 
@@ -364,12 +366,12 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
       `);
 
     if (userResult.recordset.length === 0) {
-      res.status(404).json({ error: "User not found" });
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
 
     if (userResult.recordset[0].role === "admin") {
-      res.status(403).json({ error: "Cannot delete admin users" });
+      sendApiError(res, req, 403, ApiErrors.cannotDeleteAdminUsers);
       return;
     }
 
@@ -381,7 +383,7 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
     res.json({ message: "User deleted successfully" });
   } catch (error) {
     logger.error("Delete user error:", error);
-    res.status(500).json({ error: "Failed to delete user" });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteUser);
   }
 }
 
@@ -403,7 +405,7 @@ export async function getAllPlans(req: Request, res: Response): Promise<void> {
     res.json({ plans: result.recordset });
   } catch (error) {
     logger.error("Get all plans error:", error);
-    res.status(500).json({ error: "Failed to get plans" });
+    sendApiError(res, req, 500, ApiErrors.failedGetPlans);
   }
 }
 
@@ -432,7 +434,7 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
       `);
 
     if (planResult.recordset.length === 0) {
-      res.status(404).json({ error: "Plan not found" });
+      sendApiError(res, req, 404, ApiErrors.planNotFound);
       return;
     }
 
@@ -482,7 +484,7 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
     }
 
     if (updates.length === 0) {
-      res.status(400).json({ error: "No fields to update" });
+      sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
       return;
     }
 
@@ -502,7 +504,7 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
     res.json({ message: "Plan updated successfully" });
   } catch (error) {
     logger.error("Update plan error:", error);
-    res.status(500).json({ error: "Failed to update plan" });
+    sendApiError(res, req, 500, ApiErrors.failedUpdatePlan);
   }
 }
 
@@ -523,7 +525,7 @@ export async function createPlan(req: Request, res: Response): Promise<void> {
     } = req.body;
 
     if (!name || priceMonthly === undefined || priceYearly === undefined) {
-      res.status(400).json({ error: "Missing required fields" });
+      sendApiError(res, req, 400, ApiErrors.missingRequiredFields);
       return;
     }
 
@@ -558,7 +560,7 @@ export async function createPlan(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error("Create plan error:", error);
-    res.status(500).json({ error: "Failed to create plan" });
+    sendApiError(res, req, 500, ApiErrors.failedCreatePlan);
   }
 }
 
@@ -602,7 +604,7 @@ export async function getGlobalAds(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error("Get global ads error:", error);
-    res.status(500).json({ error: "Failed to get ads" });
+    sendApiError(res, req, 500, ApiErrors.failedGetAds);
   }
 }
 
@@ -627,7 +629,7 @@ export async function createGlobalAd(
     } = req.body;
 
     if (!title && !titleAr) {
-      res.status(400).json({ error: "Title (English or Arabic) is required" });
+      sendApiError(res, req, 400, ApiErrors.adTitleRequired);
       return;
     }
 
@@ -666,7 +668,7 @@ export async function createGlobalAd(
     });
   } catch (error) {
     logger.error("Create global ad error:", error);
-    res.status(500).json({ error: "Failed to create ad" });
+    sendApiError(res, req, 500, ApiErrors.failedCreateAd);
   }
 }
 
@@ -699,7 +701,7 @@ export async function updateGlobalAd(
       `);
 
     if (adResult.recordset.length === 0) {
-      res.status(404).json({ error: "Ad not found" });
+      sendApiError(res, req, 404, ApiErrors.adNotFound);
       return;
     }
 
@@ -753,7 +755,7 @@ export async function updateGlobalAd(
     }
 
     if (updates.length === 0) {
-      res.status(400).json({ error: "No fields to update" });
+      sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
       return;
     }
 
@@ -769,7 +771,7 @@ export async function updateGlobalAd(
     res.json({ message: "Ad updated successfully" });
   } catch (error) {
     logger.error("Update global ad error:", error);
-    res.status(500).json({ error: "Failed to update ad" });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateAd);
   }
 }
 
@@ -787,14 +789,14 @@ export async function deleteGlobalAd(
       `);
 
     if (result.rowsAffected[0] === 0) {
-      res.status(404).json({ error: "Ad not found" });
+      sendApiError(res, req, 404, ApiErrors.adNotFound);
       return;
     }
 
     res.json({ message: "Ad deleted successfully" });
   } catch (error) {
     logger.error("Delete global ad error:", error);
-    res.status(500).json({ error: "Failed to delete ad" });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteAd);
   }
 }
 
@@ -806,7 +808,7 @@ export async function createAdmin(req: Request, res: Response): Promise<void> {
     const { email, password, name } = req.body;
 
     if (!email || !password || !name) {
-      res.status(400).json({ error: "Email, password, and name are required" });
+      sendApiError(res, req, 400, ApiErrors.adminCredentialsRequired);
       return;
     }
 
@@ -820,7 +822,7 @@ export async function createAdmin(req: Request, res: Response): Promise<void> {
       `);
 
     if (existingUser.recordset.length > 0) {
-      res.status(400).json({ error: "Email already exists" });
+      sendApiError(res, req, 400, ApiErrors.emailAlreadyExists);
       return;
     }
 
@@ -845,7 +847,7 @@ export async function createAdmin(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error("Create admin error:", error);
-    res.status(500).json({ error: "Failed to create admin" });
+    sendApiError(res, req, 500, ApiErrors.failedCreateAdmin);
   }
 }
 
@@ -856,7 +858,7 @@ export async function deleteAdmin(req: Request, res: Response): Promise<void> {
     const currentUserId = req.user?.userId;
 
     if (currentUserId !== undefined && Number(id) === currentUserId) {
-      res.status(403).json({ error: "Cannot delete your own admin account" });
+      sendApiError(res, req, 403, ApiErrors.cannotDeleteOwnAdmin);
       return;
     }
 
@@ -867,12 +869,12 @@ export async function deleteAdmin(req: Request, res: Response): Promise<void> {
       `);
 
     if (userResult.recordset.length === 0) {
-      res.status(404).json({ error: "Admin not found" });
+      sendApiError(res, req, 404, ApiErrors.adminNotFound);
       return;
     }
 
     if (userResult.recordset[0].role !== "admin") {
-      res.status(404).json({ error: "Admin not found" });
+      sendApiError(res, req, 404, ApiErrors.adminNotFound);
       return;
     }
 
@@ -883,7 +885,7 @@ export async function deleteAdmin(req: Request, res: Response): Promise<void> {
     res.json({ message: "Administrator deleted successfully" });
   } catch (error) {
     logger.error("Delete admin error:", error);
-    res.status(500).json({ error: "Failed to delete administrator" });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteAdministrator);
   }
 }
 
@@ -967,7 +969,7 @@ export async function getAllAdmins(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error("Get all admins error:", error);
-    res.status(500).json({ error: "Failed to get admins" });
+    sendApiError(res, req, 500, ApiErrors.failedGetAdmins);
   }
 }
 
@@ -993,14 +995,14 @@ export async function getAdAnalytics(
     `);
 
     if (result.recordset.length === 0) {
-      res.status(404).json({ error: "Ad not found" });
+      sendApiError(res, req, 404, ApiErrors.adNotFound);
       return;
     }
 
     res.json({ analytics: result.recordset[0] });
   } catch (error) {
     logger.error("Get ad analytics error:", error);
-    res.status(500).json({ error: "Failed to get ad analytics" });
+    sendApiError(res, req, 500, ApiErrors.failedGetAdAnalytics);
   }
 }
 
@@ -1023,15 +1025,13 @@ export async function updateUserSubscription(
 
     // Validate required fields
     if (!planId || !billingCycle) {
-      res.status(400).json({ error: "Plan ID and billing cycle are required" });
+      sendApiError(res, req, 400, ApiErrors.planIdAndBillingRequired);
       return;
     }
 
     // Validate billing cycle
     if (!["monthly", "yearly", "free"].includes(billingCycle)) {
-      res.status(400).json({
-        error: "Invalid billing cycle. Must be monthly, yearly, or free",
-      });
+      sendApiError(res, req, 400, ApiErrors.invalidBillingCycle);
       return;
     }
 
@@ -1043,12 +1043,12 @@ export async function updateUserSubscription(
     `);
 
     if (userResult.recordset.length === 0) {
-      res.status(404).json({ error: "User not found" });
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
 
     if (userResult.recordset[0].role === "admin") {
-      res.status(403).json({ error: "Cannot modify admin user subscriptions" });
+      sendApiError(res, req, 403, ApiErrors.cannotModifyAdminSubscriptions);
       return;
     }
 
@@ -1059,7 +1059,7 @@ export async function updateUserSubscription(
     `);
 
     if (planResult.recordset.length === 0) {
-      res.status(404).json({ error: "Plan not found" });
+      sendApiError(res, req, 404, ApiErrors.planNotFound);
       return;
     }
 
@@ -1149,7 +1149,7 @@ export async function updateUserSubscription(
     });
   } catch (error) {
     logger.error("Update user subscription error:", error);
-    res.status(500).json({ error: "Failed to update user subscription" });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateUserSubscription);
   }
 }
 
@@ -1170,7 +1170,7 @@ export async function getPlansForSubscription(
     res.json({ plans: result.recordset });
   } catch (error) {
     logger.error("Get plans error:", error);
-    res.status(500).json({ error: "Failed to get plans" });
+    sendApiError(res, req, 500, ApiErrors.failedGetPlans);
   }
 }
 
@@ -1189,14 +1189,12 @@ export async function applyFreePlanLimits(
     `);
 
     if (userResult.recordset.length === 0) {
-      res.status(404).json({ error: "User not found" });
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
 
     if (userResult.recordset[0].role === "admin") {
-      res
-        .status(403)
-        .json({ error: "Cannot apply free plan limits to admin users" });
+      sendApiError(res, req, 403, ApiErrors.cannotApplyFreePlanToAdmin);
       return;
     }
 
@@ -1277,6 +1275,6 @@ export async function applyFreePlanLimits(
     });
   } catch (error) {
     logger.error("Apply free plan limits error:", error);
-    res.status(500).json({ error: "Failed to apply free plan limits" });
+    sendApiError(res, req, 500, ApiErrors.failedApplyFreePlanLimits);
   }
 }

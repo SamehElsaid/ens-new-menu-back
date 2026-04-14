@@ -8,6 +8,8 @@ import {
 import { logger } from "../utils/logger";
 import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
 import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
@@ -36,7 +38,7 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
     res.json({ menus: result.recordset });
   } catch (error) {
     logger.error("Get user menus error:", error);
-    res.status(500).json({ error: "Failed to get menus" });
+    sendApiError(res, req, 500, ApiErrors.failedGetMenus);
   }
 }
 
@@ -57,9 +59,7 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
 
     // Validate required fields
     if (!nameAr || !nameEn) {
-      res
-        .status(400)
-        .json({ error: "Name is required in both Arabic and English" });
+      sendApiError(res, req, 400, ApiErrors.nameRequiredArEn);
       return;
     }
 
@@ -158,7 +158,7 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error("Create menu error:", error);
-    res.status(500).json({ error: "Failed to create menu" });
+    sendApiError(res, req, 500, ApiErrors.failedCreateMenu);
   }
 }
 
@@ -190,7 +190,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       `);
 
     if (result.recordset.length === 0) {
-      res.status(404).json({ error: "Menu not found" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
@@ -263,7 +263,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error("Get menu by ID error:", error);
-    res.status(500).json({ error: "Failed to get menu" });
+    sendApiError(res, req, 500, ApiErrors.failedGetMenu);
   }
 }
 
@@ -476,7 +476,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
     res.json({ message: "Menu updated successfully" });
   } catch (error) {
     logger.error("Update menu error:", error);
-    res.status(500).json({ error: "Failed to update menu" });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateMenu);
   }
 }
 
@@ -493,7 +493,7 @@ export async function toggleMenuStatus(
 
     // Validate isActive value
     if (typeof isActive !== "boolean") {
-      res.status(400).json({ error: "isActive must be a boolean value" });
+      sendApiError(res, req, 400, ApiErrors.isActiveMustBeBoolean);
       return;
     }
 
@@ -524,7 +524,7 @@ export async function toggleMenuStatus(
       .query(query);
 
     if (result.rowsAffected[0] === 0) {
-      res.status(404).json({ error: "Menu not found" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
@@ -534,7 +534,7 @@ export async function toggleMenuStatus(
     });
   } catch (error) {
     logger.error("Toggle menu status error:", error);
-    res.status(500).json({ error: "Failed to update menu status" });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateMenuStatus);
   }
 }
 
@@ -553,14 +553,14 @@ export async function deleteMenu(req: Request, res: Response): Promise<void> {
       .query("DELETE FROM Menus WHERE id = @id AND userId = @userId");
 
     if (result.rowsAffected[0] === 0) {
-      res.status(404).json({ error: "Menu not found" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
     res.json({ message: "Menu deleted successfully" });
   } catch (error) {
     logger.error("Delete menu error:", error);
-    res.status(500).json({ error: "Failed to delete menu" });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteMenu);
   }
 }
 
@@ -573,7 +573,7 @@ export async function checkSlugAvailability(
     const { slug } = req.query;
 
     if (!slug || typeof slug !== "string") {
-      res.status(400).json({ error: "Slug is required" });
+      sendApiError(res, req, 400, ApiErrors.slugRequired);
       return;
     }
 
@@ -581,9 +581,7 @@ export async function checkSlugAvailability(
 
     // Validate slug format
     if (!validateSlug(normalizedSlug)) {
-      res.status(400).json({
-        error:
-          "Invalid slug format. Use only lowercase letters, numbers, and hyphens.",
+      sendApiError(res, req, 400, ApiErrors.invalidSlugFormat, {
         available: false,
       });
       return;
@@ -637,6 +635,6 @@ export async function checkSlugAvailability(
     });
   } catch (error) {
     logger.error("Check slug availability error:", error);
-    res.status(500).json({ error: "Failed to check slug availability" });
+    sendApiError(res, req, 500, ApiErrors.failedCheckSlugAvailability);
   }
 }

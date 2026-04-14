@@ -7,6 +7,8 @@ import { getPool, sql } from '../config/database';
 import bcrypt from 'bcryptjs';
 import { logger } from '../utils/logger';
 import { getImageUrl } from '../utils/urlHelper';
+import { sendApiError } from '../utils/apiErrorResponse';
+import { ApiErrors } from '../i18n/apiErrors';
 
 // Get user profile
 export async function getProfile(req: Request, res: Response): Promise<void> {
@@ -27,14 +29,14 @@ export async function getProfile(req: Request, res: Response): Promise<void> {
       `);
 
     if (result.recordset.length === 0) {
-      res.status(404).json({ error: 'User not found' });
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
 
     res.json({ user: result.recordset[0] });
   } catch (error) {
     logger.error('Get profile error:', error);
-    res.status(500).json({ error: 'Failed to get profile' });
+    sendApiError(res, req, 500, ApiErrors.failedGetProfile);
   }
 }
 
@@ -104,7 +106,7 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
     }
 
     if (updates.length === 0) {
-      res.status(400).json({ error: 'No fields to update' });
+      sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
       return;
     }
 
@@ -132,7 +134,7 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
     });
   } catch (error) {
     logger.error('Update profile error:', error);
-    res.status(500).json({ error: 'Failed to update profile' });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateProfile);
   }
 }
 
@@ -151,7 +153,7 @@ export async function changePassword(req: Request, res: Response): Promise<void>
       .query('SELECT password FROM Users WHERE id = @userId');
 
     if (userResult.recordset.length === 0) {
-      res.status(404).json({ error: 'User not found' });
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
 
@@ -162,7 +164,7 @@ export async function changePassword(req: Request, res: Response): Promise<void>
     );
 
     if (!isValid) {
-      res.status(401).json({ error: 'Current password is incorrect' });
+      sendApiError(res, req, 401, ApiErrors.currentPasswordIncorrect);
       return;
     }
 
@@ -179,7 +181,7 @@ export async function changePassword(req: Request, res: Response): Promise<void>
     res.json({ message: 'Password changed successfully' });
   } catch (error) {
     logger.error('Change password error:', error);
-    res.status(500).json({ error: 'Failed to change password' });
+    sendApiError(res, req, 500, ApiErrors.failedChangePassword);
   }
 }
 
@@ -241,7 +243,7 @@ export async function getStatistics(req: Request, res: Response): Promise<void> 
     });
   } catch (error) {
     logger.error('Get statistics error:', error);
-    res.status(500).json({ error: 'Failed to get statistics' });
+    sendApiError(res, req, 500, ApiErrors.failedGetStatistics);
   }
 }
 
@@ -259,7 +261,7 @@ export async function upgradePlan(req: Request, res: Response): Promise<void> {
     };
 
     if (!planLimits[planType]) {
-      res.status(400).json({ error: 'Invalid plan type' });
+      sendApiError(res, req, 400, ApiErrors.invalidPlanType);
       return;
     }
 
@@ -283,7 +285,7 @@ export async function upgradePlan(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error('Upgrade plan error:', error);
-    res.status(500).json({ error: 'Failed to upgrade plan' });
+    sendApiError(res, req, 500, ApiErrors.failedUpgradePlan);
   }
 }
 
@@ -344,7 +346,7 @@ export async function getSubscription(req: Request, res: Response): Promise<void
     });
   } catch (error) {
     logger.error('Get subscription error:', error);
-    res.status(500).json({ error: 'Failed to get subscription' });
+    sendApiError(res, req, 500, ApiErrors.failedGetSubscription);
   }
 }
 
@@ -363,7 +365,7 @@ export async function deleteAccount(req: Request, res: Response): Promise<void> 
       .query('SELECT password FROM Users WHERE id = @userId');
 
     if (userResult.recordset.length === 0) {
-      res.status(404).json({ error: 'User not found' });
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
 
@@ -373,7 +375,7 @@ export async function deleteAccount(req: Request, res: Response): Promise<void> 
     );
 
     if (!isValid) {
-      res.status(401).json({ error: 'Password is incorrect' });
+      sendApiError(res, req, 401, ApiErrors.passwordIncorrect);
       return;
     }
 
@@ -386,7 +388,7 @@ export async function deleteAccount(req: Request, res: Response): Promise<void> 
     res.json({ message: 'Account deleted successfully' });
   } catch (error) {
     logger.error('Delete account error:', error);
-    res.status(500).json({ error: 'Failed to delete account' });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteAccount);
   }
 }
 

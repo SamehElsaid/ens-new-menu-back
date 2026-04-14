@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
 import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 // Get all menus (no auth) - returns slug only as array
 export const getAllPublicMenus = async (req: Request, res: Response) => {
@@ -13,7 +15,7 @@ export const getAllPublicMenus = async (req: Request, res: Response) => {
     res.json(slugs);
   } catch (error) {
     console.error("Get all public menus error:", error);
-    res.status(500).json({ error: "Failed to get menus" });
+    sendApiError(res, req, 500, ApiErrors.failedGetMenus);
   }
 };
 

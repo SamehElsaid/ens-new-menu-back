@@ -3,6 +3,8 @@ import { getPool, sql, executeTransaction } from '../config/database';
 import { logger } from '../utils/logger';
 import { normalizeImageUrls } from '../utils/urlHelper';
 import { getLocaleFromAcceptLanguage } from '../utils/localeHelper';
+import { sendApiError } from '../utils/apiErrorResponse';
+import { ApiErrors } from '../i18n/apiErrors';
 
 // Get menu items (with pagination, search by name, filter by category name)
 export async function getMenuItems(req: Request, res: Response): Promise<void> {
@@ -33,7 +35,7 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
       .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: 'Menu not found' });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
@@ -208,7 +210,7 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error('Get menu items error:', error);
-    res.status(500).json({ error: 'Failed to get menu items' });
+    sendApiError(res, req, 500, ApiErrors.failedGetMenuItems);
   }
 }
 
@@ -238,12 +240,12 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
 
     // Validation
     if (!nameAr || !nameEn) {
-      res.status(400).json({ error: 'Name is required in both Arabic and English' });
+      sendApiError(res, req, 400, ApiErrors.nameRequiredArEn);
       return;
     }
 
     if (!price || parseFloat(price) < 0) {
-      res.status(400).json({ error: 'Valid price is required' });
+      sendApiError(res, req, 400, ApiErrors.validPriceRequired);
       return;
     }
 
@@ -265,13 +267,13 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
     if (hasNewColumns) {
       // With new columns, categoryId is preferred but category is acceptable
       if (!categoryId && !category) {
-        res.status(400).json({ error: 'Category is required (either categoryId or category)' });
+        sendApiError(res, req, 400, ApiErrors.categoryRequiredEitherOr);
         return;
       }
     } else {
       // Without new columns, category is required
       if (!category) {
-        res.status(400).json({ error: 'Category is required' });
+        sendApiError(res, req, 400, ApiErrors.categoryRequired);
         return;
       }
     }
@@ -284,7 +286,7 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
       .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: 'Menu not found' });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
@@ -375,7 +377,7 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
     });
   } catch (error) {
     logger.error('Create menu item error:', error);
-    res.status(500).json({ error: 'Failed to create menu item' });
+    sendApiError(res, req, 500, ApiErrors.failedCreateMenuItem);
   }
 }
 
@@ -513,7 +515,7 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
     res.json({ message: 'Menu item updated successfully' });
   } catch (error) {
     logger.error('Update menu item error:', error);
-    res.status(500).json({ error: 'Failed to update menu item' });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateMenuItem);
   }
 }
 
@@ -538,14 +540,14 @@ export async function deleteMenuItem(req: Request, res: Response): Promise<void>
       `);
 
     if (result.rowsAffected[0] === 0) {
-      res.status(404).json({ error: 'Menu item not found' });
+      sendApiError(res, req, 404, ApiErrors.menuItemNotFound);
       return;
     }
 
     res.json({ message: 'Menu item deleted successfully' });
   } catch (error) {
     logger.error('Delete menu item error:', error);
-    res.status(500).json({ error: 'Failed to delete menu item' });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteMenuItem);
   }
 }
 
@@ -566,7 +568,7 @@ export async function updateDisplayOrder(req: Request, res: Response): Promise<v
       .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: 'Menu not found' });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
@@ -588,7 +590,7 @@ export async function updateDisplayOrder(req: Request, res: Response): Promise<v
     res.json({ message: 'Display order updated successfully' });
   } catch (error) {
     logger.error('Update display order error:', error);
-    res.status(500).json({ error: 'Failed to update display order' });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateDisplayOrder);
   }
 }
 

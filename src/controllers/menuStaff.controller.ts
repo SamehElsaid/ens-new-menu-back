@@ -7,6 +7,8 @@ import {
   quoteMenuStaffIdent,
 } from "../config/menuStaffColumns";
 import { logger } from "../utils/logger";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 export async function getStaff(req: Request, res: Response): Promise<void> {
   try {
@@ -23,7 +25,7 @@ export async function getStaff(req: Request, res: Response): Promise<void> {
       .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: "Menu not found" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
@@ -44,7 +46,7 @@ export async function getStaff(req: Request, res: Response): Promise<void> {
     res.json({ staff });
   } catch (error) {
     logger.error("Get menu staff error:", error);
-    res.status(500).json({ error: "Failed to get staff" });
+    sendApiError(res, req, 500, ApiErrors.failedListStaff);
   }
 }
 
@@ -72,7 +74,7 @@ export async function getStaffById(
       `);
 
     if (result.recordset.length === 0) {
-      res.status(404).json({ error: "Staff member not found" });
+      sendApiError(res, req, 404, ApiErrors.staffMemberNotFound);
       return;
     }
 
@@ -84,7 +86,7 @@ export async function getStaffById(
     });
   } catch (error) {
     logger.error("Get staff by ID error:", error);
-    res.status(500).json({ error: "Failed to get staff member" });
+    sendApiError(res, req, 500, ApiErrors.failedGetStaffMember);
   }
 }
 
@@ -107,14 +109,12 @@ export async function createStaff(
       .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: "Menu not found" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
     if (password && !meta.passwordKey) {
-      res.status(400).json({
-        error: "Password column not configured on MenuStaff table",
-      });
+      sendApiError(res, req, 400, ApiErrors.passwordColumnNotConfigured);
       return;
     }
 
@@ -127,7 +127,7 @@ export async function createStaff(
           `SELECT id FROM MenuStaff WHERE ${quoteMenuStaffIdent(meta.emailKey)} = @email AND menuId = @menuId`
         );
       if (dupCheck.recordset.length > 0) {
-        res.status(400).json({ error: "Email already exists for this menu" });
+        sendApiError(res, req, 400, ApiErrors.emailExistsForMenu);
         return;
       }
     }
@@ -194,7 +194,7 @@ export async function createStaff(
     });
   } catch (error) {
     logger.error("Create staff error:", error);
-    res.status(500).json({ error: "Failed to create staff member" });
+    sendApiError(res, req, 500, ApiErrors.failedCreateStaffMember);
   }
 }
 
@@ -223,7 +223,7 @@ export async function updateStaff(
       `);
 
     if (checkResult.recordset.length === 0) {
-      res.status(404).json({ error: "Staff member not found" });
+      sendApiError(res, req, 404, ApiErrors.staffMemberNotFound);
       return;
     }
 
@@ -257,7 +257,7 @@ export async function updateStaff(
     }
 
     if (updates.length === 0) {
-      res.status(400).json({ error: "No fields to update" });
+      sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
       return;
     }
 
@@ -270,7 +270,7 @@ export async function updateStaff(
     res.json({ message: "Staff member updated successfully" });
   } catch (error) {
     logger.error("Update staff error:", error);
-    res.status(500).json({ error: "Failed to update staff member" });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateStaffMember);
   }
 }
 
@@ -297,13 +297,13 @@ export async function deleteStaff(
       `);
 
     if (result.rowsAffected[0] === 0) {
-      res.status(404).json({ error: "Staff member not found" });
+      sendApiError(res, req, 404, ApiErrors.staffMemberNotFound);
       return;
     }
 
     res.json({ message: "Staff member deleted successfully" });
   } catch (error) {
     logger.error("Delete staff error:", error);
-    res.status(500).json({ error: "Failed to delete staff member" });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteStaffMember);
   }
 }

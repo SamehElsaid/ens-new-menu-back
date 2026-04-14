@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
 import { getPool, sql } from '../config/database';
+import { sendApiError } from '../utils/apiErrorResponse';
+import { ApiErrors } from '../i18n/apiErrors';
 
 // Get all menu items for a specific menu
 export const getMenuItems = async (req: Request, res: Response) => {
@@ -19,9 +21,8 @@ export const getMenuItems = async (req: Request, res: Response) => {
       `);
 
     if (menuResult.recordset.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Menu not found or you do not have access to it' 
+      return sendApiError(res, req, 404, ApiErrors.menuNotFoundNoAccess, {
+        success: false,
       });
     }
 
@@ -57,10 +58,9 @@ export const getMenuItems = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error fetching menu items:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch menu items',
-      error: error.message 
+    sendApiError(res, req, 500, ApiErrors.failedFetchMenuItems, {
+      success: false,
+      ...(process.env.NODE_ENV === 'development' && { detail: error.message }),
     });
   }
 };
@@ -82,9 +82,8 @@ export const getMenuItem = async (req: Request, res: Response) => {
       `);
 
     if (menuResult.recordset.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Menu not found or you do not have access to it' 
+      return sendApiError(res, req, 404, ApiErrors.menuNotFoundNoAccess, {
+        success: false,
       });
     }
 
@@ -108,9 +107,8 @@ export const getMenuItem = async (req: Request, res: Response) => {
       `);
 
     if (itemResult.recordset.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Menu item not found' 
+      return sendApiError(res, req, 404, ApiErrors.menuItemNotFound, {
+        success: false,
       });
     }
 
@@ -143,10 +141,9 @@ export const getMenuItem = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error fetching menu item:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch menu item',
-      error: error.message 
+    sendApiError(res, req, 500, ApiErrors.failedFetchMenuItem, {
+      success: false,
+      ...(process.env.NODE_ENV === 'development' && { detail: error.message }),
     });
   }
 };
@@ -166,30 +163,26 @@ export const createMenuItem = async (req: Request, res: Response) => {
 
     // Validation
     if (!translations || !translations.ar || !translations.en) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Translations for both Arabic and English are required' 
+      return sendApiError(res, req, 400, ApiErrors.translationsBothRequired, {
+        success: false,
       });
     }
 
     if (!translations.ar.name || !translations.en.name) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Name is required in both languages' 
+      return sendApiError(res, req, 400, ApiErrors.nameRequiredBothLanguages, {
+        success: false,
       });
     }
 
     if (price === undefined || price < 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Valid price is required' 
+      return sendApiError(res, req, 400, ApiErrors.validPriceRequired, {
+        success: false,
       });
     }
 
     if (!category) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Category is required' 
+      return sendApiError(res, req, 400, ApiErrors.categoryRequired, {
+        success: false,
       });
     }
 
@@ -205,9 +198,8 @@ export const createMenuItem = async (req: Request, res: Response) => {
       `);
 
     if (menuResult.recordset.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Menu not found or you do not have access to it' 
+      return sendApiError(res, req, 404, ApiErrors.menuNotFoundNoAccess, {
+        success: false,
       });
     }
 
@@ -264,10 +256,9 @@ export const createMenuItem = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error creating menu item:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to create menu item',
-      error: error.message 
+    sendApiError(res, req, 500, ApiErrors.failedCreateMenuItem, {
+      success: false,
+      ...(process.env.NODE_ENV === 'development' && { detail: error.message }),
     });
   }
 };
@@ -297,9 +288,8 @@ export const updateMenuItem = async (req: Request, res: Response) => {
       `);
 
     if (menuResult.recordset.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Menu not found or you do not have access to it' 
+      return sendApiError(res, req, 404, ApiErrors.menuNotFoundNoAccess, {
+        success: false,
       });
     }
 
@@ -313,9 +303,8 @@ export const updateMenuItem = async (req: Request, res: Response) => {
       `);
 
     if (itemCheck.recordset.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Menu item not found' 
+      return sendApiError(res, req, 404, ApiErrors.menuItemNotFound, {
+        success: false,
       });
     }
 
@@ -397,10 +386,9 @@ export const updateMenuItem = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error updating menu item:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to update menu item',
-      error: error.message 
+    sendApiError(res, req, 500, ApiErrors.failedUpdateMenuItem, {
+      success: false,
+      ...(process.env.NODE_ENV === 'development' && { detail: error.message }),
     });
   }
 };
@@ -422,9 +410,8 @@ export const deleteMenuItem = async (req: Request, res: Response) => {
       `);
 
     if (menuResult.recordset.length === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Menu not found or you do not have access to it' 
+      return sendApiError(res, req, 404, ApiErrors.menuNotFoundNoAccess, {
+        success: false,
       });
     }
 
@@ -438,9 +425,8 @@ export const deleteMenuItem = async (req: Request, res: Response) => {
       `);
 
     if (result.rowsAffected[0] === 0) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Menu item not found' 
+      return sendApiError(res, req, 404, ApiErrors.menuItemNotFound, {
+        success: false,
       });
     }
 
@@ -450,10 +436,9 @@ export const deleteMenuItem = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error deleting menu item:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to delete menu item',
-      error: error.message 
+    sendApiError(res, req, 500, ApiErrors.failedDeleteMenuItem, {
+      success: false,
+      ...(process.env.NODE_ENV === 'development' && { detail: error.message }),
     });
   }
 };

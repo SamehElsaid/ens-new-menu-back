@@ -18,6 +18,7 @@ import {
   isUserOnFreePlan,
   menuOwnerHasProPlan,
 } from "../services/subscriptionPlan.service";
+import { sendApiError } from "../utils/apiErrorResponse";
 
 export async function staffLogin(
   req: Request,
@@ -42,36 +43,42 @@ export async function staffLogin(
       `);
 
     if (menuResult.recordset.length === 0) {
-      res.status(404).json({ error: "المطعم غير موجود", errorEn: "Restaurant not found" });
+      sendApiError(res, req, 404, {
+        en: "Restaurant not found",
+        ar: "المطعم غير موجود",
+      });
       return;
     }
 
     const menu = menuResult.recordset[0];
 
     if (!menu.isActive) {
-      res.status(403).json({
-        error: "هذا المطعم غير مفعل حالياً",
-        errorEn: "This restaurant is currently inactive",
+      sendApiError(res, req, 403, {
+        en: "This restaurant is currently inactive",
+        ar: "هذا المطعم غير مفعل حالياً",
       });
       return;
     }
 
     if (await isUserOnFreePlan(menu.userId as number)) {
-      res.status(403).json({
-        code: "PRO_REQUIRED",
-        error:
-          "Staff access requires a Pro plan. Ask the owner to upgrade.",
-        errorAr:
-          "دخول الطاقم يتطلب خطة Pro. اطلب من صاحب المنيو الترقية.",
-      });
+      sendApiError(
+        res,
+        req,
+        403,
+        {
+          en: "Staff access requires a Pro plan. Ask the owner to upgrade.",
+          ar: "دخول الطاقم يتطلب خطة Pro. اطلب من صاحب المنيو الترقية.",
+        },
+        { code: "PRO_REQUIRED" }
+      );
       return;
     }
 
     const staffMeta = await getMenuStaffColumnMeta();
     if (!staffMeta.emailKey) {
-      res.status(500).json({
-        error: "إعدادات جدول الموظفين غير مكتملة",
-        errorEn: "MenuStaff table has no email column",
+      sendApiError(res, req, 500, {
+        en: "MenuStaff table has no email column",
+        ar: "إعدادات جدول الموظفين غير مكتملة",
       });
       return;
     }
@@ -88,9 +95,9 @@ export async function staffLogin(
       `);
 
     if (staffResult.recordset.length === 0) {
-      res.status(401).json({
-        error: "البريد الإلكتروني غير مسجل في هذا المطعم",
-        errorEn: "Email not registered in this restaurant",
+      sendApiError(res, req, 401, {
+        en: "Email not registered in this restaurant",
+        ar: "البريد الإلكتروني غير مسجل في هذا المطعم",
       });
       return;
     }
@@ -98,27 +105,27 @@ export async function staffLogin(
     const staff = staffResult.recordset[0] as Record<string, unknown>;
 
     if (!getStaffIsActive(staff, staffMeta)) {
-      res.status(403).json({
-        error: "تم إيقاف حسابك. تواصل مع إدارة المطعم.",
-        errorEn: "Your account is deactivated. Contact the restaurant manager.",
+      sendApiError(res, req, 403, {
+        en: "Your account is deactivated. Contact the restaurant manager.",
+        ar: "تم إيقاف حسابك. تواصل مع إدارة المطعم.",
       });
       return;
     }
 
     const storedHash = getStaffPasswordHash(staff, staffMeta);
     if (!storedHash) {
-      res.status(401).json({
-        error: "لم يتم تعيين كلمة مرور لحسابك. تواصل مع إدارة المطعم.",
-        errorEn: "No password set for your account. Contact the restaurant manager.",
+      sendApiError(res, req, 401, {
+        en: "No password set for your account. Contact the restaurant manager.",
+        ar: "لم يتم تعيين كلمة مرور لحسابك. تواصل مع إدارة المطعم.",
       });
       return;
     }
 
     const isValidPassword = await bcrypt.compare(password, storedHash);
     if (!isValidPassword) {
-      res.status(401).json({
-        error: "كلمة المرور غير صحيحة",
-        errorEn: "Invalid password",
+      sendApiError(res, req, 401, {
+        en: "Invalid password",
+        ar: "كلمة المرور غير صحيحة",
       });
       return;
     }
@@ -186,7 +193,10 @@ export async function staffLogin(
     });
   } catch (error) {
     logger.error("Staff login error:", error);
-    res.status(500).json({ error: "Failed to login" });
+    sendApiError(res, req, 500, {
+      en: "Failed to login",
+      ar: "فشل تسجيل الدخول",
+    });
   }
 }
 
@@ -217,17 +227,25 @@ export async function getStaffMe(
       `);
 
     if (result.recordset.length === 0) {
-      res.status(404).json({ error: "Staff member not found" });
+      sendApiError(res, req, 404, {
+        en: "Staff member not found",
+        ar: "لم يُعثر على عضو الطاقم",
+      });
       return;
     }
 
     const staffMenuId = result.recordset[0].menuId as number;
     if (!(await menuOwnerHasProPlan(staffMenuId))) {
-      res.status(403).json({
-        code: "PRO_REQUIRED",
-        error: "Staff features require a Pro plan.",
-        errorAr: "ميزات الطاقم تتطلب خطة Pro.",
-      });
+      sendApiError(
+        res,
+        req,
+        403,
+        {
+          en: "Staff features require a Pro plan.",
+          ar: "ميزات الطاقم تتطلب خطة Pro.",
+        },
+        { code: "PRO_REQUIRED" }
+      );
       return;
     }
 
@@ -253,7 +271,10 @@ export async function getStaffMe(
     });
   } catch (error) {
     logger.error("Get staff me error:", error);
-    res.status(500).json({ error: "Failed to get staff data" });
+    sendApiError(res, req, 500, {
+      en: "Failed to get staff data",
+      ar: "فشل جلب بيانات الطاقم",
+    });
   }
 }
 
@@ -292,6 +313,9 @@ export async function staffLogout(
     res.json({ message: "Logged out successfully" });
   } catch (error) {
     logger.error("Staff logout error:", error);
-    res.status(500).json({ error: "Failed to logout" });
+    sendApiError(res, req, 500, {
+      en: "Failed to logout",
+      ar: "فشل تسجيل الخروج",
+    });
   }
 }

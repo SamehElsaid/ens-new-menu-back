@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { GoogleOAuthService } from '../services/google-oauth.service';
 import { logger } from '../utils/logger';
 import { LoginAttemptsService } from '../services/loginAttempts.service';
+import { sendApiError } from '../utils/apiErrorResponse';
+import { ApiErrors } from '../i18n/apiErrors';
 
 /**
  * Handle Google OAuth login/signup
@@ -14,14 +16,14 @@ export async function googleAuth(req: Request, res: Response): Promise<void> {
     const userAgent = req.headers['user-agent'];
 
     if (!token && !accessToken && !code) {
-      res.status(400).json({ error: 'Google token, access_token, or code is required' });
+      sendApiError(res, req, 400, ApiErrors.googleTokenRequired);
       return;
     }
 
     let googleUserInfo;
     if (code) {
       if (!redirectUri) {
-        res.status(400).json({ error: 'redirect_uri is required when using code' });
+        sendApiError(res, req, 400, ApiErrors.redirectUriRequiredWithCode);
         return;
       }
       googleUserInfo = await GoogleOAuthService.getUserInfoFromCode(code, redirectUri);
@@ -34,11 +36,14 @@ export async function googleAuth(req: Request, res: Response): Promise<void> {
     // Check if account is locked (for existing email-based accounts)
     const lockStatus = await LoginAttemptsService.isAccountLocked(googleUserInfo.email);
     if (lockStatus.isLocked) {
-      res.status(403).json({
-        error: lockStatus.message || 'Account is temporarily locked',
-        isLocked: true,
-        lockedUntil: lockStatus.lockedUntil,
-      });
+      const en = lockStatus.message || ApiErrors.accountTemporarilyLocked.en;
+      sendApiError(
+        res,
+        req,
+        403,
+        { en, ar: ApiErrors.accountTemporarilyLocked.ar },
+        { isLocked: true, lockedUntil: lockStatus.lockedUntil },
+      );
       return;
     }
 
@@ -71,11 +76,11 @@ export async function googleAuth(req: Request, res: Response): Promise<void> {
     logger.error('Google auth error:', error);
     
     if (error.message === 'Invalid Google token') {
-      res.status(400).json({ error: 'Invalid Google token' });
+      sendApiError(res, req, 400, ApiErrors.invalidGoogleToken);
       return;
     }
 
-    res.status(500).json({ error: 'Failed to authenticate with Google' });
+    sendApiError(res, req, 500, ApiErrors.failedGoogleAuth);
   }
 }
 
@@ -89,7 +94,7 @@ export async function getGoogleConfig(req: Request, res: Response): Promise<void
     });
   } catch (error) {
     logger.error('Get Google config error:', error);
-    res.status(500).json({ error: 'Failed to get Google configuration' });
+    sendApiError(res, req, 500, ApiErrors.failedGoogleConfig);
   }
 }
 

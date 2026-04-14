@@ -7,6 +7,8 @@ import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../utils/logger';
 import { getImageUrl } from '../utils/urlHelper';
+import { sendApiError } from '../utils/apiErrorResponse';
+import { ApiErrors } from '../i18n/apiErrors';
 
 // Allowed image types
 const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon'];
@@ -59,7 +61,7 @@ export async function ensureUploadDirectories(): Promise<void> {
 export async function uploadImage(req: Request, res: Response): Promise<void> {
   try {
     if (!req.file) {
-      res.status(400).json({ error: 'No file uploaded' });
+      sendApiError(res, req, 400, ApiErrors.noFileUploaded);
       return;
     }
 
@@ -67,7 +69,7 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
     const allowedTypes = ['logos', 'menu-items', 'ads', 'categories', 'profile-images'];
 
     if (!allowedTypes.includes(type)) {
-      res.status(400).json({ error: 'Invalid upload type' });
+      sendApiError(res, req, 400, ApiErrors.invalidUploadType);
       return;
     }
 
@@ -78,24 +80,24 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
     const isIcon = fileType?.mime === 'image/x-icon' || req.file.originalname.endsWith('.ico');
     
     if (!fileType && !isIcon) {
-      res.status(400).json({ error: 'Invalid file type detected' });
+      sendApiError(res, req, 400, ApiErrors.invalidFileTypeDetected);
       return;
     }
 
     if (!isIcon && fileType && !ALLOWED_TYPES.includes(fileType.mime)) {
-      res.status(400).json({ error: 'Invalid file type detected' });
+      sendApiError(res, req, 400, ApiErrors.invalidFileTypeDetected);
       return;
     }
 
     // For ICO files, only allow in logos type
     if (isIcon && type !== 'logos') {
-      res.status(400).json({ error: 'ICO files are only allowed for logos' });
+      sendApiError(res, req, 400, ApiErrors.icoOnlyForLogos);
       return;
     }
 
     // Validate ICO file size (1MB max)
     if (isIcon && req.file.size > 1 * 1024 * 1024) {
-      res.status(400).json({ error: 'Favicon file size must be less than 1MB' });
+      sendApiError(res, req, 400, ApiErrors.faviconMax1mb);
       return;
     }
 
@@ -183,7 +185,7 @@ export async function uploadImage(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error('Upload image error:', error);
-    res.status(500).json({ error: 'Failed to upload image' });
+    sendApiError(res, req, 500, ApiErrors.failedUploadImage);
   }
 }
 
@@ -196,13 +198,13 @@ export async function deleteImage(req: Request, res: Response): Promise<void> {
     const allowedTypes = ['logos', 'menu-items', 'ads', 'categories', 'profile-images'];
 
     if (!allowedTypes.includes(type as string)) {
-      res.status(400).json({ error: 'Invalid upload type' });
+      sendApiError(res, req, 400, ApiErrors.invalidUploadType);
       return;
     }
 
     // Security: ensure filename doesn't contain path traversal
     if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
-      res.status(400).json({ error: 'Invalid filename' });
+      sendApiError(res, req, 400, ApiErrors.invalidFilename);
       return;
     }
 
@@ -216,11 +218,11 @@ export async function deleteImage(req: Request, res: Response): Promise<void> {
       
       res.json({ message: 'File deleted successfully' });
     } catch (error) {
-      res.status(404).json({ error: 'File not found' });
+      sendApiError(res, req, 404, ApiErrors.fileNotFound);
     }
   } catch (error) {
     logger.error('Delete image error:', error);
-    res.status(500).json({ error: 'Failed to delete image' });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteImage);
   }
 }
 
@@ -233,13 +235,13 @@ export async function getImageInfo(req: Request, res: Response): Promise<void> {
     const allowedTypes = ['logos', 'menu-items', 'ads', 'categories', 'profile-images'];
 
     if (!allowedTypes.includes(type as string)) {
-      res.status(400).json({ error: 'Invalid upload type' });
+      sendApiError(res, req, 400, ApiErrors.invalidUploadType);
       return;
     }
 
     // Security: ensure filename doesn't contain path traversal
     if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
-      res.status(400).json({ error: 'Invalid filename' });
+      sendApiError(res, req, 400, ApiErrors.invalidFilename);
       return;
     }
 
@@ -262,11 +264,11 @@ export async function getImageInfo(req: Request, res: Response): Promise<void> {
         url: getImageUrl(relativePath),
       });
     } catch (error) {
-      res.status(404).json({ error: 'File not found' });
+      sendApiError(res, req, 404, ApiErrors.fileNotFound);
     }
   } catch (error) {
     logger.error('Get image info error:', error);
-    res.status(500).json({ error: 'Failed to get image info' });
+    sendApiError(res, req, 500, ApiErrors.failedGetImageInfo);
   }
 }
 

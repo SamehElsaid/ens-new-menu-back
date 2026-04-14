@@ -1,6 +1,11 @@
 import { Request, Response } from 'express';
 import sql from 'mssql';
 import { getPool, executeTransaction } from '../config/database';
+import { sendApiError } from '../utils/apiErrorResponse';
+import { ApiErrors } from '../i18n/apiErrors';
+
+const ERR_MENU_ACCESS = ApiErrors.menuNotFoundOrAccess.en;
+const ERR_CUSTOM_PRO = ApiErrors.customizationsProOnly.en;
 
 /**
  * Get menu customizations
@@ -42,7 +47,7 @@ export async function getCustomizations(req: Request, res: Response): Promise<vo
     res.json(result.recordset[0]);
   } catch (error) {
     console.error('Error getting customizations:', error);
-    res.status(500).json({ error: 'Failed to get customizations' });
+    sendApiError(res, req, 500, ApiErrors.failedGetCustomizations);
   }
 }
 
@@ -82,12 +87,12 @@ export async function updateCustomizations(req: Request, res: Response): Promise
         `);
 
       if (menuResult.recordset.length === 0) {
-        throw new Error('Menu not found or access denied');
+        throw new Error(ERR_MENU_ACCESS);
       }
 
       const userBillingCycle = menuResult.recordset[0].billingCycle;
       if (!userBillingCycle || userBillingCycle === 'free') {
-        throw new Error('Customizations are only available for Pro users');
+        throw new Error(ERR_CUSTOM_PRO);
       }
 
       // Check if customizations exist
@@ -152,12 +157,12 @@ export async function updateCustomizations(req: Request, res: Response): Promise
     res.json({ success: true, message: 'Customizations updated successfully' });
   } catch (error: any) {
     console.error('Error updating customizations:', error);
-    if (error.message === 'Customizations are only available for Pro users') {
-      res.status(403).json({ error: error.message });
-    } else if (error.message === 'Menu not found or access denied') {
-      res.status(404).json({ error: error.message });
+    if (error.message === ERR_CUSTOM_PRO) {
+      sendApiError(res, req, 403, ApiErrors.customizationsProOnly);
+    } else if (error.message === ERR_MENU_ACCESS) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
     } else {
-      res.status(500).json({ error: 'Failed to update customizations' });
+      sendApiError(res, req, 500, ApiErrors.failedUpdateCustomizations);
     }
   }
 }
@@ -180,7 +185,7 @@ export async function resetCustomizations(req: Request, res: Response): Promise<
         .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
 
       if (menuResult.recordset.length === 0) {
-        throw new Error('Menu not found or access denied');
+        throw new Error(ERR_MENU_ACCESS);
       }
 
       // Delete customizations
@@ -193,10 +198,10 @@ export async function resetCustomizations(req: Request, res: Response): Promise<
     res.json({ success: true, message: 'Customizations reset to default' });
   } catch (error: any) {
     console.error('Error resetting customizations:', error);
-    if (error.message === 'Menu not found or access denied') {
-      res.status(404).json({ error: error.message });
+    if (error.message === ERR_MENU_ACCESS) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
     } else {
-      res.status(500).json({ error: 'Failed to reset customizations' });
+      sendApiError(res, req, 500, ApiErrors.failedResetCustomizations);
     }
   }
 }

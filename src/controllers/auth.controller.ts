@@ -18,6 +18,8 @@ import { logger } from "../utils/logger";
 import { LoginAttemptsService } from "../services/loginAttempts.service";
 import { RefreshTokenService } from "../services/refreshToken.service";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 // Check Availability (Email or Phone Number)
 export async function checkAvailability(
@@ -28,7 +30,7 @@ export async function checkAvailability(
     const { email, phoneNumber } = req.query;
 
     if (!email && !phoneNumber) {
-      res.status(400).json({ error: "Email or phone number is required" });
+      sendApiError(res, req, 400, ApiErrors.emailOrPhoneRequired);
       return;
     }
 
@@ -63,7 +65,7 @@ export async function checkAvailability(
     });
   } catch (error) {
     logger.error("Check availability error:", error);
-    res.status(500).json({ error: "Failed to check availability" });
+    sendApiError(res, req, 500, ApiErrors.failedCheckAvailability);
   }
 }
 
@@ -74,7 +76,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
 
     // Validate required fields
     if (!phoneNumber) {
-      res.status(400).json({ error: "Phone number is required" });
+      sendApiError(res, req, 400, ApiErrors.phoneRequired);
       return;
     }
 
@@ -87,7 +89,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
       .query("SELECT id FROM Users WHERE email = @email");
 
     if (existingEmail.recordset.length > 0) {
-      res.status(400).json({ error: "Email already registered" });
+      sendApiError(res, req, 400, ApiErrors.emailAlreadyRegistered);
       return;
     }
 
@@ -98,7 +100,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
       .query("SELECT id FROM Users WHERE phoneNumber = @phoneNumber");
 
     if (existingPhone.recordset.length > 0) {
-      res.status(400).json({ error: "Phone number already registered" });
+      sendApiError(res, req, 400, ApiErrors.phoneAlreadyRegistered);
       return;
     }
 
@@ -111,7 +113,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
       .query("SELECT id FROM Plans WHERE name = 'Free'");
     if (!freePlanResult.recordset.length) {
       logger.error("Free plan not found in Plans table");
-      res.status(500).json({ error: "Free plan not configured" });
+      sendApiError(res, req, 500, ApiErrors.freePlanNotConfigured);
       return;
     }
     const freePlanId = freePlanResult.recordset[0].id;
@@ -161,7 +163,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error("Signup error:", error);
-    res.status(500).json({ error: "Failed to create account" });
+    sendApiError(res, req, 500, ApiErrors.failedCreateAccount);
   }
 }
 
@@ -180,11 +182,14 @@ export async function login(req: Request, res: Response): Promise<void> {
     // Check if account is locked
     const lockStatus = await LoginAttemptsService.isAccountLocked(email);
     if (lockStatus.isLocked) {
-      res.status(403).json({
-        error: lockStatus.message || "Account is temporarily locked",
-        isLocked: true,
-        lockedUntil: lockStatus.lockedUntil,
-      });
+      const en = lockStatus.message || ApiErrors.accountTemporarilyLocked.en;
+      sendApiError(
+        res,
+        req,
+        403,
+        { en, ar: ApiErrors.accountTemporarilyLocked.ar },
+        { isLocked: true, lockedUntil: lockStatus.lockedUntil },
+      );
       return;
     }
 
@@ -246,13 +251,20 @@ export async function login(req: Request, res: Response): Promise<void> {
 
     // Check if account is suspended
     if (user.isSuspended) {
-      res.status(403).json({
-        error: "تم إيقاف هذا الحساب. برجاء التواصل مع الدعم.",
-        errorEn: "This account has been suspended. Please contact support.",
-        isSuspended: true,
-        suspendedReason:
-          user.suspendedReason || "Account suspended by administrator",
-      });
+      sendApiError(
+        res,
+        req,
+        403,
+        {
+          en: "This account has been suspended. Please contact support.",
+          ar: "تم إيقاف هذا الحساب. برجاء التواصل مع الدعم.",
+        },
+        {
+          isSuspended: true,
+          suspendedReason:
+            user.suspendedReason || "Account suspended by administrator",
+        },
+      );
       return;
     }
 
@@ -347,7 +359,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error("Login error:", error);
-    res.status(500).json({ error: "Failed to login" });
+    sendApiError(res, req, 500, ApiErrors.failedLogin);
   }
 }
 
@@ -357,7 +369,7 @@ export async function verifyEmail(req: Request, res: Response): Promise<void> {
     const { token } = req.query;
 
     if (!token) {
-      res.status(400).json({ error: "Token is required" });
+      sendApiError(res, req, 400, ApiErrors.tokenRequired);
       return;
     }
 
@@ -372,7 +384,7 @@ export async function verifyEmail(req: Request, res: Response): Promise<void> {
       `);
 
     if (verificationResult.recordset.length === 0) {
-      res.status(400).json({ error: "Invalid or expired verification token" });
+      sendApiError(res, req, 400, ApiErrors.invalidVerificationToken);
       return;
     }
 
@@ -396,7 +408,7 @@ export async function verifyEmail(req: Request, res: Response): Promise<void> {
     res.json({ message: "Email verified successfully" });
   } catch (error) {
     logger.error("Email verification error:", error);
-    res.status(500).json({ error: "Failed to verify email" });
+    sendApiError(res, req, 500, ApiErrors.failedVerifyEmail);
   }
 }
 
@@ -417,14 +429,14 @@ export async function resendVerification(
       .query("SELECT * FROM Users WHERE email = @email");
 
     if (userResult.recordset.length === 0) {
-      res.status(404).json({ error: "User not found" });
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
 
     const user = userResult.recordset[0];
 
     if (user.isEmailVerified) {
-      res.status(400).json({ error: "Email is already verified" });
+      sendApiError(res, req, 400, ApiErrors.emailAlreadyVerified);
       return;
     }
 
@@ -453,7 +465,7 @@ export async function resendVerification(
     res.json({ message: "Verification email sent" });
   } catch (error) {
     logger.error("Resend verification error:", error);
-    res.status(500).json({ error: "Failed to resend verification email" });
+    sendApiError(res, req, 500, ApiErrors.failedResendVerification);
   }
 }
 
@@ -511,7 +523,7 @@ export async function forgotPassword(
     res.json({ message: "If the email exists, a reset link will be sent" });
   } catch (error) {
     logger.error("Forgot password error:", error);
-    res.status(500).json({ error: "Failed to process password reset request" });
+    sendApiError(res, req, 500, ApiErrors.failedPasswordResetRequest);
   }
 }
 
@@ -537,7 +549,7 @@ export async function resetPassword(
       `);
 
     if (resetResult.recordset.length === 0) {
-      res.status(400).json({ error: "Invalid or expired reset token" });
+      sendApiError(res, req, 400, ApiErrors.invalidResetToken);
       return;
     }
 
@@ -570,7 +582,7 @@ export async function resetPassword(
     res.json({ message: "Password reset successfully" });
   } catch (error) {
     logger.error("Reset password error:", error);
-    res.status(500).json({ error: "Failed to reset password" });
+    sendApiError(res, req, 500, ApiErrors.failedResetPassword);
   }
 }
 
@@ -596,7 +608,7 @@ export async function getMe(req: Request, res: Response): Promise<void> {
       `);
 
     if (userResult.recordset.length === 0) {
-      res.status(404).json({ error: "User not found" });
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
 
@@ -628,7 +640,7 @@ export async function getMe(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error("Get me error:", error);
-    res.status(500).json({ error: "Failed to get user data" });
+    sendApiError(res, req, 500, ApiErrors.failedGetUserData);
   }
 }
 
@@ -638,7 +650,7 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
     const { refreshToken } = req.body;
 
     if (!refreshToken) {
-      res.status(400).json({ error: "Refresh token is required" });
+      sendApiError(res, req, 400, ApiErrors.refreshTokenRequired);
       return;
     }
 
@@ -663,12 +675,14 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
     }
 
     if (!tokenVerification.isValid) {
-      res.status(401).json({
-        error:
-          tokenVerification.isRevoked
-            ? "Refresh token has been revoked"
-            : "Invalid or expired refresh token",
-      });
+      sendApiError(
+        res,
+        req,
+        401,
+        tokenVerification.isRevoked
+          ? ApiErrors.refreshTokenRevoked
+          : ApiErrors.invalidRefreshToken,
+      );
       return;
     }
 
@@ -680,7 +694,7 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
     try {
       decoded = verifyRefreshToken(tokenToUse);
     } catch (error) {
-      res.status(401).json({ error: "Invalid or expired refresh token" });
+      sendApiError(res, req, 401, ApiErrors.invalidRefreshToken);
       return;
     }
 
@@ -691,7 +705,7 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
       .query("SELECT * FROM Users WHERE id = @userId");
 
     if (userResult.recordset.length === 0) {
-      res.status(404).json({ error: "User not found" });
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
 
@@ -724,7 +738,7 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
     });
   } catch (error) {
     logger.error("Refresh token error:", error);
-    res.status(500).json({ error: "Failed to refresh token" });
+    sendApiError(res, req, 500, ApiErrors.failedRefreshToken);
   }
 }
 
@@ -759,6 +773,6 @@ export async function logout(req: Request, res: Response): Promise<void> {
     res.json({ message: "Logged out successfully" });
   } catch (error) {
     logger.error("Logout error:", error);
-    res.status(500).json({ error: "Failed to logout" });
+    sendApiError(res, req, 500, ApiErrors.failedLogout);
   }
 }

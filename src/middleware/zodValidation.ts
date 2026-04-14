@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodSchema, ZodError } from 'zod';
 import { logger } from '../utils/logger';
+import { pickLocalized, sendApiError } from '../utils/apiErrorResponse';
+import { ApiErrors } from '../i18n/apiErrors';
 
 /**
  * Middleware to validate request body/query against a Zod schema
@@ -36,18 +38,21 @@ export const validateRequest = (
         
         logger.warn('Validation error:', { errors });
         
+        const firstMsg = errors[0]?.message || 'Invalid input data';
+        const en400 = `${ApiErrors.validationFailed.en}: ${firstMsg}`;
+        const ar400 = `${ApiErrors.validationFailed.ar}: ${firstMsg}`;
         return res.status(400).json({
-          error: 'Validation failed',
+          error: pickLocalized(req, { en: en400, ar: ar400 }),
+          errorAr: ar400,
+          errorEn: en400,
           details: errors,
-          message: errors[0]?.message || 'Invalid input data',
+          message: firstMsg,
         });
       }
       
       // Handle unexpected errors
       logger.error('Unexpected validation error:', error);
-      return res.status(500).json({
-        error: 'Internal server error during validation',
-      });
+      return sendApiError(res, req, 500, ApiErrors.validationFailedInternal);
     }
   };
 };

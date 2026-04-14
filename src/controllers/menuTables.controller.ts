@@ -3,6 +3,8 @@ import { getPool, sql } from "../config/database";
 import { getMenuTablesColumnMeta } from "../config/menuTablesColumns";
 import { logger } from "../utils/logger";
 import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 export async function getTables(req: Request, res: Response): Promise<void> {
   try {
@@ -18,7 +20,7 @@ export async function getTables(req: Request, res: Response): Promise<void> {
       .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: "Menu not found" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
@@ -38,7 +40,7 @@ export async function getTables(req: Request, res: Response): Promise<void> {
     res.json({ tables });
   } catch (error) {
     logger.error("Get menu tables error:", error);
-    res.status(500).json({ error: "Failed to get tables" });
+    sendApiError(res, req, 500, ApiErrors.failedGetTables);
   }
 }
 
@@ -65,7 +67,7 @@ export async function getTableById(
       `);
 
     if (result.recordset.length === 0) {
-      res.status(404).json({ error: "Table not found" });
+      sendApiError(res, req, 404, ApiErrors.tableNotFound);
       return;
     }
 
@@ -76,7 +78,7 @@ export async function getTableById(
     });
   } catch (error) {
     logger.error("Get table by ID error:", error);
-    res.status(500).json({ error: "Failed to get table" });
+    sendApiError(res, req, 500, ApiErrors.failedGetTable);
   }
 }
 
@@ -98,7 +100,7 @@ export async function createTable(
       .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: "Menu not found" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
@@ -138,7 +140,7 @@ export async function createTable(
     });
   } catch (error) {
     logger.error("Create table error:", error);
-    res.status(500).json({ error: "Failed to create table" });
+    sendApiError(res, req, 500, ApiErrors.failedCreateTable);
   }
 }
 
@@ -166,7 +168,7 @@ export async function updateTable(
       `);
 
     if (checkResult.recordset.length === 0) {
-      res.status(404).json({ error: "Table not found" });
+      sendApiError(res, req, 404, ApiErrors.tableNotFound);
       return;
     }
 
@@ -191,7 +193,7 @@ export async function updateTable(
     }
 
     if (updates.length === 0) {
-      res.status(400).json({ error: "No fields to update" });
+      sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
       return;
     }
 
@@ -204,7 +206,7 @@ export async function updateTable(
     res.json({ message: "Table updated successfully" });
   } catch (error) {
     logger.error("Update table error:", error);
-    res.status(500).json({ error: "Failed to update table" });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateTable);
   }
 }
 
@@ -231,13 +233,13 @@ export async function deleteTable(
       `);
 
     if (result.rowsAffected[0] === 0) {
-      res.status(404).json({ error: "Table not found" });
+      sendApiError(res, req, 404, ApiErrors.tableNotFound);
       return;
     }
 
     res.json({ message: "Table deleted successfully" });
   } catch (error) {
     logger.error("Delete table error:", error);
-    res.status(500).json({ error: "Failed to delete table" });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteTable);
   }
 }

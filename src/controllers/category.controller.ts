@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
 import { logger } from "../utils/logger";
 import { normalizeImageUrls } from "../utils/urlHelper";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 // Get all categories for a menu (with pagination)
 export async function getCategories(
@@ -27,7 +29,7 @@ export async function getCategories(
       .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: "Menu not found or access denied" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
       return;
     }
 
@@ -79,7 +81,7 @@ export async function getCategories(
     });
   } catch (error) {
     logger.error("Get categories error:", error);
-    res.status(500).json({ error: "Failed to get categories" });
+    sendApiError(res, req, 500, ApiErrors.failedGetCategories);
   }
 }
 
@@ -102,7 +104,7 @@ export async function getCategoryById(
       .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: "Menu not found or access denied" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
       return;
     }
 
@@ -127,14 +129,14 @@ export async function getCategoryById(
       `);
 
     if (result.recordset.length === 0) {
-      res.status(404).json({ error: "Category not found" });
+      sendApiError(res, req, 404, ApiErrors.categoryNotFound);
       return;
     }
 
     res.json({ category: result.recordset[0] });
   } catch (error) {
     logger.error("Get category by ID error:", error);
-    res.status(500).json({ error: "Failed to get category" });
+    sendApiError(res, req, 500, ApiErrors.failedGetCategory);
   }
 }
 
@@ -153,9 +155,7 @@ export async function createCategory(
 
     // Validate required fields
     if (!nameAr || !nameEn) {
-      res
-        .status(400)
-        .json({ error: "Name is required in both Arabic and English" });
+      sendApiError(res, req, 400, ApiErrors.nameRequiredArEn);
       return;
     }
 
@@ -169,7 +169,7 @@ export async function createCategory(
       .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: "Menu not found or access denied" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
       return;
     }
 
@@ -233,7 +233,7 @@ export async function createCategory(
     });
   } catch (error) {
     logger.error("Create category error:", error);
-    res.status(500).json({ error: "Failed to create category" });
+    sendApiError(res, req, 500, ApiErrors.failedCreateCategory);
   }
 }
 
@@ -260,7 +260,7 @@ export async function updateCategory(
       .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: "Menu not found or access denied" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
       return;
     }
 
@@ -274,7 +274,7 @@ export async function updateCategory(
       );
 
     if (categoryCheck.recordset.length === 0) {
-      res.status(404).json({ error: "Category not found" });
+      sendApiError(res, req, 404, ApiErrors.categoryNotFound);
       return;
     }
 
@@ -333,7 +333,7 @@ export async function updateCategory(
     res.json({ message: "Category updated successfully" });
   } catch (error) {
     logger.error("Update category error:", error);
-    res.status(500).json({ error: "Failed to update category" });
+    sendApiError(res, req, 500, ApiErrors.failedUpdateCategory);
   }
 }
 
@@ -356,7 +356,7 @@ export async function deleteCategory(
       .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
 
     if (menuCheck.recordset.length === 0) {
-      res.status(404).json({ error: "Menu not found or access denied" });
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
       return;
     }
 
@@ -386,13 +386,13 @@ export async function deleteCategory(
       );
 
     if (result.rowsAffected[0] === 0) {
-      res.status(404).json({ error: "Category not found" });
+      sendApiError(res, req, 404, ApiErrors.categoryNotFound);
       return;
     }
 
     res.json({ message: "Category deleted successfully" });
   } catch (error) {
     logger.error("Delete category error:", error);
-    res.status(500).json({ error: "Failed to delete category" });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteCategory);
   }
 }

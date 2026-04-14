@@ -6,6 +6,8 @@
 import { Request, Response } from 'express';
 import * as notificationService from '../services/notificationService';
 import { logger } from '../utils/logger';
+import { sendApiError } from '../utils/apiErrorResponse';
+import { ApiErrors } from '../i18n/apiErrors';
 
 /**
  * Get all notifications for the authenticated user
@@ -15,7 +17,7 @@ export async function getNotifications(req: Request, res: Response): Promise<voi
     const userId = req.user?.id;
     
     if (!userId) {
-      res.status(401).json({ error: 'Unauthorized' });
+      sendApiError(res, req, 401, ApiErrors.unauthorized);
       return;
     }
 
@@ -25,7 +27,7 @@ export async function getNotifications(req: Request, res: Response): Promise<voi
     res.json({ notifications });
   } catch (error) {
     logger.error('Get notifications error:', error);
-    res.status(500).json({ error: 'Failed to get notifications' });
+    sendApiError(res, req, 500, ApiErrors.failedGetNotifications);
   }
 }
 
@@ -37,7 +39,7 @@ export async function getUnreadCount(req: Request, res: Response): Promise<void>
     const userId = req.user?.id;
     
     if (!userId) {
-      res.status(401).json({ error: 'Unauthorized' });
+      sendApiError(res, req, 401, ApiErrors.unauthorized);
       return;
     }
 
@@ -46,7 +48,7 @@ export async function getUnreadCount(req: Request, res: Response): Promise<void>
     res.json({ count });
   } catch (error) {
     logger.error('Get unread count error:', error);
-    res.status(500).json({ error: 'Failed to get unread count' });
+    sendApiError(res, req, 500, ApiErrors.failedGetUnreadCount);
   }
 }
 
@@ -59,13 +61,13 @@ export async function markNotificationAsRead(req: Request, res: Response): Promi
     const { id } = req.params;
     
     if (!userId) {
-      res.status(401).json({ error: 'Unauthorized' });
+      sendApiError(res, req, 401, ApiErrors.unauthorized);
       return;
     }
 
     const notificationId = parseInt(id);
     if (isNaN(notificationId)) {
-      res.status(400).json({ error: 'Invalid notification ID' });
+      sendApiError(res, req, 400, ApiErrors.invalidNotificationId);
       return;
     }
 
@@ -74,11 +76,11 @@ export async function markNotificationAsRead(req: Request, res: Response): Promi
     if (success) {
       res.json({ message: 'Notification marked as read' });
     } else {
-      res.status(500).json({ error: 'Failed to mark notification as read' });
+      sendApiError(res, req, 500, ApiErrors.failedMarkNotificationRead);
     }
   } catch (error) {
     logger.error('Mark notification as read error:', error);
-    res.status(500).json({ error: 'Failed to mark notification as read' });
+    sendApiError(res, req, 500, ApiErrors.failedMarkNotificationRead);
   }
 }
 
@@ -90,7 +92,7 @@ export async function markAllAsRead(req: Request, res: Response): Promise<void> 
     const userId = req.user?.id;
     
     if (!userId) {
-      res.status(401).json({ error: 'Unauthorized' });
+      sendApiError(res, req, 401, ApiErrors.unauthorized);
       return;
     }
 
@@ -99,11 +101,11 @@ export async function markAllAsRead(req: Request, res: Response): Promise<void> 
     if (success) {
       res.json({ message: 'All notifications marked as read' });
     } else {
-      res.status(500).json({ error: 'Failed to mark all notifications as read' });
+      sendApiError(res, req, 500, ApiErrors.failedMarkAllNotificationsRead);
     }
   } catch (error) {
     logger.error('Mark all as read error:', error);
-    res.status(500).json({ error: 'Failed to mark all notifications as read' });
+    sendApiError(res, req, 500, ApiErrors.failedMarkAllNotificationsRead);
   }
 }
 
@@ -116,13 +118,13 @@ export async function deleteNotification(req: Request, res: Response): Promise<v
     const { id } = req.params;
     
     if (!userId) {
-      res.status(401).json({ error: 'Unauthorized' });
+      sendApiError(res, req, 401, ApiErrors.unauthorized);
       return;
     }
 
     const notificationId = parseInt(id);
     if (isNaN(notificationId)) {
-      res.status(400).json({ error: 'Invalid notification ID' });
+      sendApiError(res, req, 400, ApiErrors.invalidNotificationId);
       return;
     }
 
@@ -131,11 +133,11 @@ export async function deleteNotification(req: Request, res: Response): Promise<v
     if (success) {
       res.json({ message: 'Notification deleted' });
     } else {
-      res.status(500).json({ error: 'Failed to delete notification' });
+      sendApiError(res, req, 500, ApiErrors.failedDeleteNotification);
     }
   } catch (error) {
     logger.error('Delete notification error:', error);
-    res.status(500).json({ error: 'Failed to delete notification' });
+    sendApiError(res, req, 500, ApiErrors.failedDeleteNotification);
   }
 }
 
