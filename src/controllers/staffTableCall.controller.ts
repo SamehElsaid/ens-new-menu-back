@@ -83,6 +83,58 @@ export async function listStaffTableCallsHistory(
 }
 
 /**
+ * GET /api/staff-auth/table-calls/:id — single call (same fields as history rows)
+ */
+export async function getStaffTableCallById(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const staffId = req.user!.userId;
+    const menuId = await getMenuIdForStaff(staffId);
+    if (menuId === null) {
+      sendApiError(res, req, 403, ApiErrors.staffMenuNotFound);
+      return;
+    }
+
+    if (!(await menuOwnerHasProPlan(menuId))) {
+      sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+        code: "PRO_REQUIRED",
+      });
+      return;
+    }
+
+    const callId = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(callId) || callId <= 0) {
+      sendApiError(res, req, 400, ApiErrors.invalidCallId);
+      return;
+    }
+
+    const snap = await getStaffTableCallSnapshot(menuId, callId);
+    if (!snap) {
+      sendApiError(res, req, 404, ApiErrors.tableCallNotFound);
+      return;
+    }
+
+    const acknowledgedAt = snap.acknowledgedAt ?? null;
+    res.json({
+      id: snap.id,
+      menuId: snap.menuId,
+      tableNumber: snap.tableNumber,
+      requestedAt: snap.createdAt.toISOString(),
+      confirmedAt: acknowledgedAt ? acknowledgedAt.toISOString() : null,
+      customerName: snap.customerName,
+      items: snap.items,
+      orderTotal: snap.orderTotal,
+      status: snap.status,
+    });
+  } catch (error) {
+    logger.error("getStaffTableCallById error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedGetTableCall);
+  }
+}
+
+/**
  * GET /api/staff-auth/table-calls — pending calls for logged-in staff's menu
  */
 export async function listPendingStaffTableCalls(

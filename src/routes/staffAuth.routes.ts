@@ -41,6 +41,14 @@ router.get(
   staffTableCallController.listPendingStaffTableCalls,
 );
 
+// GET /api/staff-auth/table-calls/:id — single order (same shape as history item)
+router.get(
+  "/table-calls/:id",
+  requireStaff,
+  validate([param("id").isInt()]),
+  staffTableCallController.getStaffTableCallById,
+);
+
 // PATCH /api/staff-auth/table-calls/:id/status — body: { status: "confirmed" | "cancelled" }
 router.patch(
   "/table-calls/:id/status",

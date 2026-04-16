@@ -409,6 +409,8 @@ export type StaffTableCallRow = {
   /** Sum of line totals for this call. */
   orderTotal: number;
   status: StaffTableCallStatus;
+  /** Set when loaded from DB (e.g. snapshot) for confirmedAt mapping. */
+  acknowledgedAt?: Date | null;
 };
 
 export type StaffTableCallHistoryRow = StaffTableCallRow & {
@@ -632,6 +634,7 @@ export async function getStaffTableCallSnapshot(
       items,
       orderTotal: computeOrderTotalFromItems(items),
       status,
+      acknowledgedAt: row.acknowledgedAt ?? null,
     };
   } catch (error) {
     logger.error("getStaffTableCallSnapshot error:", error);
