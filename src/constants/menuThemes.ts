@@ -8,6 +8,7 @@ export const ALLOWED_MENU_THEMES = [
   "sky",
   "emerald",
   "noir",
+  "oceanic",
 ] as const;
 
 export type MenuThemeId = (typeof ALLOWED_MENU_THEMES)[number];
