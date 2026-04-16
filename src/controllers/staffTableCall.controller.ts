@@ -49,6 +49,8 @@ export async function listStaffTableCallsHistory(
         acknowledgedAt: c.acknowledgedAt
           ? c.acknowledgedAt.toISOString()
           : null,
+        customerName: c.customerName,
+        items: c.items,
       })),
     });
   } catch (error) {
@@ -88,6 +90,8 @@ export async function listPendingStaffTableCalls(
         menuId: c.menuId,
         tableNumber: c.tableNumber,
         at: c.createdAt.toISOString(),
+        customerName: c.customerName,
+        items: c.items,
       })),
     });
   } catch (error) {

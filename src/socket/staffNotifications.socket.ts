@@ -77,6 +77,8 @@ export function attachStaffNotificationsSocket(
             menuId: c.menuId,
             tableNumber: c.tableNumber,
             at: c.createdAt.toISOString(),
+            customerName: c.customerName,
+            items: c.items,
           })),
         });
       } catch (e) {
@@ -87,7 +89,15 @@ export function attachStaffNotificationsSocket(
 
     socket.on(
       "guest:call_staff",
-      async (payload: { menuId?: number; tableNumber?: string }, cb) => {
+      async (
+        payload: {
+          menuId?: number;
+          tableNumber?: string;
+          customerName?: string;
+          items?: unknown;
+        },
+        cb,
+      ) => {
         const reply = (data: Record<string, unknown>) => {
           try {
             cb?.(data);
@@ -99,7 +109,10 @@ export function attachStaffNotificationsSocket(
         try {
           const menuId = Number(payload?.menuId);
           const tableNumber = String(payload?.tableNumber ?? "").trim();
-          const result = await processGuestStaffCall(menuId, tableNumber);
+          const result = await processGuestStaffCall(menuId, tableNumber, {
+            customerName: payload?.customerName,
+            items: payload?.items,
+          });
 
           if (!result.ok) {
             reply({ ok: false, error: result.error });
@@ -111,6 +124,8 @@ export function attachStaffNotificationsSocket(
             menuId: result.menuId,
             tableNumber: result.tableNumber,
             at: result.createdAt.toISOString(),
+            customerName: result.customerName,
+            items: result.items,
           });
           reply({ ok: true });
         } catch (e) {

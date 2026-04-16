@@ -12,6 +12,7 @@ function statusForError(error: string): number {
       return 403;
     case "INVALID_PAYLOAD":
     case "INVALID_TABLE":
+    case "INVALID_ORDER_ITEMS":
       return 400;
     default:
       return 500;
@@ -20,7 +21,15 @@ function statusForError(error: string): number {
 
 /**
  * POST /api/public/staff-call
- * Body: { menuId: number, tableNumber: string }
+ * Body: {
+ *   menuId: number,
+ *   tableNumber: string,
+ *   customerName?: string,
+ *   items?: Array<
+ *     | { menuItemId: number; price: number; quantity: number; name?: string; notes?: string }
+ *     | { name: string; quantity?: number; price?: number; notes?: string }
+ *   >
+ * }
  */
 export async function postGuestStaffCall(
   req: Request,
@@ -30,7 +39,10 @@ export async function postGuestStaffCall(
     const menuId = Number(req.body?.menuId);
     const tableNumber = String(req.body?.tableNumber ?? "").trim();
 
-    const result = await processGuestStaffCall(menuId, tableNumber);
+    const result = await processGuestStaffCall(menuId, tableNumber, {
+      customerName: req.body?.customerName,
+      items: req.body?.items,
+    });
 
     if (!result.ok) {
       const status = statusForError(result.error);
@@ -54,6 +66,8 @@ export async function postGuestStaffCall(
       menuId: result.menuId,
       tableNumber: result.tableNumber,
       at: result.createdAt.toISOString(),
+      customerName: result.customerName,
+      items: result.items,
     });
 
     res.json({
@@ -62,6 +76,8 @@ export async function postGuestStaffCall(
       menuId: result.menuId,
       tableNumber: result.tableNumber,
       at: result.createdAt.toISOString(),
+      customerName: result.customerName,
+      items: result.items,
     });
   } catch (error) {
     logger.error("postGuestStaffCall error:", error);
