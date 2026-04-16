@@ -79,6 +79,8 @@ export function attachStaffNotificationsSocket(
             at: c.createdAt.toISOString(),
             customerName: c.customerName,
             items: c.items,
+            orderTotal: c.orderTotal,
+            status: c.status,
           })),
         });
       } catch (e) {
@@ -126,6 +128,8 @@ export function attachStaffNotificationsSocket(
             at: result.createdAt.toISOString(),
             customerName: result.customerName,
             items: result.items,
+            orderTotal: result.orderTotal,
+            status: result.status,
           });
           reply({ ok: true });
         } catch (e) {

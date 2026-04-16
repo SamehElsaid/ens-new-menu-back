@@ -23,7 +23,7 @@ router.post(
 // GET /api/staff-auth/me
 router.get("/me", requireAuth, staffAuthController.getStaffMe);
 
-// GET /api/staff-auth/table-calls/history — all calls (table + requestedAt + acknowledgedAt)
+// GET /api/staff-auth/table-calls/history — all calls (requestedAt, confirmedAt, status)
 router.get(
   "/table-calls/history",
   requireStaff,
@@ -41,12 +41,23 @@ router.get(
   staffTableCallController.listPendingStaffTableCalls,
 );
 
-// PATCH /api/staff-auth/table-calls/:id/acknowledge
+// PATCH /api/staff-auth/table-calls/:id/status — body: { status: "confirmed" | "cancelled" }
 router.patch(
-  "/table-calls/:id/acknowledge",
+  "/table-calls/:id/status",
+  requireStaff,
+  validate([
+    param("id").isInt(),
+    body("status").isIn(["confirmed", "cancelled"]),
+  ]),
+  staffTableCallController.patchTableCallStatus,
+);
+
+// PATCH /api/staff-auth/table-calls/:id/items — edit cart lines while pending
+router.patch(
+  "/table-calls/:id/items",
   requireStaff,
   validate([param("id").isInt()]),
-  staffTableCallController.acknowledgeTableCall,
+  staffTableCallController.patchTableCallItems,
 );
 
 // POST /api/staff-auth/logout

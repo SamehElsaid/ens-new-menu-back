@@ -138,13 +138,17 @@ export const ApiErrors = {
     en: 'Invalid call id',
     ar: 'معرّف النداء غير صالح',
   },
-  callNotFoundOrAcknowledged: {
-    en: 'Call not found, wrong menu, or already acknowledged',
-    ar: 'النداء غير موجود أو لمنيو مختلف أو تمت معالجته مسبقًا',
+  callNotFoundOrNotPending: {
+    en: 'Order not found, wrong menu, or not in pending status',
+    ar: 'الطلب غير موجود أو لمنيو مختلف أو ليس بحالة انتظار',
   },
-  failedAcknowledgeCall: {
-    en: 'Failed to acknowledge call',
-    ar: 'فشل تأكيد استلام النداء',
+  failedCallStatusUpdate: {
+    en: 'Failed to update order status',
+    ar: 'فشل تحديث حالة الطلب',
+  },
+  failedUpdateCallItems: {
+    en: 'Failed to update order items',
+    ar: 'فشل تحديث عناصر الطلب',
   },
   tableNotFound: {
     en: 'Table not found',

@@ -1,5 +1,8 @@
 import type { Server as SocketIOServer } from "socket.io";
-import type { StaffOrderItem } from "../services/staffTableCall.service";
+import type {
+  StaffOrderItem,
+  StaffTableCallStatus,
+} from "../services/staffTableCall.service";
 
 let ioInstance: SocketIOServer | null = null;
 
@@ -15,13 +18,27 @@ export type StaffTableCallBroadcastPayload = {
   at: string;
   /** Name entered by the guest (who is ordering). */
   customerName: string | null;
-  /** Line items (product names and optional menuItemId / qty). */
+  /** Line items (resolved unit price, line total per row). */
   items: StaffOrderItem[];
+  /** Sum of line totals. */
+  orderTotal: number;
+  /** New orders from the view start as `pending`. */
+  status: StaffTableCallStatus;
 };
+
+/** After confirm / cancel / staff edits while pending. */
+export type StaffTableCallChangedPayload = StaffTableCallBroadcastPayload;
 
 export function broadcastStaffTableCall(
   menuId: number,
   payload: StaffTableCallBroadcastPayload,
 ): void {
   ioInstance?.to(`menu:${menuId}`).emit("staff:table_call", payload);
+}
+
+export function broadcastStaffTableCallChanged(
+  menuId: number,
+  payload: StaffTableCallChangedPayload,
+): void {
+  ioInstance?.to(`menu:${menuId}`).emit("staff:table_call_changed", payload);
 }

@@ -1,14 +1,35 @@
 import { Request, Response } from "express";
 import {
-  acknowledgeStaffTableCall,
   getMenuIdForStaff,
   getPendingStaffTableCalls,
+  getStaffTableCallSnapshot,
   getStaffTableCallsHistory,
+  setStaffTableCallStatus,
+  updateStaffTableCallItems,
 } from "../services/staffTableCall.service";
 import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
 import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { broadcastStaffTableCallChanged } from "../socket/staffIoBroadcast";
+
+async function emitCallChanged(
+  menuId: number,
+  callId: number,
+): Promise<void> {
+  const snap = await getStaffTableCallSnapshot(menuId, callId);
+  if (!snap) return;
+  broadcastStaffTableCallChanged(menuId, {
+    id: snap.id,
+    menuId: snap.menuId,
+    tableNumber: snap.tableNumber,
+    at: snap.createdAt.toISOString(),
+    customerName: snap.customerName,
+    items: snap.items,
+    orderTotal: snap.orderTotal,
+    status: snap.status,
+  });
+}
 
 /**
  * GET /api/staff-auth/table-calls/history — all calls for menu (table + times), newest first
@@ -46,11 +67,13 @@ export async function listStaffTableCallsHistory(
         menuId: c.menuId,
         tableNumber: c.tableNumber,
         requestedAt: c.createdAt.toISOString(),
-        acknowledgedAt: c.acknowledgedAt
+        confirmedAt: c.acknowledgedAt
           ? c.acknowledgedAt.toISOString()
           : null,
         customerName: c.customerName,
         items: c.items,
+        orderTotal: c.orderTotal,
+        status: c.status,
       })),
     });
   } catch (error) {
@@ -64,7 +87,7 @@ export async function listStaffTableCallsHistory(
  */
 export async function listPendingStaffTableCalls(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const staffId = req.user!.userId;
@@ -92,6 +115,8 @@ export async function listPendingStaffTableCalls(
         at: c.createdAt.toISOString(),
         customerName: c.customerName,
         items: c.items,
+        orderTotal: c.orderTotal,
+        status: c.status,
       })),
     });
   } catch (error) {
@@ -101,11 +126,12 @@ export async function listPendingStaffTableCalls(
 }
 
 /**
- * PATCH /api/staff-auth/table-calls/:id/acknowledge
+ * PATCH /api/staff-auth/table-calls/:id/status
+ * Body: { "status": "confirmed" | "cancelled" } — only from `pending`.
  */
-export async function acknowledgeTableCall(
+export async function patchTableCallStatus(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const staffId = req.user!.userId;
@@ -128,15 +154,95 @@ export async function acknowledgeTableCall(
       return;
     }
 
-    const ok = await acknowledgeStaffTableCall(callId, menuId);
-    if (!ok) {
-      sendApiError(res, req, 404, ApiErrors.callNotFoundOrAcknowledged);
+    const raw = String(req.body?.status ?? "")
+      .trim()
+      .toLowerCase();
+    if (raw !== "confirmed" && raw !== "cancelled") {
+      sendApiError(res, req, 400, ApiErrors.validationFailed);
       return;
     }
 
-    res.json({ message: "Acknowledged" });
+    const ok = await setStaffTableCallStatus(
+      callId,
+      menuId,
+      raw as "confirmed" | "cancelled",
+    );
+    if (!ok) {
+      sendApiError(res, req, 404, ApiErrors.callNotFoundOrNotPending);
+      return;
+    }
+
+    await emitCallChanged(menuId, callId);
+    res.json({ status: raw });
   } catch (error) {
-    logger.error("acknowledgeTableCall error:", error);
-    sendApiError(res, req, 500, ApiErrors.failedAcknowledgeCall);
+    logger.error("patchTableCallStatus error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedCallStatusUpdate);
+  }
+}
+
+/**
+ * PATCH /api/staff-auth/table-calls/:id/items — edit quantities / lines while pending
+ * Body: { items: same shape as guest staff-call }
+ */
+export async function patchTableCallItems(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const staffId = req.user!.userId;
+    const menuId = await getMenuIdForStaff(staffId);
+    if (menuId === null) {
+      sendApiError(res, req, 403, ApiErrors.staffMenuNotFound);
+      return;
+    }
+
+    if (!(await menuOwnerHasProPlan(menuId))) {
+      sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+        code: "PRO_REQUIRED",
+      });
+      return;
+    }
+
+    const callId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(callId) || callId <= 0) {
+      sendApiError(res, req, 400, ApiErrors.invalidCallId);
+      return;
+    }
+
+    const result = await updateStaffTableCallItems(
+      callId,
+      menuId,
+      req.body?.items,
+    );
+
+    if (!result.ok) {
+      if (result.error === "NOT_FOUND") {
+        sendApiError(res, req, 404, ApiErrors.callNotFoundOrNotPending);
+        return;
+      }
+      if (result.error === "NOT_PENDING") {
+        sendApiError(res, req, 409, ApiErrors.callNotFoundOrNotPending);
+        return;
+      }
+      if (
+        result.error === "INVALID_PAYLOAD" ||
+        result.error === "INVALID_ORDER_ITEMS"
+      ) {
+        sendApiError(res, req, 400, ApiErrors.validationFailed);
+        return;
+      }
+      sendApiError(res, req, 500, ApiErrors.failedUpdateCallItems);
+      return;
+    }
+
+    await emitCallChanged(menuId, callId);
+    res.json({
+      items: result.items,
+      orderTotal: result.orderTotal,
+      status: "pending" as const,
+    });
+  } catch (error) {
+    logger.error("patchTableCallItems error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedUpdateCallItems);
   }
 }

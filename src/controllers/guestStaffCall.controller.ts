@@ -26,9 +26,10 @@ function statusForError(error: string): number {
  *   tableNumber: string,
  *   customerName?: string,
  *   items?: Array<
- *     | { menuItemId: number; price: number; quantity: number; name?: string; notes?: string }
+ *     | { menuItemId: number; quantity: number; price?: number; name?: string; notes?: string }
  *     | { name: string; quantity?: number; price?: number; notes?: string }
  *   >
+ *   (price optional — filled from MenuItems; response includes line totals + orderTotal)
  * }
  */
 export async function postGuestStaffCall(
@@ -68,6 +69,8 @@ export async function postGuestStaffCall(
       at: result.createdAt.toISOString(),
       customerName: result.customerName,
       items: result.items,
+      orderTotal: result.orderTotal,
+      status: result.status,
     });
 
     res.json({
@@ -78,6 +81,8 @@ export async function postGuestStaffCall(
       at: result.createdAt.toISOString(),
       customerName: result.customerName,
       items: result.items,
+      orderTotal: result.orderTotal,
+      status: result.status,
     });
   } catch (error) {
     logger.error("postGuestStaffCall error:", error);

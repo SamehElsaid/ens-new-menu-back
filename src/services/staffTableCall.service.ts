@@ -11,6 +11,25 @@ import {
 import { logger } from "../utils/logger";
 import { isUserOnFreePlan } from "./subscriptionPlan.service";
 
+/** Persisted on StaffTableCalls.status (after migration). */
+export type StaffTableCallStatus = "pending" | "confirmed" | "cancelled";
+
+export function normalizeStaffTableCallStatus(
+  statusRaw: unknown,
+  acknowledgedAt: Date | null | undefined,
+): StaffTableCallStatus {
+  const s = String(statusRaw ?? "")
+    .trim()
+    .toLowerCase();
+  if (s === "confirmed" || s === "cancelled" || s === "pending") {
+    return s;
+  }
+  if (acknowledgedAt) {
+    return "confirmed";
+  }
+  return "pending";
+}
+
 export type GuestStaffCallError =
   | "INVALID_PAYLOAD"
   | "INVALID_ORDER_ITEMS"
@@ -19,13 +38,15 @@ export type GuestStaffCallError =
   | "FEATURE_REQUIRES_PRO"
   | "SERVER_ERROR";
 
-/** One line in a guest-submitted order (id + unit price + qty from client, or legacy name-only). */
+/** One line in a guest-submitted order (id + qty; price from DB or optional client override). */
 export type StaffOrderItem = {
   name: string;
   menuItemId?: number;
-  /** Unit price at order time (required with `menuItemId` on create). */
+  /** Unit price (from client override, or resolved from MenuItems when omitted). */
   price?: number;
   quantity: number;
+  /** Line total (price × quantity), set by server after resolve. */
+  total?: number;
   notes?: string;
 };
 
@@ -51,6 +72,24 @@ function parsePriceField(
     return { ok: false };
   }
   return { ok: true, value: Math.round(n * 100) / 100 };
+}
+
+function lineTotal(unit: number, quantity: number): number {
+  return Math.round(unit * quantity * 100) / 100;
+}
+
+export function computeOrderTotalFromItems(items: StaffOrderItem[]): number {
+  return (
+    Math.round(
+      items.reduce((s, i) => {
+        const line =
+          i.total !== undefined
+            ? i.total
+            : lineTotal(i.price ?? 0, i.quantity);
+        return s + line;
+      }, 0) * 100,
+    ) / 100
+  );
 }
 
 function parseOrderItemsInput(raw: unknown):
@@ -83,10 +122,6 @@ function parseOrderItemsInput(raw: unknown):
     }
 
     if (menuItemId !== undefined) {
-      const priceParsed = parsePriceField(o.price);
-      if (!priceParsed.ok) {
-        return { ok: false };
-      }
       if (o.quantity == null || o.quantity === "") {
         return { ok: false };
       }
@@ -99,11 +134,13 @@ function parseOrderItemsInput(raw: unknown):
       if (o.notes != null && o.notes !== "") {
         notes = String(o.notes).trim().slice(0, 500);
       }
+      const priceParsed = parsePriceField(o.price);
+      const fromClient = priceParsed.ok ? priceParsed.value : undefined;
       out.push({
         name: nameRaw,
         menuItemId,
-        price: priceParsed.value,
         quantity,
+        ...(fromClient !== undefined ? { price: fromClient } : {}),
         ...(notes ? { notes } : {}),
       });
       continue;
@@ -135,53 +172,86 @@ function parseOrderItemsInput(raw: unknown):
   return { ok: true, items: out };
 }
 
-async function enrichMenuItemNames(
+/**
+ * Resolve display name + unit price from DB when missing; set line `total`.
+ * If client sent `price`, it overrides DB unit price.
+ */
+export async function enrichMenuItemsFromDb(
   menuId: number,
   items: StaffOrderItem[],
 ): Promise<StaffOrderItem[]> {
-  const needIds = [
+  const ids = [
     ...new Set(
       items
-        .filter((i) => i.menuItemId != null && !String(i.name ?? "").trim())
-        .map((i) => i.menuItemId as number),
+        .map((i) => i.menuItemId)
+        .filter((id): id is number => typeof id === "number"),
     ),
   ];
-  if (needIds.length === 0) {
-    return items;
-  }
+  const byId = new Map<
+    number,
+    { unitPrice: number; displayName: string }
+  >();
 
-  const pool = await getPool();
-  const req = pool.request().input("menuId", sql.Int, menuId);
-  const parts: string[] = [];
-  needIds.forEach((id, i) => {
-    const p = `mid${i}`;
-    parts.push(`@${p}`);
-    req.input(p, sql.Int, id);
-  });
-  const r = await req.query(
-    `SELECT mi.id,
-      COALESCE(mitar.name, miten.name, N'#' + CAST(mi.id AS NVARCHAR(20))) AS displayName
-     FROM MenuItems mi
-     LEFT JOIN MenuItemTranslations mitar ON mitar.menuItemId = mi.id AND mitar.locale = N'ar'
-     LEFT JOIN MenuItemTranslations miten ON miten.menuItemId = mi.id AND miten.locale = N'en'
-     WHERE mi.menuId = @menuId AND mi.id IN (${parts.join(", ")})`,
-  );
-  const map = new Map<number, string>();
-  for (const row of r.recordset as { id: number; displayName: string }[]) {
-    const label = String(row.displayName ?? "").trim() || `Item ${row.id}`;
-    map.set(row.id, label);
+  if (ids.length > 0) {
+    const pool = await getPool();
+    const req = pool.request().input("menuId", sql.Int, menuId);
+    const parts: string[] = [];
+    ids.forEach((id, i) => {
+      const p = `mid${i}`;
+      parts.push(`@${p}`);
+      req.input(p, sql.Int, id);
+    });
+    const r = await req.query(
+      `SELECT mi.id,
+        mi.price,
+        COALESCE(mitar.name, miten.name, N'#' + CAST(mi.id AS NVARCHAR(20))) AS displayName
+       FROM MenuItems mi
+       LEFT JOIN MenuItemTranslations mitar ON mitar.menuItemId = mi.id AND mitar.locale = N'ar'
+       LEFT JOIN MenuItemTranslations miten ON miten.menuItemId = mi.id AND miten.locale = N'en'
+       WHERE mi.menuId = @menuId AND mi.id IN (${parts.join(", ")})`,
+    );
+    for (const row of r.recordset as {
+      id: number;
+      price: unknown;
+      displayName: string;
+    }[]) {
+      const p = Number(row.price);
+      const unitPrice = Number.isFinite(p) ? Math.round(p * 100) / 100 : 0;
+      const displayName =
+        String(row.displayName ?? "").trim() || `Item ${row.id}`;
+      byId.set(row.id, { unitPrice, displayName });
+    }
   }
 
   return items.map((it) => {
-    const nm = String(it.name ?? "").trim();
-    if (nm) {
-      return it;
+    if (it.menuItemId == null) {
+      const unit = it.price ?? 0;
+      const total = lineTotal(unit, it.quantity);
+      return {
+        ...it,
+        name: String(it.name ?? "").trim() || "—",
+        ...(it.price !== undefined ? { price: unit } : {}),
+        total,
+      };
     }
-    if (it.menuItemId != null) {
-      const resolved = map.get(it.menuItemId) ?? `Item ${it.menuItemId}`;
-      return { ...it, name: resolved };
-    }
-    return { ...it, name: "—" };
+
+    const db = byId.get(it.menuItemId);
+    const nameFromClient = String(it.name ?? "").trim();
+    const name =
+      nameFromClient || (db?.displayName ?? `Item ${it.menuItemId}`);
+
+    const unit =
+      it.price !== undefined ? it.price : (db?.unitPrice ?? 0);
+    const total = lineTotal(unit, it.quantity);
+
+    return {
+      ...it,
+      name,
+      price: unit,
+      quantity: it.quantity,
+      total,
+      ...(it.notes ? { notes: it.notes } : {}),
+    };
   });
 }
 
@@ -221,6 +291,8 @@ export async function processGuestStaffCall(
       createdAt: Date;
       customerName: string | null;
       items: StaffOrderItem[];
+      orderTotal: number;
+      status: "pending";
     }
   | { ok: false; error: GuestStaffCallError }
 > {
@@ -292,11 +364,13 @@ export async function processGuestStaffCall(
 
     let itemsResolved: StaffOrderItem[];
     try {
-      itemsResolved = await enrichMenuItemNames(menuId, items);
+      itemsResolved = await enrichMenuItemsFromDb(menuId, items);
     } catch (e) {
-      logger.error("enrichMenuItemNames error:", e);
+      logger.error("enrichMenuItemsFromDb error:", e);
       return { ok: false, error: "SERVER_ERROR" };
     }
+
+    const orderTotal = computeOrderTotalFromItems(itemsResolved);
 
     const persisted = await createStaffTableCall(
       menuId,
@@ -316,6 +390,8 @@ export async function processGuestStaffCall(
       createdAt: persisted.createdAt,
       customerName,
       items: itemsResolved,
+      orderTotal,
+      status: "pending" as const,
     };
   } catch (error) {
     logger.error("processGuestStaffCall error:", error);
@@ -330,6 +406,9 @@ export type StaffTableCallRow = {
   createdAt: Date;
   customerName: string | null;
   items: StaffOrderItem[];
+  /** Sum of line totals for this call. */
+  orderTotal: number;
+  status: StaffTableCallStatus;
 };
 
 export type StaffTableCallHistoryRow = StaffTableCallRow & {
@@ -412,24 +491,42 @@ function parseOrderItemsFromStored(raw: unknown): StaffOrderItem[] {
       notes = String(o.notes).trim().slice(0, 500);
     }
 
+    let total: number | undefined;
+    if (o.total != null && o.total !== "") {
+      const t = Number(o.total);
+      if (Number.isFinite(t) && t >= 0 && t <= 999_999_999.99) {
+        total = Math.round(t * 100) / 100;
+      }
+    }
+
     if (menuItemId !== undefined) {
-      out.push({
+      const row: StaffOrderItem = {
         name: nameRaw || `Item ${menuItemId}`,
         menuItemId,
         quantity,
         ...(price !== undefined ? { price } : {}),
+        ...(total !== undefined ? { total } : {}),
         ...(notes ? { notes } : {}),
-      });
+      };
+      if (row.total === undefined && row.price !== undefined) {
+        row.total = lineTotal(row.price, row.quantity);
+      }
+      out.push(row);
       continue;
     }
 
     if (!nameRaw) continue;
-    out.push({
+    const row: StaffOrderItem = {
       name: nameRaw,
       quantity,
       ...(price !== undefined ? { price } : {}),
+      ...(total !== undefined ? { total } : {}),
       ...(notes ? { notes } : {}),
-    });
+    };
+    if (row.total === undefined && row.price !== undefined) {
+      row.total = lineTotal(row.price, row.quantity);
+    }
+    out.push(row);
   }
   return out;
 }
@@ -462,9 +559,9 @@ export async function createStaffTableCall(
       .input("tableNumber", sql.NVarChar, tableNumber)
       .input("customerName", sql.NVarChar, customerName)
       .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson).query(`
-        INSERT INTO StaffTableCalls (menuId, tableNumber, customerName, orderItemsJson)
+        INSERT INTO StaffTableCalls (menuId, tableNumber, customerName, orderItemsJson, status)
         OUTPUT INSERTED.id, INSERTED.createdAt
-        VALUES (@menuId, @tableNumber, @customerName, @orderItemsJson)
+        VALUES (@menuId, @tableNumber, @customerName, @orderItemsJson, N'pending')
       `);
     const row = result.recordset[0];
     if (!row?.id) {
@@ -480,6 +577,68 @@ export async function createStaffTableCall(
   }
 }
 
+export async function getStaffTableCallSnapshot(
+  menuId: number,
+  callId: number,
+): Promise<StaffTableCallRow | null> {
+  try {
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("id", sql.Int, callId)
+      .query(`
+        SELECT
+          id,
+          menuId,
+          tableNumber,
+          createdAt,
+          customerName,
+          orderItemsJson,
+          status,
+          acknowledgedAt
+        FROM StaffTableCalls
+        WHERE id = @id AND menuId = @menuId
+      `);
+    const row = result.recordset[0] as
+      | {
+          id: number;
+          menuId: number;
+          tableNumber: string;
+          createdAt: Date;
+          customerName: string | null;
+          orderItemsJson?: string;
+          status?: string | null;
+          acknowledgedAt?: Date | null;
+        }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+    const items = parseOrderItemsJson(row.orderItemsJson);
+    const status = normalizeStaffTableCallStatus(
+      row.status,
+      row.acknowledgedAt ?? null,
+    );
+    return {
+      id: row.id,
+      menuId: row.menuId,
+      tableNumber: String(row.tableNumber),
+      createdAt: row.createdAt,
+      customerName:
+        row.customerName != null && String(row.customerName).trim() !== ""
+          ? String(row.customerName).trim()
+          : null,
+      items,
+      orderTotal: computeOrderTotalFromItems(items),
+      status,
+    };
+  } catch (error) {
+    logger.error("getStaffTableCallSnapshot error:", error);
+    return null;
+  }
+}
+
 export async function getPendingStaffTableCalls(
   menuId: number,
   limit = 100,
@@ -489,31 +648,51 @@ export async function getPendingStaffTableCalls(
     const result = await pool
       .request()
       .input("menuId", sql.Int, menuId)
-      .input("limit", sql.Int, Math.min(Math.max(limit, 1), 500))      .query(`
+      .input("limit", sql.Int, Math.min(Math.max(limit, 1), 500))
+      .query(`
         SELECT TOP (@limit)
           id,
           menuId,
           tableNumber,
           createdAt,
           customerName,
-          orderItemsJson
+          orderItemsJson,
+          status,
+          acknowledgedAt
         FROM StaffTableCalls
-        WHERE menuId = @menuId AND acknowledgedAt IS NULL
+        WHERE menuId = @menuId
+          AND (
+            status = N'pending'
+            OR (status IS NULL AND acknowledgedAt IS NULL)
+          )
         ORDER BY createdAt ASC
       `);
-    return (result.recordset as StaffTableCallRow[]).map((row) => ({
-      id: row.id,
-      menuId: row.menuId,
-      tableNumber: String(row.tableNumber),
-      createdAt: row.createdAt,
-      customerName:
-        row.customerName != null && String(row.customerName).trim() !== ""
-          ? String(row.customerName).trim()
-          : null,
-      items: parseOrderItemsJson(
+    return (result.recordset as StaffTableCallRow[]).map((row) => {
+      const items = parseOrderItemsJson(
         (row as { orderItemsJson?: string }).orderItemsJson,
-      ),
-    }));
+      );
+      const r = row as {
+        status?: string | null;
+        acknowledgedAt?: Date | null;
+      };
+      const status = normalizeStaffTableCallStatus(
+        r.status,
+        r.acknowledgedAt ?? null,
+      );
+      return {
+        id: row.id,
+        menuId: row.menuId,
+        tableNumber: String(row.tableNumber),
+        createdAt: row.createdAt,
+        customerName:
+          row.customerName != null && String(row.customerName).trim() !== ""
+            ? String(row.customerName).trim()
+            : null,
+        items,
+        orderTotal: computeOrderTotalFromItems(items),
+        status,
+      };
+    });
   } catch (error) {
     logger.error("getPendingStaffTableCalls error:", error);
     return [];
@@ -521,7 +700,7 @@ export async function getPendingStaffTableCalls(
 }
 
 /**
- * All table-call rows for a menu (newest first), pending and acknowledged.
+ * All table-call rows for a menu (newest first).
  */
 export async function getStaffTableCallsHistory(
   menuId: number,
@@ -557,7 +736,8 @@ export async function getStaffTableCallsHistory(
           createdAt,
           acknowledgedAt,
           customerName,
-          orderItemsJson
+          orderItemsJson,
+          status
         FROM StaffTableCalls
         WHERE menuId = @menuId
         ORDER BY createdAt DESC
@@ -565,20 +745,33 @@ export async function getStaffTableCallsHistory(
       `);
 
     const rows = (rowsResult.recordset as StaffTableCallHistoryRow[]).map(
-      (row) => ({
-        id: row.id,
-        menuId: row.menuId,
-        tableNumber: String(row.tableNumber),
-        createdAt: row.createdAt,
-        acknowledgedAt: row.acknowledgedAt ?? null,
-        customerName:
-          row.customerName != null && String(row.customerName).trim() !== ""
-            ? String(row.customerName).trim()
-            : null,
-        items: parseOrderItemsJson(
+      (row) => {
+        const items = parseOrderItemsJson(
           (row as { orderItemsJson?: string }).orderItemsJson,
-        ),
-      }),
+        );
+        const r = row as {
+          status?: string | null;
+          acknowledgedAt?: Date | null;
+        };
+        const status = normalizeStaffTableCallStatus(
+          r.status,
+          r.acknowledgedAt ?? null,
+        );
+        return {
+          id: row.id,
+          menuId: row.menuId,
+          tableNumber: String(row.tableNumber),
+          createdAt: row.createdAt,
+          acknowledgedAt: row.acknowledgedAt ?? null,
+          customerName:
+            row.customerName != null && String(row.customerName).trim() !== ""
+              ? String(row.customerName).trim()
+              : null,
+          items,
+          orderTotal: computeOrderTotalFromItems(items),
+          status,
+        };
+      },
     );
 
     return {
@@ -598,23 +791,168 @@ export async function getStaffTableCallsHistory(
   }
 }
 
-export async function acknowledgeStaffTableCall(
+const pendingWhereSql = `
+  (
+    status = N'pending'
+    OR (status IS NULL AND acknowledgedAt IS NULL)
+  )
+`;
+
+/**
+ * Staff sets order lifecycle: `confirmed` (sets `acknowledgedAt`) or `cancelled`.
+ * Only from `pending`.
+ */
+export async function setStaffTableCallStatus(
   callId: number,
   menuId: number,
+  nextStatus: "confirmed" | "cancelled",
 ): Promise<boolean> {
   try {
     const pool = await getPool();
+    if (nextStatus === "confirmed") {
+      const result = await pool
+        .request()
+        .input("id", sql.Int, callId)
+        .input("menuId", sql.Int, menuId).query(`
+          UPDATE StaffTableCalls
+          SET acknowledgedAt = SYSUTCDATETIME(),
+              status = N'confirmed'
+          WHERE id = @id AND menuId = @menuId
+            AND ${pendingWhereSql}
+        `);
+      return (result.rowsAffected?.[0] ?? 0) > 0;
+    }
     const result = await pool
       .request()
       .input("id", sql.Int, callId)
       .input("menuId", sql.Int, menuId).query(`
         UPDATE StaffTableCalls
-        SET acknowledgedAt = SYSUTCDATETIME()
-        WHERE id = @id AND menuId = @menuId AND acknowledgedAt IS NULL
+        SET status = N'cancelled'
+        WHERE id = @id AND menuId = @menuId
+          AND ${pendingWhereSql}
       `);
     return (result.rowsAffected?.[0] ?? 0) > 0;
   } catch (error) {
-    logger.error("acknowledgeStaffTableCall error:", error);
+    logger.error("setStaffTableCallStatus error:", error);
     return false;
+  }
+}
+
+export type UpdateStaffCallItemsError =
+  | "NOT_FOUND"
+  | "NOT_PENDING"
+  | "INVALID_PAYLOAD"
+  | "INVALID_ORDER_ITEMS"
+  | "SERVER_ERROR";
+
+/**
+ * Staff edits line quantities / removes lines while order is still pending.
+ * Replaces `orderItemsJson` with enriched items and recomputed line totals.
+ */
+export async function updateStaffTableCallItems(
+  callId: number,
+  menuId: number,
+  itemsRaw: unknown,
+): Promise<
+  | {
+      ok: true;
+      items: StaffOrderItem[];
+      orderTotal: number;
+      tableNumber: string;
+      customerName: string | null;
+      createdAt: Date;
+    }
+  | { ok: false; error: UpdateStaffCallItemsError }
+> {
+  const parsed = parseOrderItemsInput(itemsRaw);
+  if (!parsed.ok) {
+    return { ok: false, error: "INVALID_PAYLOAD" };
+  }
+  const itemsIn = parsed.items;
+
+  try {
+    const pool = await getPool();
+    const rowResult = await pool
+      .request()
+      .input("id", sql.Int, callId)
+      .input("menuId", sql.Int, menuId)
+      .query(`
+        SELECT id, tableNumber, customerName, orderItemsJson, status, acknowledgedAt, createdAt
+        FROM StaffTableCalls
+        WHERE id = @id AND menuId = @menuId
+      `);
+    const row = rowResult.recordset[0] as
+      | {
+          tableNumber: string;
+          customerName: string | null;
+          status?: string | null;
+          acknowledgedAt?: Date | null;
+          createdAt: Date;
+        }
+      | undefined;
+    if (!row) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+    const st = normalizeStaffTableCallStatus(
+      row.status,
+      row.acknowledgedAt ?? null,
+    );
+    if (st !== "pending") {
+      return { ok: false, error: "NOT_PENDING" };
+    }
+
+    const idsForCheck = itemsIn
+      .map((i) => i.menuItemId)
+      .filter((id): id is number => typeof id === "number");
+    if (idsForCheck.length > 0) {
+      const okIds = await menuItemsExistForMenu(menuId, idsForCheck);
+      if (!okIds) {
+        return { ok: false, error: "INVALID_ORDER_ITEMS" };
+      }
+    }
+
+    let itemsResolved: StaffOrderItem[];
+    try {
+      itemsResolved = await enrichMenuItemsFromDb(menuId, itemsIn);
+    } catch (e) {
+      logger.error("updateStaffTableCallItems enrich error:", e);
+      return { ok: false, error: "SERVER_ERROR" };
+    }
+
+    const orderTotal = computeOrderTotalFromItems(itemsResolved);
+    const orderJson =
+      itemsResolved.length > 0 ? JSON.stringify(itemsResolved) : null;
+
+    const upd = await pool
+      .request()
+      .input("id", sql.Int, callId)
+      .input("menuId", sql.Int, menuId)
+      .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson).query(`
+        UPDATE StaffTableCalls
+        SET orderItemsJson = @orderItemsJson
+        WHERE id = @id AND menuId = @menuId
+          AND (
+            status = N'pending'
+            OR (status IS NULL AND acknowledgedAt IS NULL)
+          )
+      `);
+    if ((upd.rowsAffected?.[0] ?? 0) === 0) {
+      return { ok: false, error: "NOT_PENDING" };
+    }
+
+    return {
+      ok: true,
+      items: itemsResolved,
+      orderTotal,
+      tableNumber: String(row.tableNumber),
+      customerName:
+        row.customerName != null && String(row.customerName).trim() !== ""
+          ? String(row.customerName).trim()
+          : null,
+      createdAt: row.createdAt,
+    };
+  } catch (error) {
+    logger.error("updateStaffTableCallItems error:", error);
+    return { ok: false, error: "SERVER_ERROR" };
   }
 }
