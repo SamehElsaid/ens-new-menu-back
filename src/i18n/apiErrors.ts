@@ -134,6 +134,14 @@ export const ApiErrors = {
     en: 'Failed to list table calls',
     ar: 'فشل جلب نداءات الطاولات',
   },
+  failedGetTableCall: {
+    en: 'Failed to get table order',
+    ar: 'فشل جلب الطلب',
+  },
+  tableCallNotFound: {
+    en: 'Order not found or does not belong to this menu',
+    ar: 'الطلب غير موجود أو لا يتبع هذا المنيو',
+  },
   invalidCallId: {
     en: 'Invalid call id',
     ar: 'معرّف النداء غير صالح',

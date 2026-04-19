@@ -6,6 +6,7 @@ import {
   getStaffTableCallsHistory,
   setStaffTableCallStatus,
   updateStaffTableCallItems,
+  updateStaffTableCallItemsAndStatus,
 } from "../services/staffTableCall.service";
 import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
 import { logger } from "../utils/logger";
@@ -82,6 +83,58 @@ export async function listStaffTableCallsHistory(
 }
 
 /**
+ * GET /api/staff-auth/table-calls/:id — single call (same fields as history rows)
+ */
+export async function getStaffTableCallById(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const staffId = req.user!.userId;
+    const menuId = await getMenuIdForStaff(staffId);
+    if (menuId === null) {
+      sendApiError(res, req, 403, ApiErrors.staffMenuNotFound);
+      return;
+    }
+
+    if (!(await menuOwnerHasProPlan(menuId))) {
+      sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+        code: "PRO_REQUIRED",
+      });
+      return;
+    }
+
+    const callId = parseInt(String(req.params.id), 10);
+    if (!Number.isFinite(callId) || callId <= 0) {
+      sendApiError(res, req, 400, ApiErrors.invalidCallId);
+      return;
+    }
+
+    const snap = await getStaffTableCallSnapshot(menuId, callId);
+    if (!snap) {
+      sendApiError(res, req, 404, ApiErrors.tableCallNotFound);
+      return;
+    }
+
+    const acknowledgedAt = snap.acknowledgedAt ?? null;
+    res.json({
+      id: snap.id,
+      menuId: snap.menuId,
+      tableNumber: snap.tableNumber,
+      requestedAt: snap.createdAt.toISOString(),
+      confirmedAt: acknowledgedAt ? acknowledgedAt.toISOString() : null,
+      customerName: snap.customerName,
+      items: snap.items,
+      orderTotal: snap.orderTotal,
+      status: snap.status,
+    });
+  } catch (error) {
+    logger.error("getStaffTableCallById error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedGetTableCall);
+  }
+}
+
+/**
  * GET /api/staff-auth/table-calls — pending calls for logged-in staff's menu
  */
 export async function listPendingStaffTableCalls(
@@ -121,6 +174,87 @@ export async function listPendingStaffTableCalls(
   } catch (error) {
     logger.error("listPendingStaffTableCalls error:", error);
     sendApiError(res, req, 500, ApiErrors.failedListTableCalls);
+  }
+}
+
+/**
+ * PUT /api/staff-auth/table-calls/:id
+ * Body: { items: [{ menuItemId, quantity }, ...], status: "pending" | "confirmed" | "cancelled" }
+ * Replaces stored order lines with `items` and applies `status` in one step (only while `pending`).
+ */
+export async function putStaffTableCall(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const staffId = req.user!.userId;
+    const menuId = await getMenuIdForStaff(staffId);
+    if (menuId === null) {
+      sendApiError(res, req, 403, ApiErrors.staffMenuNotFound);
+      return;
+    }
+
+    if (!(await menuOwnerHasProPlan(menuId))) {
+      sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+        code: "PRO_REQUIRED",
+      });
+      return;
+    }
+
+    const callId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(callId) || callId <= 0) {
+      sendApiError(res, req, 400, ApiErrors.invalidCallId);
+      return;
+    }
+
+    const rawStatus = String(req.body?.status ?? "")
+      .trim()
+      .toLowerCase();
+    if (
+      rawStatus !== "pending" &&
+      rawStatus !== "confirmed" &&
+      rawStatus !== "cancelled"
+    ) {
+      sendApiError(res, req, 400, ApiErrors.validationFailed);
+      return;
+    }
+
+    const result = await updateStaffTableCallItemsAndStatus(
+      callId,
+      menuId,
+      req.body?.items,
+      rawStatus as "pending" | "confirmed" | "cancelled",
+    );
+
+    if (!result.ok) {
+      if (result.error === "NOT_FOUND") {
+        sendApiError(res, req, 404, ApiErrors.callNotFoundOrNotPending);
+        return;
+      }
+      if (result.error === "NOT_PENDING") {
+        sendApiError(res, req, 409, ApiErrors.callNotFoundOrNotPending);
+        return;
+      }
+      if (
+        result.error === "INVALID_PAYLOAD" ||
+        result.error === "INVALID_ORDER_ITEMS"
+      ) {
+        sendApiError(res, req, 400, ApiErrors.validationFailed);
+        return;
+      }
+      sendApiError(res, req, 500, ApiErrors.failedUpdateCallItems);
+      return;
+    }
+
+    await emitCallChanged(menuId, callId);
+    res.json({
+      items: result.items,
+      orderTotal: result.orderTotal,
+      status: result.status,
+    });
+  } catch (error) {
+    logger.error("putStaffTableCall error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedUpdateCallItems);
   }
 }
 

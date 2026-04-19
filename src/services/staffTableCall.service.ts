@@ -409,6 +409,8 @@ export type StaffTableCallRow = {
   /** Sum of line totals for this call. */
   orderTotal: number;
   status: StaffTableCallStatus;
+  /** Set when loaded from DB (e.g. snapshot) for confirmedAt mapping. */
+  acknowledgedAt?: Date | null;
 };
 
 export type StaffTableCallHistoryRow = StaffTableCallRow & {
@@ -632,6 +634,7 @@ export async function getStaffTableCallSnapshot(
       items,
       orderTotal: computeOrderTotalFromItems(items),
       status,
+      acknowledgedAt: row.acknowledgedAt ?? null,
     };
   } catch (error) {
     logger.error("getStaffTableCallSnapshot error:", error);
@@ -953,6 +956,140 @@ export async function updateStaffTableCallItems(
     };
   } catch (error) {
     logger.error("updateStaffTableCallItems error:", error);
+    return { ok: false, error: "SERVER_ERROR" };
+  }
+}
+
+export type UpdateStaffCallItemsAndStatusError = UpdateStaffCallItemsError;
+
+/**
+ * Replace order lines and optionally set lifecycle status in one update (only while `pending`).
+ * `statusTarget` `"pending"` replaces items only; `confirmed` / `cancelled` also transitions status.
+ */
+export async function updateStaffTableCallItemsAndStatus(
+  callId: number,
+  menuId: number,
+  itemsRaw: unknown,
+  statusTarget: "pending" | "confirmed" | "cancelled",
+): Promise<
+  | {
+      ok: true;
+      items: StaffOrderItem[];
+      orderTotal: number;
+      status: StaffTableCallStatus;
+    }
+  | { ok: false; error: UpdateStaffCallItemsAndStatusError }
+> {
+  const parsed = parseOrderItemsInput(itemsRaw);
+  if (!parsed.ok) {
+    return { ok: false, error: "INVALID_PAYLOAD" };
+  }
+  const itemsIn = parsed.items;
+
+  try {
+    const pool = await getPool();
+    const rowResult = await pool
+      .request()
+      .input("id", sql.Int, callId)
+      .input("menuId", sql.Int, menuId)
+      .query(`
+        SELECT id, status, acknowledgedAt
+        FROM StaffTableCalls
+        WHERE id = @id AND menuId = @menuId
+      `);
+    const row = rowResult.recordset[0] as
+      | {
+          status?: string | null;
+          acknowledgedAt?: Date | null;
+        }
+      | undefined;
+    if (!row) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+    const st = normalizeStaffTableCallStatus(
+      row.status,
+      row.acknowledgedAt ?? null,
+    );
+    if (st !== "pending") {
+      return { ok: false, error: "NOT_PENDING" };
+    }
+
+    const idsForCheck = itemsIn
+      .map((i) => i.menuItemId)
+      .filter((id): id is number => typeof id === "number");
+    if (idsForCheck.length > 0) {
+      const okIds = await menuItemsExistForMenu(menuId, idsForCheck);
+      if (!okIds) {
+        return { ok: false, error: "INVALID_ORDER_ITEMS" };
+      }
+    }
+
+    let itemsResolved: StaffOrderItem[];
+    try {
+      itemsResolved = await enrichMenuItemsFromDb(menuId, itemsIn);
+    } catch (e) {
+      logger.error("updateStaffTableCallItemsAndStatus enrich error:", e);
+      return { ok: false, error: "SERVER_ERROR" };
+    }
+
+    const orderTotal = computeOrderTotalFromItems(itemsResolved);
+    const orderJson =
+      itemsResolved.length > 0 ? JSON.stringify(itemsResolved) : null;
+
+    let updateSql: string;
+    if (statusTarget === "pending") {
+      updateSql = `
+        UPDATE StaffTableCalls
+        SET orderItemsJson = @orderItemsJson
+        WHERE id = @id AND menuId = @menuId
+          AND ${pendingWhereSql}
+      `;
+    } else if (statusTarget === "confirmed") {
+      updateSql = `
+        UPDATE StaffTableCalls
+        SET orderItemsJson = @orderItemsJson,
+            status = N'confirmed',
+            acknowledgedAt = SYSUTCDATETIME()
+        WHERE id = @id AND menuId = @menuId
+          AND ${pendingWhereSql}
+      `;
+    } else {
+      updateSql = `
+        UPDATE StaffTableCalls
+        SET orderItemsJson = @orderItemsJson,
+            status = N'cancelled',
+            acknowledgedAt = NULL
+        WHERE id = @id AND menuId = @menuId
+          AND ${pendingWhereSql}
+      `;
+    }
+
+    const upd = await pool
+      .request()
+      .input("id", sql.Int, callId)
+      .input("menuId", sql.Int, menuId)
+      .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson)
+      .query(updateSql);
+
+    if ((upd.rowsAffected?.[0] ?? 0) === 0) {
+      return { ok: false, error: "NOT_PENDING" };
+    }
+
+    const outStatus: StaffTableCallStatus =
+      statusTarget === "confirmed"
+        ? "confirmed"
+        : statusTarget === "cancelled"
+          ? "cancelled"
+          : "pending";
+
+    return {
+      ok: true,
+      items: itemsResolved,
+      orderTotal,
+      status: outStatus,
+    };
+  } catch (error) {
+    logger.error("updateStaffTableCallItemsAndStatus error:", error);
     return { ok: false, error: "SERVER_ERROR" };
   }
 }
