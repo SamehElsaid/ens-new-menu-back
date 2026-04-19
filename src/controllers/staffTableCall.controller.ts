@@ -71,7 +71,6 @@ export async function listStaffTableCallsHistory(
           ? c.acknowledgedAt.toISOString()
           : null,
         customerName: c.customerName,
-        items: c.items,
         orderTotal: c.orderTotal,
         status: c.status,
       })),

@@ -20,6 +20,20 @@ import {
 } from "../services/subscriptionPlan.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 
+function parseMenuWorkingHours(workingHours: unknown): unknown {
+  if (!workingHours) {
+    return null;
+  }
+  if (typeof workingHours === "string") {
+    try {
+      return JSON.parse(workingHours);
+    } catch {
+      return null;
+    }
+  }
+  return workingHours;
+}
+
 export async function staffLogin(
   req: Request,
   res: Response
@@ -34,8 +48,30 @@ export async function staffLogin(
       .request()
       .input("slug", sql.NVarChar, menuSlug.toLowerCase().trim())
       .query(`
-        SELECT m.id, m.slug, m.isActive, m.userId,
-               ar.name as nameAr, en.name as nameEn
+        SELECT
+          m.id,
+          m.userId,
+          m.slug,
+          m.logo,
+          m.theme,
+          m.isActive,
+          m.createdAt,
+          ISNULL(m.currency, 'SAR') as currency,
+          m.footerLogo,
+          m.footerDescriptionEn,
+          m.footerDescriptionAr,
+          m.socialFacebook,
+          m.socialInstagram,
+          m.socialTwitter,
+          m.socialWhatsapp,
+          m.addressEn,
+          m.addressAr,
+          m.phone,
+          m.workingHours,
+          ar.name as nameAr,
+          ar.description as descriptionAr,
+          en.name as nameEn,
+          en.description as descriptionEn
         FROM Menus m
         LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
         LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
@@ -172,6 +208,8 @@ export async function staffLogin(
       refreshToken = null;
     }
 
+    const workingHours = parseMenuWorkingHours(menu.workingHours);
+
     res.json({
       message: "Login successful",
       staff: {
@@ -184,9 +222,28 @@ export async function staffLogin(
       },
       menu: {
         id: menu.id,
+        userId: menu.userId,
         slug: menu.slug,
+        logo: menu.logo,
+        theme: menu.theme,
+        isActive: menu.isActive,
+        createdAt: menu.createdAt,
+        currency: menu.currency,
+        footerLogo: menu.footerLogo,
+        footerDescriptionEn: menu.footerDescriptionEn,
+        footerDescriptionAr: menu.footerDescriptionAr,
+        socialFacebook: menu.socialFacebook,
+        socialInstagram: menu.socialInstagram,
+        socialTwitter: menu.socialTwitter,
+        socialWhatsapp: menu.socialWhatsapp,
+        addressEn: menu.addressEn,
+        addressAr: menu.addressAr,
+        phone: menu.phone,
+        workingHours,
         nameAr: menu.nameAr,
+        descriptionAr: menu.descriptionAr,
         nameEn: menu.nameEn,
+        descriptionEn: menu.descriptionEn,
       },
       accessToken,
       refreshToken,
@@ -217,8 +274,28 @@ export async function getStaffMe(
       .query(`
         SELECT
           s.*,
+          m.userId as menuOwnerUserId,
           m.slug as menuSlug,
-          ar.name as menuNameAr, en.name as menuNameEn
+          m.logo as menuLogo,
+          m.theme as menuTheme,
+          m.isActive as menuIsActive,
+          m.createdAt as menuCreatedAt,
+          ISNULL(m.currency, 'SAR') as menuCurrency,
+          m.footerLogo as menuFooterLogo,
+          m.footerDescriptionEn as menuFooterDescriptionEn,
+          m.footerDescriptionAr as menuFooterDescriptionAr,
+          m.socialFacebook as menuSocialFacebook,
+          m.socialInstagram as menuSocialInstagram,
+          m.socialTwitter as menuSocialTwitter,
+          m.socialWhatsapp as menuSocialWhatsapp,
+          m.addressEn as menuAddressEn,
+          m.addressAr as menuAddressAr,
+          m.phone as menuPhone,
+          m.workingHours as menuWorkingHours,
+          ar.name as menuNameAr,
+          ar.description as menuDescriptionAr,
+          en.name as menuNameEn,
+          en.description as menuDescriptionEn
         FROM MenuStaff s
         JOIN Menus m ON s.menuId = m.id
         LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
@@ -252,6 +329,8 @@ export async function getStaffMe(
     const row = result.recordset[0] as Record<string, unknown>;
     const staff = normalizeStaffRow(row, meta);
 
+    const workingHours = parseMenuWorkingHours(row.menuWorkingHours);
+
     res.json({
       staff: {
         id: staff.id,
@@ -264,9 +343,28 @@ export async function getStaffMe(
       },
       menu: {
         id: staff.menuId,
+        userId: row.menuOwnerUserId,
         slug: row.menuSlug,
+        logo: row.menuLogo,
+        theme: row.menuTheme,
+        isActive: row.menuIsActive,
+        createdAt: row.menuCreatedAt,
+        currency: row.menuCurrency,
+        footerLogo: row.menuFooterLogo,
+        footerDescriptionEn: row.menuFooterDescriptionEn,
+        footerDescriptionAr: row.menuFooterDescriptionAr,
+        socialFacebook: row.menuSocialFacebook,
+        socialInstagram: row.menuSocialInstagram,
+        socialTwitter: row.menuSocialTwitter,
+        socialWhatsapp: row.menuSocialWhatsapp,
+        addressEn: row.menuAddressEn,
+        addressAr: row.menuAddressAr,
+        phone: row.menuPhone,
+        workingHours,
         nameAr: row.menuNameAr,
+        descriptionAr: row.menuDescriptionAr,
         nameEn: row.menuNameEn,
+        descriptionEn: row.menuDescriptionEn,
       },
     });
   } catch (error) {
