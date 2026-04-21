@@ -94,6 +94,10 @@ export const ApiErrors = {
     en: 'Failed to get menu',
     ar: 'فشل جلب المنيو',
   },
+  failedListActivityLog: {
+    en: 'Failed to load activity history',
+    ar: 'فشل تحميل سجل النشاط',
+  },
   failedUpdateMenu: {
     en: 'Failed to update menu',
     ar: 'فشل تحديث المنيو',

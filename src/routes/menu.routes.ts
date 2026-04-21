@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { body, query, param } from "express-validator";
 import * as menuController from "../controllers/menu.controller";
+import * as menuActivityLogController from "../controllers/menuActivityLog.controller";
 import { ALLOWED_MENU_THEMES } from "../constants/menuThemes";
 import { validate } from "../middleware/validation";
 import { requireAuth } from "../middleware/auth.middleware";
@@ -47,6 +48,19 @@ router.post(
       .isIn([...ALLOWED_MENU_THEMES]),
   ]),
   menuController.createMenu,
+);
+
+// GET /api/menus/:menuId/activity-logs — audit trail (owner / authorised staff)
+router.get(
+  "/:menuId/activity-logs",
+  validate([
+    param("menuId").isInt(),
+    query("page").optional().isInt(),
+    query("limit").optional().isInt(),
+    query("q").optional().isString().trim().isLength({ max: 100 }),
+    query("search").optional().isString().trim().isLength({ max: 100 }),
+  ]),
+  menuActivityLogController.listMenuActivityLogsHandler,
 );
 
 // GET /api/menus/:id - Get menu by ID

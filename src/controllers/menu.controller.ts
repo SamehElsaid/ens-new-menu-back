@@ -15,6 +15,7 @@ import {
   getMenuStaffColumnMeta,
   normalizeStaffRow,
 } from "../config/menuStaffColumns";
+import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
@@ -346,6 +347,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       workingHours,
     } = req.body;
 
+    const touched: string[] = [];
     await executeTransaction(async (transaction) => {
       // Verify ownership
       const checkResult = await transaction
@@ -365,31 +367,37 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
         .input("id", sql.Int, menuId);
 
       if (logo !== undefined) {
+        touched.push("logo");
         menuUpdates.push("logo = @logo");
         menuRequest.input("logo", sql.NVarChar, logo || null);
       }
 
       if (theme !== undefined) {
+        touched.push("theme");
         menuUpdates.push("theme = @theme");
         menuRequest.input("theme", sql.NVarChar, theme);
       }
 
       if (currency !== undefined) {
+        touched.push("currency");
         menuUpdates.push("currency = @currency");
         menuRequest.input("currency", sql.NVarChar(3), currency);
       }
 
       if (isActive !== undefined) {
+        touched.push("isActive");
         menuUpdates.push("isActive = @isActive");
         menuRequest.input("isActive", sql.Bit, isActive ? 1 : 0);
       }
 
       if (footerLogo !== undefined) {
+        touched.push("footerLogo");
         menuUpdates.push("footerLogo = @footerLogo");
         menuRequest.input("footerLogo", sql.NVarChar, footerLogo || null);
       }
 
       if (footerDescriptionEn !== undefined) {
+        touched.push("footerDescriptionEn");
         menuUpdates.push("footerDescriptionEn = @footerDescriptionEn");
         menuRequest.input(
           "footerDescriptionEn",
@@ -399,6 +407,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       }
 
       if (footerDescriptionAr !== undefined) {
+        touched.push("footerDescriptionAr");
         menuUpdates.push("footerDescriptionAr = @footerDescriptionAr");
         menuRequest.input(
           "footerDescriptionAr",
@@ -408,6 +417,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       }
 
       if (socialFacebook !== undefined) {
+        touched.push("socialFacebook");
         menuUpdates.push("socialFacebook = @socialFacebook");
         menuRequest.input(
           "socialFacebook",
@@ -417,6 +427,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       }
 
       if (socialInstagram !== undefined) {
+        touched.push("socialInstagram");
         menuUpdates.push("socialInstagram = @socialInstagram");
         menuRequest.input(
           "socialInstagram",
@@ -426,11 +437,13 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       }
 
       if (socialTwitter !== undefined) {
+        touched.push("socialTwitter");
         menuUpdates.push("socialTwitter = @socialTwitter");
         menuRequest.input("socialTwitter", sql.NVarChar, socialTwitter || null);
       }
 
       if (socialWhatsapp !== undefined) {
+        touched.push("socialWhatsapp");
         menuUpdates.push("socialWhatsapp = @socialWhatsapp");
         menuRequest.input(
           "socialWhatsapp",
@@ -440,21 +453,25 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       }
 
       if (addressEn !== undefined) {
+        touched.push("addressEn");
         menuUpdates.push("addressEn = @addressEn");
         menuRequest.input("addressEn", sql.NVarChar, addressEn || null);
       }
 
       if (addressAr !== undefined) {
+        touched.push("addressAr");
         menuUpdates.push("addressAr = @addressAr");
         menuRequest.input("addressAr", sql.NVarChar, addressAr || null);
       }
 
       if (phone !== undefined) {
+        touched.push("phone");
         menuUpdates.push("phone = @phone");
         menuRequest.input("phone", sql.NVarChar, phone || null);
       }
 
       if (workingHours !== undefined) {
+        touched.push("workingHours");
         menuUpdates.push("workingHours = @workingHours");
         menuRequest.input(
           "workingHours",
@@ -479,11 +496,13 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
           .input("menuId", sql.Int, menuId);
 
         if (nameAr !== undefined) {
+          touched.push("nameAr");
           arUpdates.push("name = @name");
           arRequest.input("name", sql.NVarChar, nameAr);
         }
 
         if (descriptionAr !== undefined) {
+          touched.push("descriptionAr");
           arUpdates.push("description = @description");
           arRequest.input("description", sql.NVarChar, descriptionAr || null);
         }
@@ -505,11 +524,13 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
           .input("menuId", sql.Int, menuId);
 
         if (nameEn !== undefined) {
+          touched.push("nameEn");
           enUpdates.push("name = @name");
           enRequest.input("name", sql.NVarChar, nameEn);
         }
 
         if (descriptionEn !== undefined) {
+          touched.push("descriptionEn");
           enUpdates.push("description = @description");
           enRequest.input("description", sql.NVarChar, descriptionEn || null);
         }
@@ -525,6 +546,16 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
     });
 
     res.json({ message: "Menu updated successfully" });
+    if (touched.length > 0) {
+      void logMenuActivitySafe(req, menuId, {
+        action: "MENU_SETTINGS_UPDATED",
+        targetType: "menu",
+        targetId: menuId,
+        summaryAr: "تحديث إعدادات القائمة",
+        summaryEn: "Menu settings updated",
+        detailJson: JSON.stringify({ fields: touched }),
+      });
+    }
   } catch (error) {
     logger.error("Update menu error:", error);
     sendApiError(res, req, 500, ApiErrors.failedUpdateMenu);

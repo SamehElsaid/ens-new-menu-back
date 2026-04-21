@@ -5,6 +5,7 @@ import { normalizeImageUrls } from "../utils/urlHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { getMenuAccessForRequest } from "../utils/menuAccess";
+import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 
 async function requireMenuAccess(
   req: Request,
@@ -212,6 +213,13 @@ export async function createCategory(
       categoryId,
       category: createdCategory.recordset[0],
     });
+    void logMenuActivitySafe(req, parseInt(menuId, 10), {
+      action: "CATEGORY_CREATED",
+      targetType: "category",
+      targetId: Number(categoryId),
+      summaryAr: `إضافة تصنيف: ${String(nameAr)}`,
+      summaryEn: `Added category: ${String(nameEn)}`,
+    });
   } catch (error) {
     logger.error("Create category error:", error);
     sendApiError(res, req, 500, ApiErrors.failedCreateCategory);
@@ -301,6 +309,29 @@ export async function updateCategory(
     }
 
     res.json({ message: "Category updated successfully" });
+
+    const nameLog = await pool
+      .request()
+      .input("categoryId", sql.Int, parseInt(categoryId, 10))
+      .query(`
+        SELECT ar.name AS nameAr, en.name AS nameEn
+        FROM Categories c
+        LEFT JOIN CategoryTranslations ar ON c.id = ar.categoryId AND ar.locale = 'ar'
+        LEFT JOIN CategoryTranslations en ON c.id = en.categoryId AND en.locale = 'en'
+        WHERE c.id = @categoryId
+      `);
+    const cn = nameLog.recordset[0] as
+      | { nameAr?: string | null; nameEn?: string | null }
+      | undefined;
+    const labelAr = String(cn?.nameAr ?? "").trim() || "تصنيف";
+    const labelEn = String(cn?.nameEn ?? "").trim() || "Category";
+    void logMenuActivitySafe(req, parseInt(menuId, 10), {
+      action: "CATEGORY_UPDATED",
+      targetType: "category",
+      targetId: parseInt(categoryId, 10),
+      summaryAr: `تعديل تصنيف: ${labelAr}`,
+      summaryEn: `Updated category: ${labelEn}`,
+    });
   } catch (error) {
     logger.error("Update category error:", error);
     sendApiError(res, req, 500, ApiErrors.failedUpdateCategory);
@@ -335,7 +366,30 @@ export async function deleteCategory(
       return;
     }
 
-    // Delete category (translations will be deleted automatically due to CASCADE)
+    const namesBefore = await pool
+      .request()
+      .input("categoryId", sql.Int, parseInt(categoryId, 10))
+      .input("menuId", sql.Int, parseInt(menuId, 10))
+      .query(`
+        SELECT ar.name AS nameAr, en.name AS nameEn
+        FROM Categories c
+        LEFT JOIN CategoryTranslations ar ON c.id = ar.categoryId AND ar.locale = 'ar'
+        LEFT JOIN CategoryTranslations en ON c.id = en.categoryId AND en.locale = 'en'
+        WHERE c.id = @categoryId AND c.menuId = @menuId
+      `);
+
+    if (namesBefore.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.categoryNotFound);
+      return;
+    }
+
+    const cn = namesBefore.recordset[0] as {
+      nameAr?: string | null;
+      nameEn?: string | null;
+    };
+    const labelAr = String(cn?.nameAr ?? "").trim() || "تصنيف";
+    const labelEn = String(cn?.nameEn ?? "").trim() || "Category";
+
     const result = await pool
       .request()
       .input("categoryId", sql.Int, parseInt(categoryId))
@@ -350,6 +404,13 @@ export async function deleteCategory(
     }
 
     res.json({ message: "Category deleted successfully" });
+    void logMenuActivitySafe(req, parseInt(menuId, 10), {
+      action: "CATEGORY_DELETED",
+      targetType: "category",
+      targetId: parseInt(categoryId, 10),
+      summaryAr: `حذف تصنيف: ${labelAr}`,
+      summaryEn: `Deleted category: ${labelEn}`,
+    });
   } catch (error) {
     logger.error("Delete category error:", error);
     sendApiError(res, req, 500, ApiErrors.failedDeleteCategory);

@@ -13,6 +13,72 @@ import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { broadcastStaffTableCallChanged } from "../socket/staffIoBroadcast";
+import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+
+function tableCallSummaries(
+  snap: {
+    tableNumber?: string;
+    customerName?: string | null;
+  } | null,
+  kind:
+    | { type: "status"; status: string }
+    | { type: "confirm"; confirmed: boolean }
+    | { type: "items" },
+): { ar: string; en: string } {
+  const tbl = String(snap?.tableNumber ?? "").trim() || "?";
+  const cust =
+    snap?.customerName != null && String(snap.customerName).trim() !== ""
+      ? String(snap.customerName).trim()
+      : "";
+
+  if (kind.type === "status") {
+    const st = kind.status;
+    if (cust) {
+      return {
+        ar: `طلب ${cust} — طاولة ${tbl} — الحالة: ${st}`,
+        en: `${cust} — table ${tbl} — status: ${st}`,
+      };
+    }
+    return {
+      ar: `طلب طاولة ${tbl} — الحالة: ${st}`,
+      en: `Table ${tbl} — status: ${st}`,
+    };
+  }
+
+  if (kind.type === "confirm") {
+    if (cust) {
+      return kind.confirmed
+        ? {
+            ar: `تأكيد طلب ${cust} — طاولة ${tbl}`,
+            en: `Confirmed order — ${cust} — table ${tbl}`,
+          }
+        : {
+            ar: `إلغاء طلب ${cust} — طاولة ${tbl}`,
+            en: `Cancelled order — ${cust} — table ${tbl}`,
+          };
+    }
+    return kind.confirmed
+      ? {
+          ar: `تأكيد طلب طاولة ${tbl}`,
+          en: `Confirmed table ${tbl} order`,
+        }
+      : {
+          ar: `إلغاء طلب طاولة ${tbl}`,
+          en: `Cancelled table ${tbl} order`,
+        };
+  }
+
+  if (cust) {
+    return {
+      ar: `تعديل أصناف طلب ${cust} — طاولة ${tbl}`,
+      en: `Edited order lines — ${cust} — table ${tbl}`,
+    };
+  }
+  return {
+    ar: `تعديل أصناف طلب طاولة ${tbl}`,
+    en: `Edited items — table ${tbl} order`,
+  };
+}
 
 async function emitCallChanged(
   menuId: number,
@@ -247,10 +313,23 @@ export async function putStaffTableCall(
     }
 
     await emitCallChanged(menuId, callId);
+    const snapPut = await getStaffTableCallSnapshot(menuId, callId);
     res.json({
       items: result.items,
       orderTotal: result.orderTotal,
       status: result.status,
+    });
+    const sums = tableCallSummaries(snapPut, {
+      type: "status",
+      status: result.status,
+    });
+    void logMenuActivitySafe(req, menuId, {
+      action: "TABLE_CALL_UPDATED",
+      targetType: "table_call",
+      targetId: callId,
+      summaryAr: sums.ar,
+      summaryEn: sums.en,
+      detailJson: JSON.stringify({ status: result.status }),
     });
   } catch (error) {
     logger.error("putStaffTableCall error:", error);
@@ -306,7 +385,21 @@ export async function patchTableCallStatus(
     }
 
     await emitCallChanged(menuId, callId);
+    const snapStatus = await getStaffTableCallSnapshot(menuId, callId);
     res.json({ status: raw });
+    const confirmed = raw === "confirmed";
+    const sums = tableCallSummaries(snapStatus, {
+      type: "confirm",
+      confirmed,
+    });
+    void logMenuActivitySafe(req, menuId, {
+      action: confirmed ? "TABLE_CALL_CONFIRMED" : "TABLE_CALL_CANCELLED",
+      targetType: "table_call",
+      targetId: callId,
+      summaryAr: sums.ar,
+      summaryEn: sums.en,
+      detailJson: JSON.stringify({ status: raw }),
+    });
   } catch (error) {
     logger.error("patchTableCallStatus error:", error);
     sendApiError(res, req, 500, ApiErrors.failedCallStatusUpdate);
@@ -369,10 +462,19 @@ export async function patchTableCallItems(
     }
 
     await emitCallChanged(menuId, callId);
+    const snapItems = await getStaffTableCallSnapshot(menuId, callId);
     res.json({
       items: result.items,
       orderTotal: result.orderTotal,
       status: "pending" as const,
+    });
+    const sums = tableCallSummaries(snapItems, { type: "items" });
+    void logMenuActivitySafe(req, menuId, {
+      action: "TABLE_CALL_ITEMS_UPDATED",
+      targetType: "table_call",
+      targetId: callId,
+      summaryAr: sums.ar,
+      summaryEn: sums.en,
     });
   } catch (error) {
     logger.error("patchTableCallItems error:", error);

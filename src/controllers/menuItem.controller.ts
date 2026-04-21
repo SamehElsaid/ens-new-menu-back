@@ -6,6 +6,7 @@ import { getLocaleFromAcceptLanguage } from '../utils/localeHelper';
 import { sendApiError } from '../utils/apiErrorResponse';
 import { ApiErrors } from '../i18n/apiErrors';
 import { getMenuAccessForRequest } from '../utils/menuAccess';
+import { logMenuActivitySafe } from '../services/menuActivityLog.service';
 
 async function requireMenuAccess(
   req: Request,
@@ -367,6 +368,13 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
       message: 'Menu item created successfully',
       itemId,
     });
+    void logMenuActivitySafe(req, parseInt(menuId, 10), {
+      action: 'ITEM_CREATED',
+      targetType: 'item',
+      targetId: itemId,
+      summaryAr: `إضافة منتج: ${String(nameAr)}`,
+      summaryEn: `Added item: ${String(nameEn)}`,
+    });
   } catch (error) {
     logger.error('Create menu item error:', error);
     sendApiError(res, req, 500, ApiErrors.failedCreateMenuItem);
@@ -511,6 +519,30 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
     });
 
     res.json({ message: 'Menu item updated successfully' });
+
+    const poolAfter = await getPool();
+    const nameRow = await poolAfter
+      .request()
+      .input('itemId', sql.Int, parseInt(itemId, 10))
+      .query(`
+        SELECT ar.name AS nameAr, en.name AS nameEn
+        FROM MenuItems mi
+        LEFT JOIN MenuItemTranslations ar ON mi.id = ar.menuItemId AND ar.locale = 'ar'
+        LEFT JOIN MenuItemTranslations en ON mi.id = en.menuItemId AND en.locale = 'en'
+        WHERE mi.id = @itemId
+      `);
+    const nr = nameRow.recordset[0] as
+      | { nameAr?: string | null; nameEn?: string | null }
+      | undefined;
+    const labelAr = String(nr?.nameAr ?? '').trim() || 'منتج';
+    const labelEn = String(nr?.nameEn ?? '').trim() || 'Item';
+    void logMenuActivitySafe(req, parseInt(menuId, 10), {
+      action: 'ITEM_UPDATED',
+      targetType: 'item',
+      targetId: parseInt(itemId, 10),
+      summaryAr: `تعديل منتج: ${labelAr}`,
+      summaryEn: `Updated item: ${labelEn}`,
+    });
   } catch (error) {
     logger.error('Update menu item error:', error);
     sendApiError(res, req, 500, ApiErrors.failedUpdateMenuItem);
@@ -531,6 +563,32 @@ export async function deleteMenuItem(req: Request, res: Response): Promise<void>
     }
     const ownerUserId = access.ownerUserId;
 
+    const namesBefore = await pool
+      .request()
+      .input('itemId', sql.Int, parseInt(itemId, 10))
+      .input('menuId', sql.Int, parseInt(menuId, 10))
+      .input('ownerUserId', sql.Int, ownerUserId)
+      .query(`
+        SELECT ar.name AS nameAr, en.name AS nameEn
+        FROM MenuItems mi
+        JOIN Menus m ON mi.menuId = m.id
+        LEFT JOIN MenuItemTranslations ar ON mi.id = ar.menuItemId AND ar.locale = 'ar'
+        LEFT JOIN MenuItemTranslations en ON mi.id = en.menuItemId AND en.locale = 'en'
+        WHERE mi.id = @itemId AND mi.menuId = @menuId AND m.userId = @ownerUserId
+      `);
+
+    if (namesBefore.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.menuItemNotFound);
+      return;
+    }
+
+    const nr = namesBefore.recordset[0] as {
+      nameAr?: string | null;
+      nameEn?: string | null;
+    };
+    const labelAr = String(nr?.nameAr ?? '').trim() || 'منتج';
+    const labelEn = String(nr?.nameEn ?? '').trim() || 'Item';
+
     const result = await pool
       .request()
       .input('itemId', sql.Int, parseInt(itemId))
@@ -549,6 +607,13 @@ export async function deleteMenuItem(req: Request, res: Response): Promise<void>
     }
 
     res.json({ message: 'Menu item deleted successfully' });
+    void logMenuActivitySafe(req, parseInt(menuId, 10), {
+      action: 'ITEM_DELETED',
+      targetType: 'item',
+      targetId: parseInt(itemId, 10),
+      summaryAr: `حذف منتج: ${labelAr}`,
+      summaryEn: `Deleted item: ${labelEn}`,
+    });
   } catch (error) {
     logger.error('Delete menu item error:', error);
     sendApiError(res, req, 500, ApiErrors.failedDeleteMenuItem);

@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
+import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 
 // Create menu ad
 export const createMenuAd = async (req: Request, res: Response) => {
@@ -60,6 +61,16 @@ export const createMenuAd = async (req: Request, res: Response) => {
       data: {
         adId,
       },
+    });
+    const mid = parseInt(String(menuId), 10);
+    const titleLabelAr = String(titleAr ?? title ?? "").trim() || "إعلان";
+    const titleLabelEn = String(title ?? titleAr ?? "").trim() || "Ad";
+    void logMenuActivitySafe(req, mid, {
+      action: "AD_CREATED",
+      targetType: "ad",
+      targetId: adId,
+      summaryAr: `إضافة إعلان: ${titleLabelAr}`,
+      summaryEn: `Added ad: ${titleLabelEn}`,
     });
   } catch (error: any) {
     console.error("Error creating ad:", error);
@@ -165,7 +176,7 @@ export const updateAd = async (req: Request, res: Response) => {
       .input("adId", sql.Int, adId)
       .input("userId", sql.Int, userId)
       .query(`
-        SELECT a.id 
+        SELECT a.id, a.menuId, a.title, a.titleAr
         FROM Ads a
         INNER JOIN Menus m ON a.menuId = m.id
         WHERE a.id = @adId AND m.userId = @userId AND a.adType = 'menu'
@@ -177,6 +188,8 @@ export const updateAd = async (req: Request, res: Response) => {
         message: "Ad not found or you don't have permission",
       });
     }
+
+    const menuIdForLog = adCheck.recordset[0].menuId as number;
 
     // Update ad
     await pool
@@ -204,9 +217,28 @@ export const updateAd = async (req: Request, res: Response) => {
         WHERE id = @adId
       `);
 
+    const titlesAfter = await pool
+      .request()
+      .input("adId", sql.Int, adId)
+      .query(
+        `SELECT title, titleAr FROM Ads WHERE id = @adId AND adType = N'menu'`,
+      );
+    const tr = titlesAfter.recordset[0] as
+      | { title?: string | null; titleAr?: string | null }
+      | undefined;
+    const labelAr = String(tr?.titleAr ?? "").trim() || String(tr?.title ?? "").trim() || "إعلان";
+    const labelEn = String(tr?.title ?? "").trim() || String(tr?.titleAr ?? "").trim() || "Ad";
+
     res.json({
       success: true,
       message: "Ad updated successfully",
+    });
+    void logMenuActivitySafe(req, menuIdForLog, {
+      action: "AD_UPDATED",
+      targetType: "ad",
+      targetId: parseInt(String(adId), 10),
+      summaryAr: `تعديل إعلان: ${labelAr}`,
+      summaryEn: `Updated ad: ${labelEn}`,
     });
   } catch (error: any) {
     console.error("Error updating ad:", error);
@@ -232,7 +264,7 @@ export const deleteAd = async (req: Request, res: Response) => {
       .input("adId", sql.Int, adId)
       .input("userId", sql.Int, userId)
       .query(`
-        SELECT a.id 
+        SELECT a.id, a.menuId, a.title, a.titleAr
         FROM Ads a
         INNER JOIN Menus m ON a.menuId = m.id
         WHERE a.id = @adId AND m.userId = @userId AND a.adType = 'menu'
@@ -245,6 +277,20 @@ export const deleteAd = async (req: Request, res: Response) => {
       });
     }
 
+    const menuIdForLog = adCheck.recordset[0].menuId as number;
+    const rowAd = adCheck.recordset[0] as {
+      title?: string | null;
+      titleAr?: string | null;
+    };
+    const labelAr =
+      String(rowAd.titleAr ?? "").trim() ||
+      String(rowAd.title ?? "").trim() ||
+      "إعلان";
+    const labelEn =
+      String(rowAd.title ?? "").trim() ||
+      String(rowAd.titleAr ?? "").trim() ||
+      "Ad";
+
     // Delete ad
     await pool
       .request()
@@ -256,6 +302,13 @@ export const deleteAd = async (req: Request, res: Response) => {
     res.json({
       success: true,
       message: "Ad deleted successfully",
+    });
+    void logMenuActivitySafe(req, menuIdForLog, {
+      action: "AD_DELETED",
+      targetType: "ad",
+      targetId: parseInt(String(adId), 10),
+      summaryAr: `حذف إعلان: ${labelAr}`,
+      summaryEn: `Deleted ad: ${labelEn}`,
     });
   } catch (error: any) {
     console.error("Error deleting ad:", error);
@@ -281,7 +334,7 @@ export const toggleAdStatus = async (req: Request, res: Response) => {
       .input("adId", sql.Int, adId)
       .input("userId", sql.Int, userId)
       .query(`
-        SELECT a.id, a.isActive 
+        SELECT a.id, a.isActive, a.menuId, a.title, a.titleAr
         FROM Ads a
         INNER JOIN Menus m ON a.menuId = m.id
         WHERE a.id = @adId AND m.userId = @userId AND a.adType = 'menu'
@@ -294,7 +347,22 @@ export const toggleAdStatus = async (req: Request, res: Response) => {
       });
     }
 
-    const currentStatus = adCheck.recordset[0].isActive;
+    const rowT = adCheck.recordset[0] as {
+      isActive: boolean;
+      menuId: number;
+      title?: string | null;
+      titleAr?: string | null;
+    };
+    const currentStatus = rowT.isActive;
+    const menuIdForLog = rowT.menuId as number;
+    const adLabelAr =
+      String(rowT.titleAr ?? "").trim() ||
+      String(rowT.title ?? "").trim() ||
+      "إعلان";
+    const adLabelEn =
+      String(rowT.title ?? "").trim() ||
+      String(rowT.titleAr ?? "").trim() ||
+      "Ad";
 
     // Toggle status
     await pool
@@ -307,12 +375,24 @@ export const toggleAdStatus = async (req: Request, res: Response) => {
         WHERE id = @adId
       `);
 
+    const newActive = !currentStatus;
     res.json({
       success: true,
       message: "Ad status updated successfully",
       data: {
-        isActive: !currentStatus,
+        isActive: newActive,
       },
+    });
+    void logMenuActivitySafe(req, menuIdForLog, {
+      action: "AD_STATUS_TOGGLED",
+      targetType: "ad",
+      targetId: parseInt(String(adId), 10),
+      summaryAr: newActive
+        ? `تفعيل إعلان: ${adLabelAr}`
+        : `إيقاف إعلان: ${adLabelAr}`,
+      summaryEn: newActive
+        ? `Enabled ad: ${adLabelEn}`
+        : `Disabled ad: ${adLabelEn}`,
     });
   } catch (error: any) {
     console.error("Error toggling ad status:", error);
