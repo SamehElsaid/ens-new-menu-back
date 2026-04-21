@@ -4,6 +4,20 @@ import { logger } from "../utils/logger";
 import { normalizeImageUrls } from "../utils/urlHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { getMenuAccessForRequest } from "../utils/menuAccess";
+
+async function requireMenuAccess(
+  req: Request,
+  res: Response,
+  menuId: string,
+): Promise<boolean> {
+  const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+  if (!access.ok) {
+    sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
+    return false;
+  }
+  return true;
+}
 
 // Get all categories for a menu (with pagination)
 export async function getCategories(
@@ -11,7 +25,6 @@ export async function getCategories(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const { locale = "ar", page = "1", limit = "10" } = req.query;
 
@@ -21,17 +34,7 @@ export async function getCategories(
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Get total count for pagination
     const countResult = await pool
@@ -91,22 +94,11 @@ export async function getCategoryById(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, categoryId } = req.params;
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Get category with both translations
     const result = await pool
@@ -146,7 +138,6 @@ export async function createCategory(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const { nameAr, nameEn, imageUrl, image, sortOrder = 0 } = req.body;
 
@@ -161,17 +152,7 @@ export async function createCategory(
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Insert category
     const categoryResult = await pool
@@ -243,7 +224,6 @@ export async function updateCategory(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, categoryId } = req.params;
     const { nameAr, nameEn, imageUrl, image, sortOrder, isActive } = req.body;
 
@@ -252,17 +232,7 @@ export async function updateCategory(
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Verify category belongs to menu
     const categoryCheck = await pool
@@ -343,22 +313,11 @@ export async function deleteCategory(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, categoryId } = req.params;
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Check if category has items
     const itemsCheck = await pool

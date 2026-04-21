@@ -5,11 +5,24 @@ import { normalizeImageUrls } from '../utils/urlHelper';
 import { getLocaleFromAcceptLanguage } from '../utils/localeHelper';
 import { sendApiError } from '../utils/apiErrorResponse';
 import { ApiErrors } from '../i18n/apiErrors';
+import { getMenuAccessForRequest } from '../utils/menuAccess';
+
+async function requireMenuAccess(
+  req: Request,
+  res: Response,
+  menuId: string,
+): Promise<boolean> {
+  const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+  if (!access.ok) {
+    sendApiError(res, req, 404, ApiErrors.menuNotFound);
+    return false;
+  }
+  return true;
+}
 
 // Get menu items (with pagination, search by name, filter by category name)
 export async function getMenuItems(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const localeParam = (req.query.locale as string)?.toLowerCase();
     const locale =
@@ -27,17 +40,7 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input('menuId', sql.Int, parseInt(menuId))
-      .input('userId', sql.Int, userId)
-      .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFound);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Check which columns exist
     const columnCheck = await pool
@@ -217,7 +220,6 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
 // Create menu item
 export async function createMenuItem(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const {
       nameAr,
@@ -278,17 +280,7 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
       }
     }
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input('menuId', sql.Int, parseInt(menuId))
-      .input('userId', sql.Int, userId)
-      .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFound);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     const itemId = await executeTransaction(async (transaction) => {
       // Check which columns exist
@@ -384,7 +376,6 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
 // Update menu item
 export async function updateMenuItem(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, itemId } = req.params;
     const {
       nameAr,
@@ -402,18 +393,25 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
       sortOrder,
     } = req.body;
 
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
+
     await executeTransaction(async (transaction) => {
       // Verify ownership
       const checkResult = await transaction
         .request()
         .input('itemId', sql.Int, parseInt(itemId))
         .input('menuId', sql.Int, parseInt(menuId))
-        .input('userId', sql.Int, userId)
+        .input('ownerUserId', sql.Int, ownerUserId)
         .query(`
           SELECT mi.id 
           FROM MenuItems mi
           JOIN Menus m ON mi.menuId = m.id
-          WHERE mi.id = @itemId AND mi.menuId = @menuId AND m.userId = @userId
+          WHERE mi.id = @itemId AND mi.menuId = @menuId AND m.userId = @ownerUserId
         `);
 
       if (checkResult.recordset.length === 0) {
@@ -522,21 +520,27 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
 // Delete menu item
 export async function deleteMenuItem(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, itemId } = req.params;
 
     const pool = await getPool();
+
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
 
     const result = await pool
       .request()
       .input('itemId', sql.Int, parseInt(itemId))
       .input('menuId', sql.Int, parseInt(menuId))
-      .input('userId', sql.Int, userId)
+      .input('ownerUserId', sql.Int, ownerUserId)
       .query(`
         DELETE mi
         FROM MenuItems mi
         JOIN Menus m ON mi.menuId = m.id
-        WHERE mi.id = @itemId AND mi.menuId = @menuId AND m.userId = @userId
+        WHERE mi.id = @itemId AND mi.menuId = @menuId AND m.userId = @ownerUserId
       `);
 
     if (result.rowsAffected[0] === 0) {
@@ -554,23 +558,12 @@ export async function deleteMenuItem(req: Request, res: Response): Promise<void>
 // Bulk update sort order
 export async function updateDisplayOrder(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const { items } = req.body; // Array of { id, sortOrder }
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input('menuId', sql.Int, parseInt(menuId))
-      .input('userId', sql.Int, userId)
-      .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFound);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     await executeTransaction(async (transaction) => {
       for (const item of items) {

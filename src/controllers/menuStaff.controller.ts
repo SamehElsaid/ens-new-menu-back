@@ -9,6 +9,10 @@ import {
 import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import {
+  parseStaffJobRoleOrError,
+  STAFF_JOB_WAITER,
+} from "../config/staffJobRoles";
 
 export async function getStaff(req: Request, res: Response): Promise<void> {
   try {
@@ -144,9 +148,15 @@ export async function createStaff(
       .input("name", sql.NVarChar, name);
 
     if (meta.roleColumnQuoted) {
+      const raw = role ?? STAFF_JOB_WAITER;
+      const parsed = parseStaffJobRoleOrError(raw);
+      if (!parsed.ok) {
+        sendApiError(res, req, 400, ApiErrors.invalidStaffJobRole);
+        return;
+      }
       cols.push(meta.roleColumnQuoted);
       vals.push("@role");
-      insertReq.input("role", sql.NVarChar, role ?? null);
+      insertReq.input("role", sql.NVarChar, parsed.value);
     }
 
     if (meta.phoneColumnQuoted) {
@@ -235,8 +245,13 @@ export async function updateStaff(
       request.input("name", sql.NVarChar, name);
     }
     if (role !== undefined && meta.roleColumnQuoted) {
+      const parsed = parseStaffJobRoleOrError(role);
+      if (!parsed.ok) {
+        sendApiError(res, req, 400, ApiErrors.invalidStaffJobRole);
+        return;
+      }
       updates.push(`${meta.roleColumnQuoted} = @role`);
-      request.input("role", sql.NVarChar, role || null);
+      request.input("role", sql.NVarChar, parsed.value);
     }
     if (phone !== undefined && meta.phoneColumnQuoted) {
       updates.push(`${meta.phoneColumnQuoted} = @phone`);

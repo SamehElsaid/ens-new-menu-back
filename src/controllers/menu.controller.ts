@@ -10,6 +10,11 @@ import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
 import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { ROLES } from "../config/constants";
+import {
+  getMenuStaffColumnMeta,
+  normalizeStaffRow,
+} from "../config/menuStaffColumns";
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
@@ -165,16 +170,43 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
 // Get menu by ID
 export async function getMenuById(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
+    const auth = req.user!;
+    const userId = auth.userId;
     const { id } = req.params;
+    const menuIdNum = parseInt(id);
+    const isStaff = auth.role === ROLES.STAFF;
 
     const pool = await getPool();
 
-    // Get menu with both translations
-    const result = await pool
-      .request()
-      .input("id", sql.Int, parseInt(id))
-      .input("userId", sql.Int, userId).query(`
+    let result;
+
+    if (isStaff) {
+      result = await pool
+        .request()
+        .input("id", sql.Int, menuIdNum)
+        .input("staffId", sql.Int, userId)
+        .query(`
+        SELECT 
+          m.id, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
+          ISNULL(m.currency, 'SAR') as currency,
+          m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
+          m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
+          m.addressEn, m.addressAr, m.phone, m.workingHours,
+          ar.name as nameAr, ar.description as descriptionAr,
+          en.name as nameEn, en.description as descriptionEn
+        FROM Menus m
+        INNER JOIN MenuStaff s ON s.menuId = m.id AND s.id = @staffId
+        LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
+        LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
+        WHERE m.id = @id
+          AND LOWER(LTRIM(RTRIM(ISNULL(s.role, '')))) IN ('cashier', 'casher')
+      `);
+    } else {
+      result = await pool
+        .request()
+        .input("id", sql.Int, menuIdNum)
+        .input("userId", sql.Int, userId)
+        .query(`
         SELECT 
           m.id, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
           ISNULL(m.currency, 'SAR') as currency,
@@ -188,8 +220,13 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
         LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
         WHERE m.id = @id AND m.userId = @userId
       `);
+    }
 
     if (result.recordset.length === 0) {
+      if (isStaff) {
+        sendApiError(res, req, 403, ApiErrors.staffCashierRequired);
+        return;
+      }
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
@@ -209,7 +246,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
     // Get statistics for the menu
     const statsResult = await pool
       .request()
-      .input("menuId", sql.Int, parseInt(id)).query(`
+      .input("menuId", sql.Int, menuIdNum).query(`
         SELECT 
           (SELECT COUNT(*) FROM MenuItems WHERE menuId = @menuId) as totalItems,
           (SELECT COUNT(*) FROM MenuItems WHERE menuId = @menuId AND available = 1) as activeItems,
@@ -220,7 +257,8 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
 
     const stats = statsResult.recordset[0];
 
-    const freeUser = await isUserOnFreePlan(userId);
+    const ownerUserId = menu.userId as number;
+    const freeUser = await isUserOnFreePlan(ownerUserId);
 
     // Staff & tables are Pro-only — omit lists and counts for Free (dashboard)
     if (freeUser) {
@@ -238,15 +276,20 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Get staff & tables lists
+    // Get staff & tables lists (staff rows normalized like GET /menus/:menuId/staff — no password hash)
+    const staffMeta = await getMenuStaffColumnMeta();
     const [staffResult, tablesResult] = await Promise.all([
-      pool.request().input("menuId", sql.Int, parseInt(id)).query(`
+      pool.request().input("menuId", sql.Int, menuIdNum).query(`
         SELECT * FROM MenuStaff WHERE menuId = @menuId ORDER BY id DESC
       `),
-      pool.request().input("menuId", sql.Int, parseInt(id)).query(`
+      pool.request().input("menuId", sql.Int, menuIdNum).query(`
         SELECT * FROM MenuTables WHERE menuId = @menuId ORDER BY id DESC
       `),
     ]);
+
+    const menuStaffNormalized = (
+      staffResult.recordset as Record<string, unknown>[]
+    ).map((row) => normalizeStaffRow(row, staffMeta));
 
     res.json({
       menu: menu,
@@ -255,7 +298,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       categoriesCount: stats.categories || 0,
       staffCount: stats.staffCount || 0,
       tablesCount: stats.tablesCount || 0,
-      menuStaff: staffResult.recordset,
+      menuStaff: menuStaffNormalized,
       menuTables: (tablesResult.recordset as Record<string, unknown>[]).map(
         (row) => normalizeMenuTableRow(row),
       ),
@@ -270,6 +313,14 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
 // Update menu
 export async function updateMenu(req: Request, res: Response): Promise<void> {
   try {
+    if (req.user?.role === ROLES.STAFF) {
+      sendApiError(res, req, 403, {
+        en: "Only the menu owner can update menu settings.",
+        ar: "يستطيع مالك القائمة فقط تعديل الإعدادات.",
+      });
+      return;
+    }
+
     const userId = req.user!.userId;
     const { id } = req.params;
     const menuId = parseInt(id);
@@ -486,6 +537,14 @@ export async function toggleMenuStatus(
   res: Response
 ): Promise<void> {
   try {
+    if (req.user?.role === ROLES.STAFF) {
+      sendApiError(res, req, 403, {
+        en: "Only the menu owner can change menu status.",
+        ar: "يستطيع مالك القائمة فقط تغيير حالة القائمة.",
+      });
+      return;
+    }
+
     const userId = req.user!.userId;
     const userRole = req.user!.role;
     const { id } = req.params;
@@ -541,6 +600,14 @@ export async function toggleMenuStatus(
 // Delete menu
 export async function deleteMenu(req: Request, res: Response): Promise<void> {
   try {
+    if (req.user?.role === ROLES.STAFF) {
+      sendApiError(res, req, 403, {
+        en: "Only the menu owner can delete this menu.",
+        ar: "يستطيع مالك القائمة فقط حذفها.",
+      });
+      return;
+    }
+
     const userId = req.user!.userId;
     const { id } = req.params;
 

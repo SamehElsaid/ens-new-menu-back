@@ -218,6 +218,14 @@ export const ApiErrors = {
     en: 'Password column not configured on MenuStaff table',
     ar: 'عمود كلمة المرور غير مهيأ في جدول طاقم المنيو',
   },
+  invalidStaffJobRole: {
+    en: 'Staff role must be waiter or cashier',
+    ar: 'يجب أن يكون دور الموظف نادلًا (waiter) أو كاشيرًا (cashier)',
+  },
+  staffCashierRequired: {
+    en: 'Only cashiers can access the restaurant dashboard',
+    ar: 'الدخول إلى لوحة التحكم متاح للكاشير فقط',
+  },
   failedGetMenuItems: {
     en: 'Failed to get menu items',
     ar: 'فشل جلب أصناف المنيو',
