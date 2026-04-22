@@ -437,17 +437,54 @@ export async function staffLogout(
       } else {
         accessTokenExpiry.setFullYear(accessTokenExpiry.getFullYear() + 100);
       }
-      await TokenBlacklistService.addToBlacklist(
-        accessToken,
-        staffId,
-        "access",
-        accessTokenExpiry,
-        "Staff logout"
-      );
+
+      // TokenBlacklist.userId has an FK to Users.id. Staff ids come from
+      // MenuStaff and may not exist in Users, so check before inserting to
+      // avoid the FK violation breaking a valid logout.
+      try {
+        const pool = await getPool();
+        const userExists = await pool
+          .request()
+          .input("userId", sql.Int, staffId)
+          .query("SELECT TOP 1 id FROM Users WHERE id = @userId");
+
+        if (userExists.recordset.length > 0) {
+          await TokenBlacklistService.addToBlacklist(
+            accessToken,
+            staffId,
+            "access",
+            accessTokenExpiry,
+            "Staff logout",
+          );
+        } else {
+          logger.warn(
+            "Skipping access-token blacklist: no matching Users row for staff",
+            { staffId },
+          );
+        }
+      } catch (blacklistError) {
+        logger.warn("Failed to blacklist staff access token on logout", {
+          staffId,
+          error:
+            blacklistError instanceof Error
+              ? blacklistError.message
+              : String(blacklistError),
+        });
+      }
     }
 
     if (refreshToken) {
-      await RefreshTokenService.revokeToken(refreshToken, "Staff logout");
+      try {
+        await RefreshTokenService.revokeToken(refreshToken, "Staff logout");
+      } catch (revokeError) {
+        logger.warn("Failed to revoke staff refresh token on logout", {
+          staffId,
+          error:
+            revokeError instanceof Error
+              ? revokeError.message
+              : String(revokeError),
+        });
+      }
     }
 
     try {
