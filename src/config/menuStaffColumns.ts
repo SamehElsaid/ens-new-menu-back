@@ -21,6 +21,8 @@ export type MenuStaffColumnMeta = {
   phoneKey: string | null;
   phoneColumnQuoted: string | null;
   createdAtKey: string | null;
+  expoTokenKey: string | null;
+  expoTokenColumnQuoted: string | null;
 };
 
 let cached: MenuStaffColumnMeta | null = null;
@@ -60,6 +62,12 @@ export async function getMenuStaffColumnMeta(): Promise<MenuStaffColumnMeta> {
   const roleName = pick("role", "staffRole");
   const phoneName = pick("phone", "phoneNumber", "mobile", "tel");
   const createdAtKey = pick("createdAt", "CreatedAt", "created_at");
+  const expoTokenKey = pick(
+    "expoPushToken",
+    "expo_push_token",
+    "expoToken",
+    "expo_token",
+  );
 
   cached = {
     nameKey,
@@ -72,6 +80,8 @@ export async function getMenuStaffColumnMeta(): Promise<MenuStaffColumnMeta> {
     phoneKey: phoneName,
     phoneColumnQuoted: phoneName ? quoteIdent(phoneName) : null,
     createdAtKey,
+    expoTokenKey,
+    expoTokenColumnQuoted: expoTokenKey ? quoteIdent(expoTokenKey) : null,
   };
   return cached;
 }

@@ -47,6 +47,12 @@ export async function staffLogin(
 ): Promise<void> {
   try {
     const { email, password, menuSlug } = req.body;
+    const rawExpoToken =
+      typeof req.body?.expoToken === "string" ? req.body.expoToken : null;
+    const expoToken =
+      rawExpoToken && rawExpoToken.trim().length > 0
+        ? rawExpoToken.trim().slice(0, 256)
+        : null;
 
     const pool = await getPool();
 
@@ -171,6 +177,32 @@ export async function staffLogin(
         ar: "كلمة المرور غير صحيحة",
       });
       return;
+    }
+
+    if (expoToken && staffMeta.expoTokenColumnQuoted) {
+      try {
+        await pool
+          .request()
+          .input("token", sql.NVarChar(256), expoToken)
+          .input("staffId", sql.Int, staff.id as number)
+          .query(
+            `UPDATE MenuStaff
+             SET ${staffMeta.expoTokenColumnQuoted} = @token
+             WHERE id = @staffId`,
+          );
+      } catch (tokenError) {
+        logger.warn("Failed to persist staff expoToken", {
+          staffId: staff.id,
+          error:
+            tokenError instanceof Error
+              ? tokenError.message
+              : String(tokenError),
+        });
+      }
+    } else if (expoToken && !staffMeta.expoTokenColumnQuoted) {
+      logger.warn(
+        "Received expoToken but MenuStaff has no expoPushToken column; run database/menu_staff_expo_push_token.sql",
+      );
     }
 
     const norm = normalizeStaffRow(staff, staffMeta);
@@ -416,6 +448,29 @@ export async function staffLogout(
 
     if (refreshToken) {
       await RefreshTokenService.revokeToken(refreshToken, "Staff logout");
+    }
+
+    try {
+      const staffMeta = await getMenuStaffColumnMeta();
+      if (staffMeta.expoTokenColumnQuoted) {
+        const pool = await getPool();
+        await pool
+          .request()
+          .input("staffId", sql.Int, staffId)
+          .query(
+            `UPDATE MenuStaff
+             SET ${staffMeta.expoTokenColumnQuoted} = NULL
+             WHERE id = @staffId`,
+          );
+      }
+    } catch (clearTokenError) {
+      logger.warn("Failed to clear staff expoToken on logout", {
+        staffId,
+        error:
+          clearTokenError instanceof Error
+            ? clearTokenError.message
+            : String(clearTokenError),
+      });
     }
 
     res.json({ message: "Logged out successfully" });

@@ -16,6 +16,8 @@ router.post(
     body("email").isEmail().normalizeEmail(),
     body("password").notEmpty().isLength({ min: 6 }),
     body("menuSlug").notEmpty().trim().isLength({ max: 200 }),
+    body("expoToken").optional({ nullable: true }).isString().trim()
+      .isLength({ max: 256 }),
   ]),
   staffAuthController.staffLogin,
 );
