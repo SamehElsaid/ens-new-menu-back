@@ -97,6 +97,7 @@ export function attachStaffNotificationsSocket(
           tableNumber?: string;
           customerName?: string;
           items?: unknown;
+          status?: unknown;
         },
         cb,
       ) => {
@@ -114,6 +115,7 @@ export function attachStaffNotificationsSocket(
           const result = await processGuestStaffCall(menuId, tableNumber, {
             customerName: payload?.customerName,
             items: payload?.items,
+            status: payload?.status,
           });
 
           if (!result.ok) {

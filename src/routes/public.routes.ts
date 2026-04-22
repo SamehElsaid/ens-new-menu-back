@@ -21,6 +21,10 @@ router.post(
   validate([
     body("menuId").isInt({ min: 1 }).toInt(),
     body("tableNumber").isString().trim().notEmpty().isLength({ min: 1, max: 50 }),
+    body("status")
+      .optional()
+      .isIn(["pending", "confirmed", "cancelled"])
+      .withMessage("status must be pending, confirmed, or cancelled"),
   ]),
   postGuestStaffCall,
 );

@@ -53,12 +53,24 @@ export type StaffOrderItem = {
 export type GuestStaffCallOptions = {
   customerName?: string | null;
   items?: unknown;
+  /** If set, stored on insert (default `pending`). */
+  status?: unknown;
 };
 
 function parseCustomerName(raw: unknown): string | null {
   if (raw == null) return null;
   const s = String(raw).trim().slice(0, 200);
   return s.length ? s : null;
+}
+
+function parseGuestInitialStaffCallStatus(raw: unknown): StaffTableCallStatus {
+  const s = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (s === "confirmed" || s === "cancelled" || s === "pending") {
+    return s;
+  }
+  return "pending";
 }
 
 function parsePriceField(
@@ -292,7 +304,7 @@ export async function processGuestStaffCall(
       customerName: string | null;
       items: StaffOrderItem[];
       orderTotal: number;
-      status: "pending";
+      status: StaffTableCallStatus;
     }
   | { ok: false; error: GuestStaffCallError }
 > {
@@ -307,6 +319,7 @@ export async function processGuestStaffCall(
   }
 
   const customerName = parseCustomerName(options?.customerName);
+  const initialStatus = parseGuestInitialStaffCallStatus(options?.status);
   const parsedItems = parseOrderItemsInput(options?.items);
   if (!parsedItems.ok) {
     return { ok: false, error: "INVALID_PAYLOAD" };
@@ -377,6 +390,7 @@ export async function processGuestStaffCall(
       safeTable,
       customerName,
       itemsResolved,
+      initialStatus,
     );
     if (!persisted) {
       return { ok: false, error: "SERVER_ERROR" };
@@ -391,7 +405,7 @@ export async function processGuestStaffCall(
       customerName,
       items: itemsResolved,
       orderTotal,
-      status: "pending" as const,
+      status: initialStatus,
     };
   } catch (error) {
     logger.error("processGuestStaffCall error:", error);
@@ -590,20 +604,26 @@ export async function createStaffTableCall(
   tableNumber: string,
   customerName: string | null,
   items: StaffOrderItem[],
+  initialStatus: StaffTableCallStatus = "pending",
 ): Promise<{ id: number; createdAt: Date } | null> {
   try {
     const pool = await getPool();
     const orderJson =
       items.length > 0 ? JSON.stringify(items) : null;
+    const statusNorm = parseGuestInitialStaffCallStatus(initialStatus);
+    const acknowledgedAt =
+      statusNorm === "confirmed" ? new Date() : null;
     const result = await pool
       .request()
       .input("menuId", sql.Int, menuId)
       .input("tableNumber", sql.NVarChar, tableNumber)
       .input("customerName", sql.NVarChar, customerName)
-      .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson).query(`
-        INSERT INTO StaffTableCalls (menuId, tableNumber, customerName, orderItemsJson, status)
+      .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson)
+      .input("status", sql.NVarChar(20), statusNorm)
+      .input("acknowledgedAt", sql.DateTime2, acknowledgedAt).query(`
+        INSERT INTO StaffTableCalls (menuId, tableNumber, customerName, orderItemsJson, status, acknowledgedAt)
         OUTPUT INSERTED.id, INSERTED.createdAt
-        VALUES (@menuId, @tableNumber, @customerName, @orderItemsJson, N'pending')
+        VALUES (@menuId, @tableNumber, @customerName, @orderItemsJson, @status, @acknowledgedAt)
       `);
     const row = result.recordset[0];
     if (!row?.id) {

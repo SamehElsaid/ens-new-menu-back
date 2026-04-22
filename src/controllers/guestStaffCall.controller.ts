@@ -30,6 +30,7 @@ function statusForError(error: string): number {
  *     | { name: string; quantity?: number; price?: number; notes?: string }
  *   >
  *   (price optional — filled from MenuItems; response includes line totals + orderTotal)
+ *   status?: "pending" | "confirmed" | "cancelled" — optional; default pending (confirmed sets acknowledgedAt)
  * }
  */
 export async function postGuestStaffCall(
@@ -43,6 +44,7 @@ export async function postGuestStaffCall(
     const result = await processGuestStaffCall(menuId, tableNumber, {
       customerName: req.body?.customerName,
       items: req.body?.items,
+      status: req.body?.status,
     });
 
     if (!result.ok) {
