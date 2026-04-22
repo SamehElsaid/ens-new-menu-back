@@ -39,6 +39,22 @@ router.get(
       .optional()
       .isIn(["ar", "en"])
       .withMessage("Locale must be ar or en"),
+    query("tableNumber")
+      .optional()
+      .isString()
+      .trim()
+      .isLength({ max: 50 })
+      .withMessage("tableNumber must be at most 50 characters"),
+    query("table")
+      .optional()
+      .isString()
+      .trim()
+      .isLength({ max: 50 })
+      .withMessage("table must be at most 50 characters"),
+    query("tableId")
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage("tableId must be a positive integer"),
   ],
   getPublicMenu
 );

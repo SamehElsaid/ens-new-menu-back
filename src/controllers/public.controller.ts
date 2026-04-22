@@ -3,6 +3,94 @@ import { getPool, sql } from "../config/database";
 import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
+
+/** Optional table from QR: `?tableNumber=` or `?table=` (max 50 chars). */
+function parsePublicMenuTableNumber(req: Request): string | null {
+  const raw = req.query.tableNumber ?? req.query.table;
+  if (typeof raw !== "string") return null;
+  const t = raw.trim().slice(0, 50);
+  return t.length > 0 ? t : null;
+}
+
+/** Same row `id` as in GET /api/menus/:menuId/tables — `?tableId=`. */
+function parsePublicMenuTableId(req: Request): number | null {
+  const raw = req.query.tableId;
+  if (raw === undefined || raw === null || raw === "") return null;
+  const s = Array.isArray(raw) ? raw[0] : raw;
+  const n = parseInt(String(s), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Same rows as GET /api/menus/:menuId/tables (public read, no auth). */
+async function fetchPublicMenuTablesForMenu(
+  pool: Awaited<ReturnType<typeof getPool>>,
+  menuId: number,
+): Promise<Record<string, unknown>[]> {
+  const exists = await pool.request().query(`
+    SELECT COUNT(*) as count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'MenuTables'
+  `);
+  if (!exists.recordset[0]?.count) return [];
+  const result = await pool
+    .request()
+    .input("menuId", sql.Int, menuId)
+    .query(`
+      SELECT *
+      FROM MenuTables
+      WHERE menuId = @menuId
+      ORDER BY id DESC
+    `);
+  return (result.recordset as Record<string, unknown>[]).map((row) =>
+    normalizeMenuTableRow(row),
+  );
+}
+
+function tableRowNumber(row: Record<string, unknown>): string | null {
+  const n = row.tableNumber ?? row.TableNumber;
+  if (n === undefined || n === null) return null;
+  return String(n).trim();
+}
+
+function tableRowId(row: Record<string, unknown>): number | null {
+  const id = row.id ?? row.Id;
+  if (id === undefined || id === null) return null;
+  const n = Number(id);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Resolve `table` like a row from GET /api/menus/:menuId/tables.
+ * - `?tableId=12` → match MenuTables.id
+ * - `?table=` / `?tableNumber=` → match tableNumber; if no hit and value is all digits, match id
+ */
+function resolvePublicMenuTable(
+  tables: Record<string, unknown>[],
+  opts: { tableNumber: string | null; tableId: number | null },
+): Record<string, unknown> | null {
+  const { tableNumber, tableId } = opts;
+
+  if (tableId !== null) {
+    const hit = tables.find((row) => tableRowId(row) === tableId);
+    return hit ?? null;
+  }
+
+  if (!tableNumber) return null;
+
+  const needle = tableNumber.trim();
+  const byLabel = tables.find((row) => {
+    const t = tableRowNumber(row);
+    return t !== null && t === needle;
+  });
+  if (byLabel) return byLabel;
+
+  if (/^\d+$/.test(needle)) {
+    const id = parseInt(needle, 10);
+    const byId = tables.find((row) => tableRowId(row) === id);
+    if (byId) return byId;
+  }
+
+  return { tableNumber: needle };
+}
 
 // Get all menus (no auth) - returns slug only as array
 export const getAllPublicMenus = async (req: Request, res: Response) => {
@@ -29,6 +117,9 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         : (req.query.locale as string) === "en"
           ? "en"
           : getLocaleFromAcceptLanguage(req, "en");
+
+    const tableNumber = parsePublicMenuTableNumber(req);
+    const tableId = parsePublicMenuTableId(req);
 
     const pool = await getPool();
 
@@ -80,6 +171,8 @@ export const getPublicMenu = async (req: Request, res: Response) => {
 
     // إذا كانت القائمة غير نشطة، أرسل بيانات محدودة لصفحة الصيانة فقط
     if (!menu.isActive) {
+      const tables = await fetchPublicMenuTablesForMenu(pool, menu.id);
+      const table = resolvePublicMenuTable(tables, { tableNumber, tableId });
       res.setHeader('Content-Language', locale);
       return res.json({
         success: true,
@@ -103,6 +196,8 @@ export const getPublicMenu = async (req: Request, res: Response) => {
             socialInstagram: menu.socialInstagram,
             socialTwitter: menu.socialTwitter,
             socialWhatsapp: menu.socialWhatsapp,
+            table,
+            tables,
           },
           items: [],
           itemsByCategory: {},
@@ -348,6 +443,9 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       `);
     }
 
+    const tables = await fetchPublicMenuTablesForMenu(pool, menu.id);
+    const table = resolvePublicMenuTable(tables, { tableNumber, tableId });
+
     res.json({
       success: true,
       data: {
@@ -374,6 +472,8 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           addressAr: menu.addressAr,
           phone: menu.phone,
           workingHours: menu.workingHours ? (typeof menu.workingHours === 'string' ? JSON.parse(menu.workingHours) : menu.workingHours) : null,
+          table,
+          tables,
         },
         customizations,
         categories: categories, // Add categories array
