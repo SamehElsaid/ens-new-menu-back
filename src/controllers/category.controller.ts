@@ -4,6 +4,21 @@ import { logger } from "../utils/logger";
 import { normalizeImageUrls } from "../utils/urlHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { getMenuAccessForRequest } from "../utils/menuAccess";
+import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+
+async function requireMenuAccess(
+  req: Request,
+  res: Response,
+  menuId: string,
+): Promise<boolean> {
+  const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+  if (!access.ok) {
+    sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
+    return false;
+  }
+  return true;
+}
 
 // Get all categories for a menu (with pagination)
 export async function getCategories(
@@ -11,7 +26,6 @@ export async function getCategories(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const { locale = "ar", page = "1", limit = "10" } = req.query;
 
@@ -21,17 +35,7 @@ export async function getCategories(
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Get total count for pagination
     const countResult = await pool
@@ -91,22 +95,11 @@ export async function getCategoryById(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, categoryId } = req.params;
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Get category with both translations
     const result = await pool
@@ -146,7 +139,6 @@ export async function createCategory(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const { nameAr, nameEn, imageUrl, image, sortOrder = 0 } = req.body;
 
@@ -161,17 +153,7 @@ export async function createCategory(
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Insert category
     const categoryResult = await pool
@@ -231,6 +213,13 @@ export async function createCategory(
       categoryId,
       category: createdCategory.recordset[0],
     });
+    void logMenuActivitySafe(req, parseInt(menuId, 10), {
+      action: "CATEGORY_CREATED",
+      targetType: "category",
+      targetId: Number(categoryId),
+      summaryAr: `إضافة تصنيف: ${String(nameAr)}`,
+      summaryEn: `Added category: ${String(nameEn)}`,
+    });
   } catch (error) {
     logger.error("Create category error:", error);
     sendApiError(res, req, 500, ApiErrors.failedCreateCategory);
@@ -243,7 +232,6 @@ export async function updateCategory(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, categoryId } = req.params;
     const { nameAr, nameEn, imageUrl, image, sortOrder, isActive } = req.body;
 
@@ -252,17 +240,7 @@ export async function updateCategory(
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Verify category belongs to menu
     const categoryCheck = await pool
@@ -331,6 +309,29 @@ export async function updateCategory(
     }
 
     res.json({ message: "Category updated successfully" });
+
+    const nameLog = await pool
+      .request()
+      .input("categoryId", sql.Int, parseInt(categoryId, 10))
+      .query(`
+        SELECT ar.name AS nameAr, en.name AS nameEn
+        FROM Categories c
+        LEFT JOIN CategoryTranslations ar ON c.id = ar.categoryId AND ar.locale = 'ar'
+        LEFT JOIN CategoryTranslations en ON c.id = en.categoryId AND en.locale = 'en'
+        WHERE c.id = @categoryId
+      `);
+    const cn = nameLog.recordset[0] as
+      | { nameAr?: string | null; nameEn?: string | null }
+      | undefined;
+    const labelAr = String(cn?.nameAr ?? "").trim() || "تصنيف";
+    const labelEn = String(cn?.nameEn ?? "").trim() || "Category";
+    void logMenuActivitySafe(req, parseInt(menuId, 10), {
+      action: "CATEGORY_UPDATED",
+      targetType: "category",
+      targetId: parseInt(categoryId, 10),
+      summaryAr: `تعديل تصنيف: ${labelAr}`,
+      summaryEn: `Updated category: ${labelEn}`,
+    });
   } catch (error) {
     logger.error("Update category error:", error);
     sendApiError(res, req, 500, ApiErrors.failedUpdateCategory);
@@ -343,22 +344,11 @@ export async function deleteCategory(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, categoryId } = req.params;
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Check if category has items
     const itemsCheck = await pool
@@ -376,7 +366,30 @@ export async function deleteCategory(
       return;
     }
 
-    // Delete category (translations will be deleted automatically due to CASCADE)
+    const namesBefore = await pool
+      .request()
+      .input("categoryId", sql.Int, parseInt(categoryId, 10))
+      .input("menuId", sql.Int, parseInt(menuId, 10))
+      .query(`
+        SELECT ar.name AS nameAr, en.name AS nameEn
+        FROM Categories c
+        LEFT JOIN CategoryTranslations ar ON c.id = ar.categoryId AND ar.locale = 'ar'
+        LEFT JOIN CategoryTranslations en ON c.id = en.categoryId AND en.locale = 'en'
+        WHERE c.id = @categoryId AND c.menuId = @menuId
+      `);
+
+    if (namesBefore.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.categoryNotFound);
+      return;
+    }
+
+    const cn = namesBefore.recordset[0] as {
+      nameAr?: string | null;
+      nameEn?: string | null;
+    };
+    const labelAr = String(cn?.nameAr ?? "").trim() || "تصنيف";
+    const labelEn = String(cn?.nameEn ?? "").trim() || "Category";
+
     const result = await pool
       .request()
       .input("categoryId", sql.Int, parseInt(categoryId))
@@ -391,6 +404,13 @@ export async function deleteCategory(
     }
 
     res.json({ message: "Category deleted successfully" });
+    void logMenuActivitySafe(req, parseInt(menuId, 10), {
+      action: "CATEGORY_DELETED",
+      targetType: "category",
+      targetId: parseInt(categoryId, 10),
+      summaryAr: `حذف تصنيف: ${labelAr}`,
+      summaryEn: `Deleted category: ${labelEn}`,
+    });
   } catch (error) {
     logger.error("Delete category error:", error);
     sendApiError(res, req, 500, ApiErrors.failedDeleteCategory);

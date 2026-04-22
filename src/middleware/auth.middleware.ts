@@ -37,9 +37,11 @@ export async function verifyToken(req: Request, res: Response, next: NextFunctio
 
     const decoded = verifyAccessToken(token);
     req.user = decoded;
-    
-    // Check and expire subscriptions for this user automatically
-    await checkAndExpireUserSubscription(decoded.userId);
+
+    // Staff JWT uses userId = MenuStaff.id — do not run owner subscription expiry on it
+    if (decoded.role !== ROLES.STAFF) {
+      await checkAndExpireUserSubscription(decoded.userId);
+    }
     
     next();
   } catch (error) {

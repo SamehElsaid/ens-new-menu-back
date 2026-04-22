@@ -5,24 +5,28 @@ import { logger } from "../utils/logger";
 import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { getMenuAccessForRequest } from "../utils/menuAccess";
+
+async function requireMenuAccess(
+  req: Request,
+  res: Response,
+  menuId: string,
+): Promise<boolean> {
+  const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+  if (!access.ok) {
+    sendApiError(res, req, 404, ApiErrors.menuNotFound);
+    return false;
+  }
+  return true;
+}
 
 export async function getTables(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
 
     const pool = await getPool();
 
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFound);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     const result = await pool
       .request()
@@ -49,21 +53,27 @@ export async function getTableById(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, tableId } = req.params;
 
     const pool = await getPool();
+
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
 
     const result = await pool
       .request()
       .input("tableId", sql.Int, parseInt(tableId))
       .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
+      .input("ownerUserId", sql.Int, ownerUserId)
       .query(`
         SELECT t.*
         FROM MenuTables t
         JOIN Menus m ON t.menuId = m.id
-        WHERE t.id = @tableId AND t.menuId = @menuId AND m.userId = @userId
+        WHERE t.id = @tableId AND t.menuId = @menuId AND m.userId = @ownerUserId
       `);
 
     if (result.recordset.length === 0) {
@@ -87,22 +97,12 @@ export async function createTable(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const { tableNumber, seats, isActive = true } = req.body;
 
     const pool = await getPool();
 
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFound);
-      return;
-    }
+    if (!(await requireMenuAccess(req, res, menuId))) return;
 
     const meta = await getMenuTablesColumnMeta();
     const { activeColumnQuoted: activeQ, seatsColumnQuoted: seatsQ } = meta;
@@ -149,22 +149,28 @@ export async function updateTable(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, tableId } = req.params;
     const { tableNumber, seats, isActive } = req.body;
 
     const pool = await getPool();
 
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
+
     const checkResult = await pool
       .request()
       .input("tableId", sql.Int, parseInt(tableId))
       .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
+      .input("ownerUserId", sql.Int, ownerUserId)
       .query(`
         SELECT t.id
         FROM MenuTables t
         JOIN Menus m ON t.menuId = m.id
-        WHERE t.id = @tableId AND t.menuId = @menuId AND m.userId = @userId
+        WHERE t.id = @tableId AND t.menuId = @menuId AND m.userId = @ownerUserId
       `);
 
     if (checkResult.recordset.length === 0) {
@@ -215,21 +221,27 @@ export async function deleteTable(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, tableId } = req.params;
 
     const pool = await getPool();
+
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
 
     const result = await pool
       .request()
       .input("tableId", sql.Int, parseInt(tableId))
       .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
+      .input("ownerUserId", sql.Int, ownerUserId)
       .query(`
         DELETE t
         FROM MenuTables t
         JOIN Menus m ON t.menuId = m.id
-        WHERE t.id = @tableId AND t.menuId = @menuId AND m.userId = @userId
+        WHERE t.id = @tableId AND t.menuId = @menuId AND m.userId = @ownerUserId
       `);
 
     if (result.rowsAffected[0] === 0) {

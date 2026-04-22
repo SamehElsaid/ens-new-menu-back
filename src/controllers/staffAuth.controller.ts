@@ -10,7 +10,14 @@ import {
   quoteMenuStaffIdent,
 } from "../config/menuStaffColumns";
 import { logger } from "../utils/logger";
-import { generateRefreshToken, generateStaffAccessToken } from "../utils/tokenHelper";
+import {
+  generateRefreshToken,
+  generateStaffAccessToken,
+} from "../utils/tokenHelper";
+import {
+  normalizeStaffJobRole,
+  STAFF_JOB_WAITER,
+} from "../config/staffJobRoles";
 import { RefreshTokenService } from "../services/refreshToken.service";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { ROLES } from "../config/constants";
@@ -167,11 +174,14 @@ export async function staffLogin(
     }
 
     const norm = normalizeStaffRow(staff, staffMeta);
+    const staffJobRole =
+      normalizeStaffJobRole(norm.role) ?? STAFF_JOB_WAITER;
     const tokenPayload = {
       id: staff.id as number,
       userId: staff.id as number,
       email: norm.email as string,
       role: ROLES.STAFF,
+      staffJobRole,
     };
 
     const accessToken = generateStaffAccessToken(tokenPayload);

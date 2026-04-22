@@ -6,6 +6,8 @@ export interface TokenPayload {
   userId: number;
   email: string;
   role: string;
+  /** When `role` is `staff`: `waiter` | `cashier` (see `staffJobRoles`). */
+  staffJobRole?: string;
 }
 
 // Validate JWT secrets on startup

@@ -94,6 +94,10 @@ export const ApiErrors = {
     en: 'Failed to get menu',
     ar: 'فشل جلب المنيو',
   },
+  failedListActivityLog: {
+    en: 'Failed to load activity history',
+    ar: 'فشل تحميل سجل النشاط',
+  },
   failedUpdateMenu: {
     en: 'Failed to update menu',
     ar: 'فشل تحديث المنيو',
@@ -217,6 +221,14 @@ export const ApiErrors = {
   passwordColumnNotConfigured: {
     en: 'Password column not configured on MenuStaff table',
     ar: 'عمود كلمة المرور غير مهيأ في جدول طاقم المنيو',
+  },
+  invalidStaffJobRole: {
+    en: 'Staff role must be waiter or cashier',
+    ar: 'يجب أن يكون دور الموظف نادلًا (waiter) أو كاشيرًا (cashier)',
+  },
+  staffCashierRequired: {
+    en: 'Only cashiers can access the restaurant dashboard',
+    ar: 'الدخول إلى لوحة التحكم متاح للكاشير فقط',
   },
   failedGetMenuItems: {
     en: 'Failed to get menu items',
