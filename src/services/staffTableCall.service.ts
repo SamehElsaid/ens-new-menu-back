@@ -457,6 +457,46 @@ export async function getMenuIdForStaff(
   }
 }
 
+/**
+ * Returns Expo push tokens of all active staff for a menu, de-duplicated.
+ * Empty array if the column does not exist or no staff registered a token.
+ */
+export async function getStaffPushTokensForMenu(
+  menuId: number,
+): Promise<string[]> {
+  try {
+    const meta = await getMenuStaffColumnMeta();
+    if (!meta.expoTokenColumnQuoted) return [];
+
+    const activeClause = meta.activeColumnQuoted
+      ? `AND (${meta.activeColumnQuoted} = 1 OR ${meta.activeColumnQuoted} IS NULL)`
+      : "";
+
+    const pool = await getPool();
+    const r = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .query(`
+        SELECT ${meta.expoTokenColumnQuoted} AS token
+        FROM MenuStaff
+        WHERE menuId = @menuId
+          AND ${meta.expoTokenColumnQuoted} IS NOT NULL
+          AND LEN(${meta.expoTokenColumnQuoted}) > 0
+          ${activeClause}
+      `);
+
+    const seen = new Set<string>();
+    for (const row of r.recordset as { token: string | null }[]) {
+      const t = (row.token ?? "").trim();
+      if (t.length > 0) seen.add(t);
+    }
+    return Array.from(seen);
+  } catch (error) {
+    logger.warn("getStaffPushTokensForMenu error:", error);
+    return [];
+  }
+}
+
 /** Read stored JSON (older rows may omit `price`). */
 function parseOrderItemsFromStored(raw: unknown): StaffOrderItem[] {
   if (!Array.isArray(raw)) return [];

@@ -11,7 +11,7 @@ import {
   processGuestStaffCall,
 } from "../services/staffTableCall.service";
 import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
-import { broadcastStaffTableCall } from "./staffIoBroadcast";
+import { notifyStaffOfTableCall } from "../services/staffNotify.service";
 
 const roomForMenu = (menuId: number) => `menu:${menuId}`;
 
@@ -121,7 +121,7 @@ export function attachStaffNotificationsSocket(
             return;
           }
 
-          broadcastStaffTableCall(result.menuId, {
+          await notifyStaffOfTableCall(result.menuId, {
             id: result.id,
             menuId: result.menuId,
             tableNumber: result.tableNumber,

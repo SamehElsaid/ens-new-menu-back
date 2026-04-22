@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { processGuestStaffCall } from "../services/staffTableCall.service";
-import { broadcastStaffTableCall } from "../socket/staffIoBroadcast";
+import { notifyStaffOfTableCall } from "../services/staffNotify.service";
 import { logger } from "../utils/logger";
 import { pickLocalized } from "../utils/apiErrorResponse";
 
@@ -62,7 +62,7 @@ export async function postGuestStaffCall(
       return;
     }
 
-    broadcastStaffTableCall(result.menuId, {
+    await notifyStaffOfTableCall(result.menuId, {
       id: result.id,
       menuId: result.menuId,
       tableNumber: result.tableNumber,
