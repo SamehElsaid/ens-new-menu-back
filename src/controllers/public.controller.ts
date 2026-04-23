@@ -31,10 +31,7 @@ async function fetchPublicMenuTablesForMenu(
     SELECT COUNT(*) as count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'MenuTables'
   `);
   if (!exists.recordset[0]?.count) return [];
-  const result = await pool
-    .request()
-    .input("menuId", sql.Int, menuId)
-    .query(`
+  const result = await pool.request().input("menuId", sql.Int, menuId).query(`
       SELECT *
       FROM MenuTables
       WHERE menuId = @menuId
@@ -173,7 +170,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     if (!menu.isActive) {
       const tables = await fetchPublicMenuTablesForMenu(pool, menu.id);
       const table = resolvePublicMenuTable(tables, { tableNumber, tableId });
-      res.setHeader('Content-Language', locale);
+      res.setHeader("Content-Language", locale);
       return res.json({
         success: true,
         data: {
@@ -227,7 +224,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       `);
 
     const existingColumns = columnCheck.recordset.map(
-      (r: any) => r.COLUMN_NAME
+      (r: any) => r.COLUMN_NAME,
     );
     const hasCategoryId = existingColumns.includes("categoryId");
     const hasOriginalPrice = existingColumns.includes("originalPrice");
@@ -286,7 +283,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       "mitEn.name as nameEn",
       "mitEn.description as descriptionEn",
       "mit.name",
-      "mit.description"
+      "mit.description",
     );
 
     // Add category names for both locales if Categories table exists
@@ -294,7 +291,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       selectFields.push(
         "ctAr.name as categoryNameAr",
         "ctEn.name as categoryNameEn",
-        "ct.name as categoryName"
+        "ct.name as categoryName",
       );
     }
 
@@ -303,7 +300,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       LEFT JOIN MenuItemTranslations mit ON mi.id = mit.menuItemId AND mit.locale = @locale
       LEFT JOIN MenuItemTranslations mitAr ON mi.id = mitAr.menuItemId AND mitAr.locale = 'ar'
       LEFT JOIN MenuItemTranslations mitEn ON mi.id = mitEn.menuItemId AND mitEn.locale = 'en'`;
-    
+
     if (hasCategoriesTable && hasCategoryId) {
       joinClause += `
           LEFT JOIN Categories c ON mi.categoryId = c.id
@@ -403,7 +400,8 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         : null;
 
     // Get menu ads based on owner's plan type
-    const planType = menu.ownerPlanType && menu.ownerPlanType !== "free" ? "paid" : "free";
+    const planType =
+      menu.ownerPlanType && menu.ownerPlanType !== "free" ? "paid" : "free";
     let ads: any[] = [];
 
     if (planType === "free") {
@@ -421,8 +419,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       // If paid plan, show custom menu ads
       const menuAdsResult = await pool
         .request()
-        .input("menuId", sql.Int, menu.id)
-        .query(`
+        .input("menuId", sql.Int, menu.id).query(`
           SELECT TOP (10)
             id, title, titleAr, content, contentAr, imageUrl, linkUrl,
             position, displayOrder
@@ -471,7 +468,11 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           addressEn: menu.addressEn,
           addressAr: menu.addressAr,
           phone: menu.phone,
-          workingHours: menu.workingHours ? (typeof menu.workingHours === 'string' ? JSON.parse(menu.workingHours) : menu.workingHours) : null,
+          workingHours: menu.workingHours
+            ? typeof menu.workingHours === "string"
+              ? JSON.parse(menu.workingHours)
+              : menu.workingHours
+            : null,
           table,
           tables,
         },
