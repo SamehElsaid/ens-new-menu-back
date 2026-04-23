@@ -7,6 +7,7 @@ import { getMenuTablesColumnMeta } from "../config/menuTablesColumns";
 import {
   getMenuStaffColumnMeta,
   getStaffIsActive,
+  quoteMenuStaffIdent,
 } from "../config/menuStaffColumns";
 import { logger } from "../utils/logger";
 import { isUserOnFreePlan } from "./subscriptionPlan.service";
@@ -425,6 +426,10 @@ export type StaffTableCallRow = {
   status: StaffTableCallStatus;
   /** Set when loaded from DB (e.g. snapshot) for confirmedAt mapping. */
   acknowledgedAt?: Date | null;
+  /** After optional migration `lastEditedByStaffId` / `lastEditedAt` on `StaffTableCalls`. */
+  lastEditedByStaffId?: number | null;
+  lastEditedAt?: Date | null;
+  lastEditedByName?: string | null;
 };
 
 export type StaffTableCallHistoryRow = StaffTableCallRow & {
@@ -599,6 +604,88 @@ function parseOrderItemsJson(
   }
 }
 
+type StaffTableCallsLastEditCols = { byId: boolean; at: boolean };
+let staffTableCallsLastEditColsCache: StaffTableCallsLastEditCols | null = null;
+
+/** Optional columns from migration `add-staffTableCalls-lastEdited.sql` (or equivalent). */
+async function getStaffTableCallsLastEditColFlags(): Promise<StaffTableCallsLastEditCols> {
+  if (staffTableCallsLastEditColsCache) {
+    return staffTableCallsLastEditColsCache;
+  }
+  const pool = await getPool();
+  const r = await pool.request().query(`
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = N'dbo' AND TABLE_NAME = N'StaffTableCalls'
+  `);
+  const lower = new Set(
+    (r.recordset as { COLUMN_NAME: string }[]).map((x) =>
+      String(x.COLUMN_NAME).toLowerCase(),
+    ),
+  );
+  staffTableCallsLastEditColsCache = {
+    byId: lower.has("lasteditedbystaffid"),
+    at: lower.has("lasteditedat"),
+  };
+  return staffTableCallsLastEditColsCache;
+}
+
+function toStaffTableCallRow(
+  row: {
+    id: number;
+    menuId: number;
+    tableNumber: string;
+    createdAt: Date;
+    customerName: string | null;
+    orderItemsJson?: string;
+    status?: string | null;
+    acknowledgedAt?: Date | null;
+    lastEditedByStaffId?: number | null;
+    lastEditedAt?: Date | null;
+    lastEditedByName?: string | null;
+  },
+  includeLastEdit: boolean,
+): StaffTableCallRow {
+  const items = parseOrderItemsJson(row.orderItemsJson);
+  const status = normalizeStaffTableCallStatus(
+    row.status,
+    row.acknowledgedAt ?? null,
+  );
+  const base: StaffTableCallRow = {
+    id: row.id,
+    menuId: row.menuId,
+    tableNumber: String(row.tableNumber),
+    createdAt: row.createdAt,
+    customerName:
+      row.customerName != null && String(row.customerName).trim() !== ""
+        ? String(row.customerName).trim()
+        : null,
+    items,
+    orderTotal: computeOrderTotalFromItems(items),
+    status,
+    acknowledgedAt: row.acknowledgedAt ?? null,
+  };
+  if (includeLastEdit) {
+    const sid = row.lastEditedByStaffId;
+    const sidNum =
+      sid != null && Number.isFinite(Number(sid)) ? Math.floor(Number(sid)) : null;
+    base.lastEditedByStaffId = sidNum && sidNum > 0 ? sidNum : null;
+    if (row.lastEditedAt != null) {
+      const d =
+        row.lastEditedAt instanceof Date
+          ? row.lastEditedAt
+          : new Date(String(row.lastEditedAt));
+      base.lastEditedAt = !Number.isNaN(d.getTime()) ? d : null;
+    } else {
+      base.lastEditedAt = null;
+    }
+    const nm = row.lastEditedByName;
+    base.lastEditedByName =
+      nm != null && String(nm).trim() !== "" ? String(nm).trim() : null;
+  }
+  return base;
+}
+
 export async function createStaffTableCall(
   menuId: number,
   tableNumber: string,
@@ -645,11 +732,40 @@ export async function getStaffTableCallSnapshot(
 ): Promise<StaffTableCallRow | null> {
   try {
     const pool = await getPool();
-    const result = await pool
-      .request()
-      .input("menuId", sql.Int, menuId)
-      .input("id", sql.Int, callId)
-      .query(`
+    const flags = await getStaffTableCallsLastEditColFlags();
+    const hasLast = flags.byId && flags.at;
+    let result;
+    if (hasLast) {
+      const ms = await getMenuStaffColumnMeta();
+      const nameCol = quoteMenuStaffIdent(ms.nameKey);
+      result = await pool
+        .request()
+        .input("menuId", sql.Int, menuId)
+        .input("id", sql.Int, callId)
+        .query(`
+        SELECT
+          c.id,
+          c.menuId,
+          c.tableNumber,
+          c.createdAt,
+          c.customerName,
+          c.orderItemsJson,
+          c.status,
+          c.acknowledgedAt,
+          c.lastEditedByStaffId,
+          c.lastEditedAt,
+          sm.${nameCol} AS lastEditedByName
+        FROM StaffTableCalls c
+        LEFT JOIN MenuStaff sm
+          ON sm.id = c.lastEditedByStaffId AND sm.menuId = c.menuId
+        WHERE c.id = @id AND c.menuId = @menuId
+      `);
+    } else {
+      result = await pool
+        .request()
+        .input("menuId", sql.Int, menuId)
+        .input("id", sql.Int, callId)
+        .query(`
         SELECT
           id,
           menuId,
@@ -662,6 +778,7 @@ export async function getStaffTableCallSnapshot(
         FROM StaffTableCalls
         WHERE id = @id AND menuId = @menuId
       `);
+    }
     const row = result.recordset[0] as
       | {
           id: number;
@@ -672,30 +789,15 @@ export async function getStaffTableCallSnapshot(
           orderItemsJson?: string;
           status?: string | null;
           acknowledgedAt?: Date | null;
+          lastEditedByStaffId?: number | null;
+          lastEditedAt?: Date | null;
+          lastEditedByName?: string | null;
         }
       | undefined;
     if (!row) {
       return null;
     }
-    const items = parseOrderItemsJson(row.orderItemsJson);
-    const status = normalizeStaffTableCallStatus(
-      row.status,
-      row.acknowledgedAt ?? null,
-    );
-    return {
-      id: row.id,
-      menuId: row.menuId,
-      tableNumber: String(row.tableNumber),
-      createdAt: row.createdAt,
-      customerName:
-        row.customerName != null && String(row.customerName).trim() !== ""
-          ? String(row.customerName).trim()
-          : null,
-      items,
-      orderTotal: computeOrderTotalFromItems(items),
-      status,
-      acknowledgedAt: row.acknowledgedAt ?? null,
-    };
+    return toStaffTableCallRow(row, hasLast);
   } catch (error) {
     logger.error("getStaffTableCallSnapshot error:", error);
     return null;
@@ -786,12 +888,44 @@ export async function getStaffTableCallsHistory(
       `);
     const total = Number(totalResult.recordset[0]?.total ?? 0);
 
-    const rowsResult = await pool
-      .request()
-      .input("menuId", sql.Int, menuId)
-      .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, safeLimit)
-      .query(`
+    const flags = await getStaffTableCallsLastEditColFlags();
+    const hasLast = flags.byId && flags.at;
+    let rowsResult;
+    if (hasLast) {
+      const ms = await getMenuStaffColumnMeta();
+      const nameCol = quoteMenuStaffIdent(ms.nameKey);
+      rowsResult = await pool
+        .request()
+        .input("menuId", sql.Int, menuId)
+        .input("offset", sql.Int, offset)
+        .input("limit", sql.Int, safeLimit)
+        .query(`
+        SELECT
+          c.id,
+          c.menuId,
+          c.tableNumber,
+          c.createdAt,
+          c.acknowledgedAt,
+          c.customerName,
+          c.orderItemsJson,
+          c.status,
+          c.lastEditedByStaffId,
+          c.lastEditedAt,
+          sm.${nameCol} AS lastEditedByName
+        FROM StaffTableCalls c
+        LEFT JOIN MenuStaff sm
+          ON sm.id = c.lastEditedByStaffId AND sm.menuId = c.menuId
+        WHERE c.menuId = @menuId
+        ORDER BY c.createdAt DESC
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      `);
+    } else {
+      rowsResult = await pool
+        .request()
+        .input("menuId", sql.Int, menuId)
+        .input("offset", sql.Int, offset)
+        .input("limit", sql.Int, safeLimit)
+        .query(`
         SELECT
           id,
           menuId,
@@ -806,34 +940,24 @@ export async function getStaffTableCallsHistory(
         ORDER BY createdAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
+    }
 
-    const rows = (rowsResult.recordset as StaffTableCallHistoryRow[]).map(
+    const rows = (rowsResult.recordset as Record<string, unknown>[]).map(
       (row) => {
-        const items = parseOrderItemsJson(
-          (row as { orderItemsJson?: string }).orderItemsJson,
-        );
         const r = row as {
+          id: number;
+          menuId: number;
+          tableNumber: string;
+          createdAt: Date;
+          customerName: string | null;
+          orderItemsJson?: string;
           status?: string | null;
           acknowledgedAt?: Date | null;
+          lastEditedByStaffId?: number | null;
+          lastEditedAt?: Date | null;
+          lastEditedByName?: string | null;
         };
-        const status = normalizeStaffTableCallStatus(
-          r.status,
-          r.acknowledgedAt ?? null,
-        );
-        return {
-          id: row.id,
-          menuId: row.menuId,
-          tableNumber: String(row.tableNumber),
-          createdAt: row.createdAt,
-          acknowledgedAt: row.acknowledgedAt ?? null,
-          customerName:
-            row.customerName != null && String(row.customerName).trim() !== ""
-              ? String(row.customerName).trim()
-              : null,
-          items,
-          orderTotal: computeOrderTotalFromItems(items),
-          status,
-        };
+        return toStaffTableCallRow(r, hasLast) as StaffTableCallHistoryRow;
       },
     );
 
@@ -858,6 +982,14 @@ const pendingWhereSql = `
   (
     status = N'pending'
     OR (status IS NULL AND acknowledgedAt IS NULL)
+  )
+`;
+
+/** Pending or confirmed — staff may still adjust `orderItemsJson` (not cancelled). */
+const editableOrderItemsWhereSql = `
+  (
+    status = N'confirmed'
+    OR (status = N'pending' OR (status IS NULL AND acknowledgedAt IS NULL))
   )
 `;
 
@@ -904,18 +1036,21 @@ export async function setStaffTableCallStatus(
 export type UpdateStaffCallItemsError =
   | "NOT_FOUND"
   | "NOT_PENDING"
+  | "NOT_EDITABLE"
   | "INVALID_PAYLOAD"
   | "INVALID_ORDER_ITEMS"
   | "SERVER_ERROR";
 
 /**
- * Staff edits line quantities / removes lines while order is still pending.
+ * Staff edits line quantities / removes lines while the order is pending or after confirm.
  * Replaces `orderItemsJson` with enriched items and recomputed line totals.
+ * Cancelled orders are not editable.
  */
 export async function updateStaffTableCallItems(
   callId: number,
   menuId: number,
   itemsRaw: unknown,
+  editorStaffId: number,
 ): Promise<
   | {
       ok: true;
@@ -924,6 +1059,7 @@ export async function updateStaffTableCallItems(
       tableNumber: string;
       customerName: string | null;
       createdAt: Date;
+      status: StaffTableCallStatus;
     }
   | { ok: false; error: UpdateStaffCallItemsError }
 > {
@@ -932,6 +1068,9 @@ export async function updateStaffTableCallItems(
     return { ok: false, error: "INVALID_PAYLOAD" };
   }
   const itemsIn = parsed.items;
+  if (!Number.isFinite(editorStaffId) || editorStaffId <= 0) {
+    return { ok: false, error: "SERVER_ERROR" };
+  }
 
   try {
     const pool = await getPool();
@@ -960,8 +1099,11 @@ export async function updateStaffTableCallItems(
       row.status,
       row.acknowledgedAt ?? null,
     );
-    if (st !== "pending") {
-      return { ok: false, error: "NOT_PENDING" };
+    if (st === "cancelled") {
+      return { ok: false, error: "NOT_EDITABLE" };
+    }
+    if (st !== "pending" && st !== "confirmed") {
+      return { ok: false, error: "NOT_EDITABLE" };
     }
 
     const idsForCheck = itemsIn
@@ -986,21 +1128,39 @@ export async function updateStaffTableCallItems(
     const orderJson =
       itemsResolved.length > 0 ? JSON.stringify(itemsResolved) : null;
 
-    const upd = await pool
-      .request()
-      .input("id", sql.Int, callId)
-      .input("menuId", sql.Int, menuId)
-      .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson).query(`
+    const flags = await getStaffTableCallsLastEditColFlags();
+    const hasLast = flags.byId && flags.at;
+
+    let upd;
+    if (hasLast) {
+      upd = await pool
+        .request()
+        .input("id", sql.Int, callId)
+        .input("menuId", sql.Int, menuId)
+        .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson)
+        .input("editorStaffId", sql.Int, editorStaffId).query(`
+        UPDATE StaffTableCalls
+        SET orderItemsJson = @orderItemsJson,
+            lastEditedByStaffId = @editorStaffId,
+            lastEditedAt = SYSUTCDATETIME()
+        WHERE id = @id AND menuId = @menuId
+          AND ${editableOrderItemsWhereSql}
+      `);
+    } else {
+      upd = await pool
+        .request()
+        .input("id", sql.Int, callId)
+        .input("menuId", sql.Int, menuId)
+        .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson)
+        .query(`
         UPDATE StaffTableCalls
         SET orderItemsJson = @orderItemsJson
         WHERE id = @id AND menuId = @menuId
-          AND (
-            status = N'pending'
-            OR (status IS NULL AND acknowledgedAt IS NULL)
-          )
+          AND ${editableOrderItemsWhereSql}
       `);
+    }
     if ((upd.rowsAffected?.[0] ?? 0) === 0) {
-      return { ok: false, error: "NOT_PENDING" };
+      return { ok: false, error: "NOT_EDITABLE" };
     }
 
     return {
@@ -1013,6 +1173,7 @@ export async function updateStaffTableCallItems(
           ? String(row.customerName).trim()
           : null,
       createdAt: row.createdAt,
+      status: st,
     };
   } catch (error) {
     logger.error("updateStaffTableCallItems error:", error);

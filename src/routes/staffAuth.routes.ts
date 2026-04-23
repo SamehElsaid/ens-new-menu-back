@@ -70,7 +70,7 @@ router.patch(
   staffTableCallController.patchTableCallStatus,
 );
 
-// PATCH /api/staff-auth/table-calls/:id/items — edit cart lines while pending
+// PATCH /api/staff-auth/table-calls/:id/items — edit cart lines (pending or confirmed; not cancelled)
 router.patch(
   "/table-calls/:id/items",
   requireStaff,

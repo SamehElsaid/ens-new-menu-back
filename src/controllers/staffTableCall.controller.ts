@@ -12,7 +12,10 @@ import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
 import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
-import { broadcastStaffTableCallChanged } from "../socket/staffIoBroadcast";
+import {
+  broadcastStaffTableCallChanged,
+  type StaffTableCallChangedPayload,
+} from "../socket/staffIoBroadcast";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 
 function tableCallSummaries(
@@ -86,7 +89,7 @@ async function emitCallChanged(
 ): Promise<void> {
   const snap = await getStaffTableCallSnapshot(menuId, callId);
   if (!snap) return;
-  broadcastStaffTableCallChanged(menuId, {
+  const payload: StaffTableCallChangedPayload = {
     id: snap.id,
     menuId: snap.menuId,
     tableNumber: snap.tableNumber,
@@ -95,7 +98,17 @@ async function emitCallChanged(
     items: snap.items,
     orderTotal: snap.orderTotal,
     status: snap.status,
-  });
+  };
+  if (snap.lastEditedByStaffId != null) {
+    payload.lastEditedByStaffId = snap.lastEditedByStaffId;
+  }
+  if (snap.lastEditedAt) {
+    payload.lastEditedAt = snap.lastEditedAt.toISOString();
+  }
+  if (snap.lastEditedByName) {
+    payload.lastEditedByName = snap.lastEditedByName;
+  }
+  broadcastStaffTableCallChanged(menuId, payload);
 }
 
 /**
@@ -407,7 +420,7 @@ export async function patchTableCallStatus(
 }
 
 /**
- * PATCH /api/staff-auth/table-calls/:id/items — edit quantities / lines while pending
+ * PATCH /api/staff-auth/table-calls/:id/items — edit quantities / lines (pending or confirmed; each save is logged to MenuActivity)
  * Body: { items: same shape as guest staff-call }
  */
 export async function patchTableCallItems(
@@ -439,6 +452,7 @@ export async function patchTableCallItems(
       callId,
       menuId,
       req.body?.items,
+      staffId,
     );
 
     if (!result.ok) {
@@ -446,8 +460,15 @@ export async function patchTableCallItems(
         sendApiError(res, req, 404, ApiErrors.callNotFoundOrNotPending);
         return;
       }
-      if (result.error === "NOT_PENDING") {
-        sendApiError(res, req, 409, ApiErrors.callNotFoundOrNotPending);
+      if (result.error === "NOT_EDITABLE" || result.error === "NOT_PENDING") {
+        sendApiError(
+          res,
+          req,
+          409,
+          result.error === "NOT_EDITABLE"
+            ? ApiErrors.tableCallNotEditable
+            : ApiErrors.callNotFoundOrNotPending,
+        );
         return;
       }
       if (
@@ -466,7 +487,10 @@ export async function patchTableCallItems(
     res.json({
       items: result.items,
       orderTotal: result.orderTotal,
-      status: "pending" as const,
+      status: result.status,
+      lastEditedByStaffId: snapItems?.lastEditedByStaffId ?? null,
+      lastEditedAt: snapItems?.lastEditedAt?.toISOString() ?? null,
+      lastEditedByName: snapItems?.lastEditedByName ?? null,
     });
     const sums = tableCallSummaries(snapItems, { type: "items" });
     void logMenuActivitySafe(req, menuId, {
@@ -475,6 +499,7 @@ export async function patchTableCallItems(
       targetId: callId,
       summaryAr: sums.ar,
       summaryEn: sums.en,
+      detailJson: JSON.stringify({ staffId, orderStatus: result.status }),
     });
   } catch (error) {
     logger.error("patchTableCallItems error:", error);

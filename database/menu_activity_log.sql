@@ -1,4 +1,6 @@
 -- Activity / audit log per menu (products, staff, settings, table orders).
+-- Table / staff calls: actions like TABLE_CALL_ITEMS_UPDATED, TABLE_CALL_CONFIRMED, …
+-- (written by logMenuActivitySafe → INSERT into this table.)
 -- Run once on the target database.
 
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'MenuActivityLog')

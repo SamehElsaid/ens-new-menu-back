@@ -154,6 +154,10 @@ export const ApiErrors = {
     en: 'Order not found, wrong menu, or not in pending status',
     ar: 'الطلب غير موجود أو لمنيو مختلف أو ليس بحالة انتظار',
   },
+  tableCallNotEditable: {
+    en: 'This order is cancelled or no longer allows editing items',
+    ar: 'الطلب ملغى أو لم يعد يقبل تعديل الأصناف',
+  },
   failedCallStatusUpdate: {
     en: 'Failed to update order status',
     ar: 'فشل تحديث حالة الطلب',

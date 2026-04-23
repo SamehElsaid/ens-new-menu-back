@@ -24,6 +24,10 @@ export type StaffTableCallBroadcastPayload = {
   orderTotal: number;
   /** New orders from the view start as `pending`. */
   status: StaffTableCallStatus;
+  /** Filled when staff changes items after create (if DB has last-edited columns). */
+  lastEditedByStaffId?: number | null;
+  lastEditedAt?: string | null;
+  lastEditedByName?: string | null;
 };
 
 /** After confirm / cancel / staff edits while pending. */
