@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { resolveProYearlyAmount } from "../config/proYearlyPricing";
 import { getPool, sql } from "../config/database";
 import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
@@ -31,10 +32,7 @@ async function fetchPublicMenuTablesForMenu(
     SELECT COUNT(*) as count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'MenuTables'
   `);
   if (!exists.recordset[0]?.count) return [];
-  const result = await pool
-    .request()
-    .input("menuId", sql.Int, menuId)
-    .query(`
+  const result = await pool.request().input("menuId", sql.Int, menuId).query(`
       SELECT *
       FROM MenuTables
       WHERE menuId = @menuId
@@ -173,7 +171,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     if (!menu.isActive) {
       const tables = await fetchPublicMenuTablesForMenu(pool, menu.id);
       const table = resolvePublicMenuTable(tables, { tableNumber, tableId });
-      res.setHeader('Content-Language', locale);
+      res.setHeader("Content-Language", locale);
       return res.json({
         success: true,
         data: {
@@ -227,7 +225,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       `);
 
     const existingColumns = columnCheck.recordset.map(
-      (r: any) => r.COLUMN_NAME
+      (r: any) => r.COLUMN_NAME,
     );
     const hasCategoryId = existingColumns.includes("categoryId");
     const hasOriginalPrice = existingColumns.includes("originalPrice");
@@ -286,7 +284,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       "mitEn.name as nameEn",
       "mitEn.description as descriptionEn",
       "mit.name",
-      "mit.description"
+      "mit.description",
     );
 
     // Add category names for both locales if Categories table exists
@@ -294,7 +292,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       selectFields.push(
         "ctAr.name as categoryNameAr",
         "ctEn.name as categoryNameEn",
-        "ct.name as categoryName"
+        "ct.name as categoryName",
       );
     }
 
@@ -303,7 +301,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       LEFT JOIN MenuItemTranslations mit ON mi.id = mit.menuItemId AND mit.locale = @locale
       LEFT JOIN MenuItemTranslations mitAr ON mi.id = mitAr.menuItemId AND mitAr.locale = 'ar'
       LEFT JOIN MenuItemTranslations mitEn ON mi.id = mitEn.menuItemId AND mitEn.locale = 'en'`;
-    
+
     if (hasCategoriesTable && hasCategoryId) {
       joinClause += `
           LEFT JOIN Categories c ON mi.categoryId = c.id
@@ -403,7 +401,8 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         : null;
 
     // Get menu ads based on owner's plan type
-    const planType = menu.ownerPlanType && menu.ownerPlanType !== "free" ? "paid" : "free";
+    const planType =
+      menu.ownerPlanType && menu.ownerPlanType !== "free" ? "paid" : "free";
     let ads: any[] = [];
 
     if (planType === "free") {
@@ -421,8 +420,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       // If paid plan, show custom menu ads
       const menuAdsResult = await pool
         .request()
-        .input("menuId", sql.Int, menu.id)
-        .query(`
+        .input("menuId", sql.Int, menu.id).query(`
           SELECT TOP (10)
             id, title, titleAr, content, contentAr, imageUrl, linkUrl,
             position, displayOrder
@@ -471,7 +469,11 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           addressEn: menu.addressEn,
           addressAr: menu.addressAr,
           phone: menu.phone,
-          workingHours: menu.workingHours ? (typeof menu.workingHours === 'string' ? JSON.parse(menu.workingHours) : menu.workingHours) : null,
+          workingHours: menu.workingHours
+            ? typeof menu.workingHours === "string"
+              ? JSON.parse(menu.workingHours)
+              : menu.workingHours
+            : null,
           table,
           tables,
         },
@@ -598,11 +600,25 @@ export const getPublicPlans = async (req: Request, res: Response) => {
       ORDER BY priceMonthly ASC
     `);
 
-    // Parse features JSON for each plan
-    const plans = result.recordset.map((plan) => ({
-      ...plan,
-      features: plan.features ? JSON.parse(plan.features) : [],
-    }));
+    const plans = result.recordset.map((plan) => {
+      const row = plan as Record<string, unknown>;
+      let priceMonthly = plan.priceMonthly;
+      let priceYearly = plan.priceYearly;
+      if (
+        String(plan.name ?? "")
+          .trim()
+          .toLowerCase() === "pro"
+      ) {
+        priceMonthly = 0;
+        priceYearly = resolveProYearlyAmount(Number(plan.priceYearly));
+      }
+      return {
+        ...row,
+        priceMonthly,
+        priceYearly,
+        features: plan.features ? JSON.parse(String(plan.features)) : [],
+      };
+    });
 
     res.json({
       success: true,

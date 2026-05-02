@@ -32,6 +32,7 @@ import uploadRoutes from "./routes/upload.routes";
 import adsRoutes from "./routes/ads.routes";
 import notificationRoutes from "./routes/notification.routes";
 import staffAuthRoutes from "./routes/staffAuth.routes";
+import paymentRoutes from "./routes/paymentRoutes";
 
 // ------------------------------------------------------------------
 
@@ -81,7 +82,7 @@ app.use(
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
-  })
+  }),
 );
 
 // ------------------------------------------------------------------
@@ -98,7 +99,7 @@ app.use(
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     next();
   },
-  express.static(path.join(__dirname, "../uploads"))
+  express.static(path.join(__dirname, "../uploads")),
 );
 
 // ------------------------------------------------------------------
@@ -128,6 +129,8 @@ app.use("/api/staff-auth", staffAuthRoutes);
 app.use("/api/api/staff-auth", staffAuthRoutes);
 app.use("/api/menus", menuRoutes);
 app.use("/api/menus", menuItemsRoutes);
+// Must be before app.use("/api", categoryRoutes): that router runs requireAuth on all /api/* paths
+app.use("/api/payment", paymentRoutes);
 app.use("/api", categoryRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
