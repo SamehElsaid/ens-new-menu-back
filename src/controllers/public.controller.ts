@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { resolveProYearlyAmount } from "../config/proYearlyPricing";
 import { getPool, sql } from "../config/database";
 import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
@@ -599,11 +600,25 @@ export const getPublicPlans = async (req: Request, res: Response) => {
       ORDER BY priceMonthly ASC
     `);
 
-    // Parse features JSON for each plan
-    const plans = result.recordset.map((plan) => ({
-      ...plan,
-      features: plan.features ? JSON.parse(plan.features) : [],
-    }));
+    const plans = result.recordset.map((plan) => {
+      const row = plan as Record<string, unknown>;
+      let priceMonthly = plan.priceMonthly;
+      let priceYearly = plan.priceYearly;
+      if (
+        String(plan.name ?? "")
+          .trim()
+          .toLowerCase() === "pro"
+      ) {
+        priceMonthly = 0;
+        priceYearly = resolveProYearlyAmount(Number(plan.priceYearly));
+      }
+      return {
+        ...row,
+        priceMonthly,
+        priceYearly,
+        features: plan.features ? JSON.parse(String(plan.features)) : [],
+      };
+    });
 
     res.json({
       success: true,

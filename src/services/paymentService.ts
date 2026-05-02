@@ -1,8 +1,11 @@
 import { getPool, sql } from "../config/database";
+import {
+  PRO_YEARLY_CURRENCY,
+  resolveProYearlyAmount,
+} from "../config/proYearlyPricing";
 import { ApiError } from "../middleware/errorHandler";
 import * as notificationService from "./notificationService";
 import crypto from "crypto";
-
 
 export interface InitiatePaymentData {
   order_id: string;
@@ -66,10 +69,7 @@ export class PaymentService {
   }
 
   /** Avoid https://host//path — double slash makes browsers treat //segment as another host (e.g. "ar"). */
-  private static joinPublicUrl(
-    base: string | undefined,
-    path: string
-  ): string {
+  private static joinPublicUrl(base: string | undefined, path: string): string {
     const b = (base || "").replace(/\/+$/, "");
     const p = path.startsWith("/") ? path : `/${path}`;
     return `${b}${p}`;
@@ -83,10 +83,7 @@ export class PaymentService {
       .trim()
       .toLowerCase();
     return (
-      s === "paid" ||
-      s === "success" ||
-      s === "completed" ||
-      s === "delivered"
+      s === "paid" || s === "success" || s === "completed" || s === "delivered"
     );
   }
 
@@ -111,11 +108,10 @@ export class PaymentService {
    */
   static async decrementStockForOrder(
     orderId: string,
-    transaction?: sql.Transaction
+    transaction?: sql.Transaction,
   ): Promise<void> {
     const pool = transaction ? null : await getPool();
-    const rq = () =>
-      transaction ? transaction.request() : pool!.request();
+    const rq = () => (transaction ? transaction.request() : pool!.request());
 
     let items: sql.IResult<{
       product_id: string;
@@ -123,9 +119,7 @@ export class PaymentService {
       stock_quantity: number | null;
     }>;
     try {
-      items = await rq()
-        .input("orderId", sql.UniqueIdentifier, orderId)
-        .query(`
+      items = await rq().input("orderId", sql.UniqueIdentifier, orderId).query(`
         SELECT oi.product_id, oi.quantity, p.stock_quantity
         FROM order_items oi
         INNER JOIN products p ON p.id = oi.product_id
@@ -134,13 +128,10 @@ export class PaymentService {
     } catch (e: unknown) {
       const m = e instanceof Error ? e.message : String(e);
       const num = (e as { number?: number })?.number;
-      if (
-        num === 208 ||
-        /Invalid object name|order_items/i.test(m)
-      ) {
+      if (num === 208 || /Invalid object name|order_items/i.test(m)) {
         console.warn(
           "decrementStockForOrder: skipped (no order_items / products in DB):",
-          m
+          m,
         );
         return;
       }
@@ -152,8 +143,7 @@ export class PaymentService {
 
       const stockResult = await rq()
         .input("product_id", sql.UniqueIdentifier, row.product_id)
-        .input("qty", sql.Int, row.quantity)
-        .query(`
+        .input("qty", sql.Int, row.quantity).query(`
           UPDATE products
           SET stock_quantity = stock_quantity - @qty,
               updated_at = GETDATE()
@@ -166,7 +156,7 @@ export class PaymentService {
       if (stockResult.rowsAffected[0] === 0) {
         throw new ApiError(
           400,
-          `Insufficient stock for product: ${row.product_id}`
+          `Insufficient stock for product: ${row.product_id}`,
         );
       }
     }
@@ -193,8 +183,7 @@ export class PaymentService {
 
     const payUp = await pool
       .request()
-      .input("id", sql.UniqueIdentifier, payment.id)
-      .query(`
+      .input("id", sql.UniqueIdentifier, payment.id).query(`
         UPDATE payments
         SET payment_status = 'cancelled', updated_at = GETDATE()
         WHERE id = @id AND payment_status = 'pending'
@@ -206,8 +195,7 @@ export class PaymentService {
 
     const ordUp = await pool
       .request()
-      .input("orderId", sql.UniqueIdentifier, payment.order_id)
-      .query(`
+      .input("orderId", sql.UniqueIdentifier, payment.order_id).query(`
         UPDATE [subscriptionCheckout]
         SET status = 'cancelled', updated_at = GETDATE()
         WHERE id = @orderId AND status = 'pending'
@@ -226,7 +214,7 @@ export class PaymentService {
     opts: {
       easykashRef?: string | null;
       paymentProvider?: string | null;
-    }
+    },
   ): Promise<void> {
     const pool = await getPool();
     const easykashRef = opts.easykashRef ?? null;
@@ -239,8 +227,7 @@ export class PaymentService {
         .request()
         .input("paymentId", sql.UniqueIdentifier, paymentId)
         .input("easykashRef", sql.NVarChar(255), easykashRef)
-        .input("payment_provider", sql.NVarChar(255), payment_provider)
-        .query(`
+        .input("payment_provider", sql.NVarChar(255), payment_provider).query(`
           UPDATE payments 
           SET 
             payment_status = 'completed',
@@ -268,7 +255,7 @@ export class PaymentService {
         await trx.rollback();
         console.warn(
           "EasyKash payment completion rolled back: order not pending",
-          orderId
+          orderId,
         );
         return;
       }
@@ -278,8 +265,7 @@ export class PaymentService {
       await trx
         .request()
         .input("orderId", sql.UniqueIdentifier, orderId)
-        .input("orderStatus", sql.NVarChar(20), "confirmed")
-        .query(`
+        .input("orderStatus", sql.NVarChar(20), "confirmed").query(`
             UPDATE [subscriptionCheckout] 
             SET 
               status = @orderStatus,
@@ -312,7 +298,7 @@ export class PaymentService {
       payment_provider?: string | null;
     },
     status: string | null | undefined,
-    providerRefNum?: string | null
+    providerRefNum?: string | null,
   ): Promise<boolean> {
     if (!this.isBrowserRedirectPaid(status)) {
       return false;
@@ -325,7 +311,7 @@ export class PaymentService {
     }
 
     console.log(
-      "🔄 Completing EasyKash payment from browser redirect (webhook may have missed or been delayed)"
+      "🔄 Completing EasyKash payment from browser redirect (webhook may have missed or been delayed)",
     );
 
     await this.applyEasykashPaymentCompleted(payment.id, payment.order_id, {
@@ -383,7 +369,7 @@ export class PaymentService {
 
       const order = orderCheck.recordset[0];
       const orderTotal = Number(
-        (order as { total?: number | string | null }).total ?? NaN
+        (order as { total?: number | string | null }).total ?? NaN,
       );
 
       // Check if order is already paid
@@ -430,13 +416,10 @@ export class PaymentService {
       // Use redirectUrl from request or default to frontend callback page
       const redirectUrl =
         data.redirectUrl ||
-        this.joinPublicUrl(
-          this.getFrontendPublicBase(),
-          "/payment/callback"
-        );
+        this.joinPublicUrl(this.getFrontendPublicBase(), "/payment/callback");
       const callbackUrl = this.joinPublicUrl(
         this.getBackendPublicBase(),
-        "/api/payment/easykash/callback"
+        "/api/payment/easykash/callback",
       );
 
       console.log("═══════════════════════════════════════");
@@ -494,7 +477,7 @@ export class PaymentService {
         const errorData: any = await response.json().catch(() => ({}));
         throw new ApiError(
           response.status,
-          `EasyKash API error: ${errorData.message || response.statusText}`
+          `EasyKash API error: ${errorData.message || response.statusText}`,
         );
       }
 
@@ -550,7 +533,7 @@ export class PaymentService {
     orderId: string,
     ownerUserId: number,
     price: number,
-    customerPhone: string
+    customerPhone: string,
   ): Promise<void> {
     const attempts: Array<() => ReturnType<sql.Request["query"]>> = [
       () =>
@@ -559,8 +542,7 @@ export class PaymentService {
           .input("id", sql.UniqueIdentifier, orderId)
           .input("userId", sql.Int, ownerUserId)
           .input("total", sql.Decimal(10, 2), price)
-          .input("phone", sql.NVarChar(50), customerPhone)
-          .query(`
+          .input("phone", sql.NVarChar(50), customerPhone).query(`
             INSERT INTO [subscriptionCheckout] (id, user_id, total_price, status, customer_first_name, customer_last_name, customer_phone, created_at, updated_at)
             VALUES (@id, @userId, @total, N'pending', N'Subscription', N'Pro', @phone, GETDATE(), GETDATE())
           `),
@@ -569,8 +551,7 @@ export class PaymentService {
           .request()
           .input("id", sql.UniqueIdentifier, orderId)
           .input("userId", sql.Int, ownerUserId)
-          .input("total", sql.Decimal(10, 2), price)
-          .query(`
+          .input("total", sql.Decimal(10, 2), price).query(`
             INSERT INTO [subscriptionCheckout] (id, user_id, total_price, status, created_at, updated_at)
             VALUES (@id, @userId, @total, N'pending', GETDATE(), GETDATE())
           `),
@@ -579,8 +560,7 @@ export class PaymentService {
           .request()
           .input("id", sql.UniqueIdentifier, orderId)
           .input("userId", sql.Int, ownerUserId)
-          .input("total", sql.Decimal(10, 2), price)
-          .query(`
+          .input("total", sql.Decimal(10, 2), price).query(`
             INSERT INTO [subscriptionCheckout] (id, user_id, total_price, status, created_at)
             VALUES (@id, @userId, @total, N'pending', GETDATE())
           `),
@@ -593,7 +573,10 @@ export class PaymentService {
         return;
       } catch (e) {
         lastErr = e instanceof Error ? e : new Error(String(e));
-        console.warn("Subscription order insert attempt failed:", lastErr.message);
+        console.warn(
+          "Subscription order insert attempt failed:",
+          lastErr.message,
+        );
       }
     }
     throw lastErr;
@@ -610,7 +593,7 @@ export class PaymentService {
       customer_phone: string;
       currency?: string;
       redirectUrl?: string;
-    }
+    },
   ): Promise<{
     paymentId: string;
     paymentUrl: string;
@@ -632,14 +615,11 @@ export class PaymentService {
       name: string;
       priceYearly: number;
     };
-    const fromEnv = (process.env.PRO_YEARLY_PRICE_EGP ?? "").trim();
-    const override =
-      fromEnv !== "" && !Number.isNaN(Number(fromEnv)) ? Number(fromEnv) : null;
-    const price =
-      override != null && override > 0 ? override : Number(plan.priceYearly);
-    if (override != null) {
+    const dbYearly = Number(plan.priceYearly);
+    const price = resolveProYearlyAmount(dbYearly);
+    if (!(Number.isFinite(dbYearly) && dbYearly > 0)) {
       console.log(
-        `💰 Pro yearly: using PRO_YEARLY_PRICE_EGP override = ${price} (DB priceYearly was ${plan.priceYearly})`
+        `💰 Pro yearly: DB priceYearly invalid (${plan.priceYearly}), using resolved amount ${price}`,
       );
     }
     if (!Number.isFinite(price) || price <= 0) {
@@ -652,7 +632,7 @@ export class PaymentService {
         orderId,
         ownerUserId,
         price,
-        data.customer_phone
+        data.customer_phone,
       );
     } catch (e: any) {
       console.error("Subscription order insert failed (all attempts):", e);
@@ -660,7 +640,7 @@ export class PaymentService {
         typeof e?.message === "string" ? e.message : "Unknown database error";
       throw new ApiError(
         500,
-        `Could not create subscription checkout row. Check DB: ${msg}. Ensure subscriptionCheckout.user_id matches your Users id type and required columns exist.`
+        `Could not create subscription checkout row. Check DB: ${msg}. Ensure subscriptionCheckout.user_id matches your Users id type and required columns exist.`,
       );
     }
 
@@ -674,7 +654,7 @@ export class PaymentService {
     const out = await this.initiatePayment(String(ownerUserId), {
       order_id: orderId,
       amount: price,
-      currency: data.currency,
+      currency: PRO_YEARLY_CURRENCY,
       customer_name: data.customer_name,
       customer_email: data.customer_email,
       customer_phone: data.customer_phone,
@@ -694,14 +674,12 @@ export class PaymentService {
   /**
    * Public entry for recovery: redirect URL (PAID) can call this if webhook/apply path did not run subscription insert.
    */
-  static async syncProYearlyFromPaymentId(
-    paymentId: string
-  ): Promise<void> {
+  static async syncProYearlyFromPaymentId(paymentId: string): Promise<void> {
     return this.tryActivateSubscriptionForPayment(paymentId);
   }
 
   private static async tryActivateSubscriptionForPayment(
-    paymentId: string
+    paymentId: string,
   ): Promise<void> {
     try {
       const pool = await getPool();
@@ -738,7 +716,7 @@ export class PaymentService {
       if (planCheck.recordset.length === 0) {
         console.error(
           "tryActivateSubscriptionForPayment: plan missing",
-          meta.planId
+          meta.planId,
         );
         return;
       }
@@ -761,8 +739,7 @@ export class PaymentService {
         .input("billingCycle", sql.NVarChar(20), "yearly")
         .input("startDate", sql.DateTime2, start)
         .input("endDate", sql.DateTime2, end)
-        .input("status", sql.NVarChar(20), "active")
-        .query(`
+        .input("status", sql.NVarChar(20), "active").query(`
           INSERT INTO Subscriptions (userId, planId, billingCycle, startDate, endDate, status, notificationSent)
           VALUES (@userId, @planId, @billingCycle, @startDate, @endDate, @status, 1)
         `);
@@ -772,14 +749,14 @@ export class PaymentService {
           await notificationService.notifySubscriptionCreated(
             meta.userId,
             planName,
-            end
+            end,
           );
         } catch (notifyErr) {
           console.error("notifySubscriptionCreated failed:", notifyErr);
         }
       }
       console.log(
-        `✅ Pro yearly subscription activated for user ${meta.userId} (payment ${paymentId})`
+        `✅ Pro yearly subscription activated for user ${meta.userId} (payment ${paymentId})`,
       );
     } catch (err) {
       console.error("tryActivateSubscriptionForPayment:", err);
@@ -796,7 +773,7 @@ export class PaymentService {
     // New EasyKash format may not include signature
     if (!data.signatureHash) {
       console.log(
-        "⚠️ No signature provided, skipping verification (new format)"
+        "⚠️ No signature provided, skipping verification (new format)",
       );
       return true; // Allow callback to proceed without signature verification
     }
@@ -823,7 +800,7 @@ export class PaymentService {
     // New format may only have: PaymentMethod, Amount, status, easykashRef
     if (!ProductCode || !ProductType) {
       console.log(
-        "⚠️ ProductCode or ProductType missing - using new format (no signature verification)"
+        "⚠️ ProductCode or ProductType missing - using new format (no signature verification)",
       );
       return true; // New format doesn't use signature
     }
@@ -896,7 +873,7 @@ export class PaymentService {
     console.log("Calculated signature:", calculatedSignature);
     console.log(
       "Test result:",
-      calculatedSignature === testPayload.signatureHash
+      calculatedSignature === testPayload.signatureHash,
     );
 
     return calculatedSignature === testPayload.signatureHash;
@@ -920,7 +897,7 @@ export class PaymentService {
     console.log("🧪 New EasyKash Format Test:");
     console.log("Payload:", JSON.stringify(newFormatPayload, null, 2));
     console.log(
-      "✅ New format test completed - no signature verification needed"
+      "✅ New format test completed - no signature verification needed",
     );
 
     return true;
@@ -933,7 +910,7 @@ export class PaymentService {
     try {
       console.log(
         "📞 EasyKash Callback Received:",
-        JSON.stringify(data, null, 2)
+        JSON.stringify(data, null, 2),
       );
 
       // Verify HMAC signature using EasyKash's exact format
@@ -971,7 +948,7 @@ export class PaymentService {
         } catch (e) {
           console.log(
             "⚠️ customerReference is not JSON, treating as orderId:",
-            data.customerReference
+            data.customerReference,
           );
           // customerReference might be a plain order ID string
           customData = { orderId: data.customerReference };
@@ -1000,7 +977,7 @@ export class PaymentService {
       if (!foundPayment && transactionId) {
         console.log(
           "🔍 Searching by transaction ID (easykashRef):",
-          transactionId
+          transactionId,
         );
 
         const paymentSearchResult = await pool
@@ -1056,7 +1033,7 @@ export class PaymentService {
         if (paymentSearchResult.recordset.length > 0) {
           foundPayment = paymentSearchResult.recordset[0];
           console.log(
-            "⚠️ Found payment by amount (last resort, may not be accurate)"
+            "⚠️ Found payment by amount (last resort, may not be accurate)",
           );
         }
       }
@@ -1097,7 +1074,9 @@ export class PaymentService {
 
       const payment = paymentResult.recordset[0];
 
-      const statusNorm = String(status ?? "").trim().toLowerCase();
+      const statusNorm = String(status ?? "")
+        .trim()
+        .toLowerCase();
 
       // Map EasyKash status to our status
       let paymentStatus: string;
@@ -1151,7 +1130,7 @@ export class PaymentService {
           {
             easykashRef: transactionId,
             paymentProvider: data.PaymentMethod || null,
-          }
+          },
         );
       } else {
         await pool
@@ -1162,7 +1141,7 @@ export class PaymentService {
           .input(
             "payment_provider",
             sql.NVarChar(255),
-            data.PaymentMethod || null
+            data.PaymentMethod || null,
           ).query(`
           UPDATE payments 
           SET 
@@ -1248,7 +1227,7 @@ export class PaymentService {
     // Auto-expire pending payments after 30 minutes (no callback received)
     if (payment.payment_status === "pending" && payment.minutes_elapsed >= 30) {
       console.log(
-        `⏰ Payment ${paymentId} expired after ${payment.minutes_elapsed} minutes. Auto-cancelling...`
+        `⏰ Payment ${paymentId} expired after ${payment.minutes_elapsed} minutes. Auto-cancelling...`,
       );
 
       // Update payment to cancelled
@@ -1360,7 +1339,7 @@ export class PaymentService {
       ) {
         throw new ApiError(
           400,
-          `Payment cannot be cancelled. Current status: ${payment.payment_status}`
+          `Payment cannot be cancelled. Current status: ${payment.payment_status}`,
         );
       }
 
@@ -1410,7 +1389,7 @@ export class PaymentService {
     page: number = 1,
     limit: number = 10,
     status?: string,
-    orderId?: string
+    orderId?: string,
   ) {
     const pool = await getPool();
     const offset = (page - 1) * limit;
