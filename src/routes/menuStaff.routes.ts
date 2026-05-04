@@ -17,7 +17,7 @@ router.get("/", [param("menuId").isInt()], staffController.getStaff);
 router.get(
   "/:staffId",
   [param("menuId").isInt(), param("staffId").isInt()],
-  staffController.getStaffById
+  staffController.getStaffById,
 );
 
 // POST /api/menus/:menuId/staff
@@ -32,7 +32,7 @@ router.post(
     body("password").optional().isString().isLength({ min: 6, max: 128 }),
     body("isActive").optional().isBoolean(),
   ]),
-  staffController.createStaff
+  staffController.createStaff,
 );
 
 // PUT /api/menus/:menuId/staff/:staffId
@@ -48,14 +48,14 @@ router.put(
     body("password").optional().isString().isLength({ min: 6, max: 128 }),
     body("isActive").optional().isBoolean(),
   ]),
-  staffController.updateStaff
+  staffController.updateStaff,
 );
 
 // DELETE /api/menus/:menuId/staff/:staffId
 router.delete(
   "/:staffId",
   [param("menuId").isInt(), param("staffId").isInt()],
-  staffController.deleteStaff
+  staffController.deleteStaff,
 );
 
 export default router;

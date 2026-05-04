@@ -12,7 +12,7 @@ import {
   sendPasswordResetEmail,
   sendPasswordChangedEmail,
 } from "../services/emailService";
-import { TOKEN_EXPIRY, ROLES } from "../config/constants";
+import { TOKEN_EXPIRY, ROLES, isLinkedOwnerDashboardRole } from "../config/constants";
 import { AppError } from "../middleware/errorHandler";
 import { logger } from "../utils/logger";
 import { LoginAttemptsService } from "../services/loginAttempts.service";
@@ -20,6 +20,7 @@ import { RefreshTokenService } from "../services/refreshToken.service";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { loadCashierAccess } from "../services/cashier.service";
 
 // Check Availability (Email or Phone Number)
 export async function checkAvailability(
@@ -209,7 +210,7 @@ export async function login(req: Request, res: Response): Promise<void> {
       );
       await LoginAttemptsService.checkAndLockAccount(email);
 
-      res.status(405).json({
+      res.status(401).json({
         error:
           "البريد الإلكتروني غير مسجل في النظام. يرجى التحقق من البريد الإلكتروني والمحاولة مرة أخرى.",
         errorType: "EMAIL_NOT_FOUND",
@@ -239,7 +240,7 @@ export async function login(req: Request, res: Response): Promise<void> {
           lockedUntil: lockResult.lockedUntil,
         });
       } else {
-        res.status(405).json({
+        res.status(401).json({
           error:
             "كلمة المرور غير صحيحة. يرجى التحقق من كلمة المرور والمحاولة مرة أخرى.",
           errorType: "INVALID_PASSWORD",
@@ -289,9 +290,24 @@ export async function login(req: Request, res: Response): Promise<void> {
     await LoginAttemptsService.resetFailedAttempts(email);
 
     // Get user profile with subscription (same shape as getMe)
+    const subUid = isLinkedOwnerDashboardRole(user.role)
+      ? (user.ownerUserId as number | null | undefined)
+      : user.id;
+    if (
+      isLinkedOwnerDashboardRole(user.role) &&
+      (subUid == null || Number.isNaN(subUid))
+    ) {
+      sendApiError(res, req, 403, {
+        en: "Your dashboard account is misconfigured. Contact the restaurant owner.",
+        ar: "حساب لوحة التحكم غير مضبوط. تواصل مع صاحب المطعم.",
+      });
+      return;
+    }
+
     const profileResult = await pool
       .request()
       .input("userId", sql.Int, user.id)
+      .input("subUid", sql.Int, subUid as number)
       .query(`
         SELECT 
           u.id, u.email, u.name, u.role, u.phoneNumber, u.country,
@@ -299,7 +315,7 @@ export async function login(req: Request, res: Response): Promise<void> {
           u.isEmailVerified, u.createdAt,
           s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
         FROM Users u
-        LEFT JOIN Subscriptions s ON u.id = s.userId
+        LEFT JOIN Subscriptions s ON s.userId = @subUid
           AND s.status = 'active'
           AND (s.endDate IS NULL OR s.endDate > GETDATE())
         LEFT JOIN Plans p ON s.planId = p.id
@@ -316,12 +332,29 @@ export async function login(req: Request, res: Response): Promise<void> {
       maxProductsPerMenu: profile?.maxProductsPerMenu ?? 50,
     };
 
+    let cashierInfo:
+      | { menuIds: number[]; pageKeys: string[]; ownerUserId: number }
+      | undefined;
+    if (isLinkedOwnerDashboardRole(profile.role)) {
+      const ca = await loadCashierAccess(user.id);
+      if (ca) {
+        cashierInfo = {
+          menuIds: ca.menuIds,
+          pageKeys: ca.pageKeys,
+          ownerUserId: ca.ownerUserId,
+        };
+      }
+    }
+
     // Generate tokens
     const tokenPayload = {
       id: user.id,
       userId: user.id,
       email: user.email,
       role: user.role,
+      ...(isLinkedOwnerDashboardRole(user.role) && user.ownerUserId != null
+        ? { ownerUserId: user.ownerUserId as number }
+        : {}),
     };
 
     const accessToken = generateAccessToken(tokenPayload);
@@ -353,6 +386,7 @@ export async function login(req: Request, res: Response): Promise<void> {
         createdAt: profile.createdAt,
         planType,
         subscription,
+        cashier: cashierInfo,
       },
       accessToken,
       refreshToken,
@@ -595,12 +629,15 @@ export async function getMe(req: Request, res: Response): Promise<void> {
     const userResult = await pool.request().input("userId", sql.Int, userId)
       .query(`
         SELECT 
-          u.id, u.email, u.name, u.role, u.phoneNumber, u.country, 
+          u.id, u.email, u.name, u.role, u.ownerUserId, u.phoneNumber, u.country, 
           u.dateOfBirth, u.gender, u.address, u.profileImage,
           u.isEmailVerified, u.createdAt,
           s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
         FROM Users u
-        LEFT JOIN Subscriptions s ON u.id = s.userId 
+        LEFT JOIN Subscriptions s ON s.userId = CASE 
+            WHEN u.ownerUserId IS NOT NULL THEN u.ownerUserId 
+            ELSE u.id 
+          END
           AND s.status = 'active' 
           AND (s.endDate IS NULL OR s.endDate > GETDATE())
         LEFT JOIN Plans p ON s.planId = p.id
@@ -614,12 +651,27 @@ export async function getMe(req: Request, res: Response): Promise<void> {
 
     const user = userResult.recordset[0];
 
+    let cashierInfo:
+      | { menuIds: number[]; pageKeys: string[]; ownerUserId: number }
+      | undefined;
+    if (isLinkedOwnerDashboardRole(user.role)) {
+      const ca = await loadCashierAccess(userId);
+      if (ca) {
+        cashierInfo = {
+          menuIds: ca.menuIds,
+          pageKeys: ca.pageKeys,
+          ownerUserId: ca.ownerUserId,
+        };
+      }
+    }
+
     res.json({
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
         role: user.role,
+        ownerUserId: user.ownerUserId ?? null,
         phoneNumber: user.phoneNumber,
         country: user.country,
         dateOfBirth: user.dateOfBirth,
@@ -636,6 +688,7 @@ export async function getMe(req: Request, res: Response): Promise<void> {
           maxMenus: user.maxMenus,
           maxProductsPerMenu: user.maxProductsPerMenu,
         },
+        cashier: cashierInfo,
       },
     });
   } catch (error) {
@@ -717,6 +770,9 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
       userId: user.id,
       email: user.email,
       role: user.role,
+      ...(isLinkedOwnerDashboardRole(user.role) && user.ownerUserId != null
+        ? { ownerUserId: user.ownerUserId as number }
+        : {}),
     };
 
     const newAccessToken = generateAccessToken(tokenPayload);

@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { verifyAccessToken, TokenPayload } from "../utils/tokenHelper";
-import { ROLES } from "../config/constants";
+import { ROLES, isLinkedOwnerDashboardRole } from "../config/constants";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
@@ -43,8 +43,13 @@ export async function verifyToken(
     req.user = decoded;
 
     // Staff JWT uses userId = MenuStaff.id — do not run owner subscription expiry on it
+    const subUserId =
+      isLinkedOwnerDashboardRole(decoded.role) &&
+      decoded.ownerUserId != null
+        ? decoded.ownerUserId
+        : decoded.userId;
     if (decoded.role !== ROLES.STAFF) {
-      await checkAndExpireUserSubscription(decoded.userId);
+      await checkAndExpireUserSubscription(subUserId);
     }
 
     next();
@@ -145,6 +150,20 @@ export async function requireStaff(
   await verifyToken(req, res, () => {
     if (req.user?.role !== ROLES.STAFF) {
       sendApiError(res, req, 403, ApiErrors.staffRequired);
+      return;
+    }
+    next();
+  });
+}
+
+export async function requireRestaurantOwner(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  await verifyToken(req, res, () => {
+    if (req.user?.role !== ROLES.USER) {
+      sendApiError(res, req, 403, ApiErrors.restaurantOwnerOnly);
       return;
     }
     next();

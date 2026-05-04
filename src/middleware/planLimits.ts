@@ -3,6 +3,7 @@ import { getPool, sql } from "../config/database";
 import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { isLinkedOwnerDashboardRole } from "../config/constants";
 
 export async function checkMenuLimit(
   req: Request,
@@ -129,8 +130,12 @@ export async function requireProPlan(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
-    if (await isUserOnFreePlan(userId)) {
+    const auth = req.user!;
+    const uid =
+      isLinkedOwnerDashboardRole(auth.role) && auth.ownerUserId != null
+        ? auth.ownerUserId
+        : auth.userId;
+    if (await isUserOnFreePlan(uid)) {
       sendApiError(res, req, 403, {
         en: ApiErrors.proFeatureOnly.en,
         ar: ApiErrors.proFeatureOnly.ar,

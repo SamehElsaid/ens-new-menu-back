@@ -14,22 +14,19 @@ import {
   STAFF_JOB_WAITER,
 } from "../config/staffJobRoles";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+import { getMenuAccessForRequest } from "../utils/menuAccess";
 
 export async function getStaff(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
 
     const pool = await getPool();
     const meta = await getMenuStaffColumnMeta();
 
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: "staff",
+    });
+    if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
@@ -60,22 +57,30 @@ export async function getStaffById(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, staffId } = req.params;
 
     const pool = await getPool();
     const meta = await getMenuStaffColumnMeta();
 
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: "staff",
+    });
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
+
     const result = await pool
       .request()
       .input("staffId", sql.Int, parseInt(staffId))
       .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
+      .input("ownerUserId", sql.Int, ownerUserId)
       .query(`
         SELECT s.*
         FROM MenuStaff s
         JOIN Menus m ON s.menuId = m.id
-        WHERE s.id = @staffId AND s.menuId = @menuId AND m.userId = @userId
+        WHERE s.id = @staffId AND s.menuId = @menuId AND m.userId = @ownerUserId
       `);
 
     if (result.recordset.length === 0) {
@@ -100,20 +105,16 @@ export async function createStaff(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const { name, role, phone, email, password, isActive = true } = req.body;
 
     const pool = await getPool();
     const meta = await getMenuStaffColumnMeta();
 
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: "staff",
+    });
+    if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
@@ -222,23 +223,31 @@ export async function updateStaff(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, staffId } = req.params;
     const { name, role, phone, email, password, isActive } = req.body;
 
     const pool = await getPool();
     const meta = await getMenuStaffColumnMeta();
 
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: "staff",
+    });
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
+
     const checkResult = await pool
       .request()
       .input("staffId", sql.Int, parseInt(staffId))
       .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
+      .input("ownerUserId", sql.Int, ownerUserId)
       .query(`
         SELECT s.id
         FROM MenuStaff s
         JOIN Menus m ON s.menuId = m.id
-        WHERE s.id = @staffId AND s.menuId = @menuId AND m.userId = @userId
+        WHERE s.id = @staffId AND s.menuId = @menuId AND m.userId = @ownerUserId
       `);
 
     if (checkResult.recordset.length === 0) {
@@ -322,23 +331,31 @@ export async function deleteStaff(
   res: Response
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, staffId } = req.params;
 
     const pool = await getPool();
     const meta = await getMenuStaffColumnMeta();
     const nameCol = quoteMenuStaffIdent(meta.nameKey);
 
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: "staff",
+    });
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
+
     const pre = await pool
       .request()
       .input("staffId", sql.Int, parseInt(staffId, 10))
       .input("menuId", sql.Int, parseInt(menuId, 10))
-      .input("userId", sql.Int, userId)
+      .input("ownerUserId", sql.Int, ownerUserId)
       .query(`
         SELECT ${nameCol} AS staffName
         FROM MenuStaff s
         JOIN Menus m ON s.menuId = m.id
-        WHERE s.id = @staffId AND s.menuId = @menuId AND m.userId = @userId
+        WHERE s.id = @staffId AND s.menuId = @menuId AND m.userId = @ownerUserId
       `);
 
     if (pre.recordset.length === 0) {
@@ -354,12 +371,12 @@ export async function deleteStaff(
       .request()
       .input("staffId", sql.Int, parseInt(staffId))
       .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
+      .input("ownerUserId", sql.Int, ownerUserId)
       .query(`
         DELETE s
         FROM MenuStaff s
         JOIN Menus m ON s.menuId = m.id
-        WHERE s.id = @staffId AND s.menuId = @menuId AND m.userId = @userId
+        WHERE s.id = @staffId AND s.menuId = @menuId AND m.userId = @ownerUserId
       `);
 
     if (result.rowsAffected[0] === 0) {

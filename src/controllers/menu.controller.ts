@@ -10,24 +10,45 @@ import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
 import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
-import { ROLES } from "../config/constants";
+import { ROLES, isLinkedOwnerDashboardRole } from "../config/constants";
 import {
   getMenuStaffColumnMeta,
   normalizeStaffRow,
 } from "../config/menuStaffColumns";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+import { getMenuAccessForRequest } from "../utils/menuAccess";
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
+    const auth = req.user!;
+    const userId = auth.userId;
     const { locale = "ar" } = req.query;
 
     const pool = await getPool();
 
-    const result = await pool
-      .request()
-      .input("userId", sql.Int, userId).query(`
+    let result;
+    if (isLinkedOwnerDashboardRole(auth.role)) {
+      result = await pool
+        .request()
+        .input("linkedUserId", sql.Int, userId)
+        .query(`
+        SELECT 
+          m.id, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt, m.updatedAt,
+          mtAr.name as nameAr, 
+          mtAr.description as descriptionAr,
+          mtEn.name as nameEn,
+          mtEn.description as descriptionEn
+        FROM Menus m
+        INNER JOIN UserMenuPermission ump ON ump.menuId = m.id AND ump.userId = @linkedUserId
+        LEFT JOIN MenuTranslations mtAr ON m.id = mtAr.menuId AND mtAr.locale = 'ar'
+        LEFT JOIN MenuTranslations mtEn ON m.id = mtEn.menuId AND mtEn.locale = 'en'
+        ORDER BY m.createdAt DESC
+      `);
+    } else {
+      result = await pool
+        .request()
+        .input("userId", sql.Int, userId).query(`
         SELECT 
           m.id, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt, m.updatedAt,
           mtAr.name as nameAr, 
@@ -40,6 +61,7 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
         WHERE m.userId = @userId
         ORDER BY m.createdAt DESC
       `);
+    }
 
     res.json({ menus: result.recordset });
   } catch (error) {
@@ -51,6 +73,14 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
 // Create menu
 export async function createMenu(req: Request, res: Response): Promise<void> {
   try {
+    if (req.user?.role && isLinkedOwnerDashboardRole(req.user.role)) {
+      sendApiError(res, req, 403, {
+        en: "Linked dashboard accounts cannot create menus.",
+        ar: "حسابات لوحة التحكم المرتبطة لا يمكنها إنشاء منيوهات.",
+      });
+      return;
+    }
+
     const userId = req.user!.userId;
     const {
       nameAr,
@@ -172,21 +202,26 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
 export async function getMenuById(req: Request, res: Response): Promise<void> {
   try {
     const auth = req.user!;
-    const userId = auth.userId;
     const { id } = req.params;
     const menuIdNum = parseInt(id);
-    const isStaff = auth.role === ROLES.STAFF;
+
+    if (auth.role === ROLES.STAFF) {
+      sendApiError(res, req, 403, ApiErrors.staffWebDashboardForbidden);
+      return;
+    }
+
+    const access = await getMenuAccessForRequest(req, menuIdNum);
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
 
     const pool = await getPool();
 
-    let result;
-
-    if (isStaff) {
-      result = await pool
-        .request()
-        .input("id", sql.Int, menuIdNum)
-        .input("staffId", sql.Int, userId)
-        .query(`
+    const result = await pool
+      .request()
+      .input("id", sql.Int, menuIdNum)
+      .query(`
         SELECT 
           m.id, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
           ISNULL(m.currency, 'SAR') as currency,
@@ -196,38 +231,12 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
           ar.name as nameAr, ar.description as descriptionAr,
           en.name as nameEn, en.description as descriptionEn
         FROM Menus m
-        INNER JOIN MenuStaff s ON s.menuId = m.id AND s.id = @staffId
         LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
         LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
         WHERE m.id = @id
-          AND LOWER(LTRIM(RTRIM(ISNULL(s.role, '')))) IN ('cashier', 'casher')
       `);
-    } else {
-      result = await pool
-        .request()
-        .input("id", sql.Int, menuIdNum)
-        .input("userId", sql.Int, userId)
-        .query(`
-        SELECT 
-          m.id, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
-          ISNULL(m.currency, 'SAR') as currency,
-          m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
-          m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
-          m.addressEn, m.addressAr, m.phone, m.workingHours,
-          ar.name as nameAr, ar.description as descriptionAr,
-          en.name as nameEn, en.description as descriptionEn
-        FROM Menus m
-        LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
-        LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
-        WHERE m.id = @id AND m.userId = @userId
-      `);
-    }
 
     if (result.recordset.length === 0) {
-      if (isStaff) {
-        sendApiError(res, req, 403, ApiErrors.staffCashierRequired);
-        return;
-      }
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
@@ -322,9 +331,21 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const userId = req.user!.userId;
     const { id } = req.params;
     const menuId = parseInt(id);
+
+    let ownerUserId = req.user!.userId;
+    if (isLinkedOwnerDashboardRole(req.user?.role)) {
+      const access = await getMenuAccessForRequest(req, menuId, {
+        requiredPageKey: "settings",
+      });
+      if (!access.ok) {
+        sendApiError(res, req, 404, ApiErrors.menuNotFound);
+        return;
+      }
+      ownerUserId = access.ownerUserId;
+    }
+
     const {
       nameAr,
       nameEn,
@@ -353,8 +374,8 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       const checkResult = await transaction
         .request()
         .input("id", sql.Int, menuId)
-        .input("userId", sql.Int, userId)
-        .query("SELECT id FROM Menus WHERE id = @id AND userId = @userId");
+        .input("ownerUserId", sql.Int, ownerUserId)
+        .query("SELECT id FROM Menus WHERE id = @id AND userId = @ownerUserId");
 
       if (checkResult.recordset.length === 0) {
         throw new Error("Menu not found or access denied");
@@ -576,6 +597,14 @@ export async function toggleMenuStatus(
       return;
     }
 
+    if (isLinkedOwnerDashboardRole(req.user?.role)) {
+      sendApiError(res, req, 403, {
+        en: "Cashier accounts cannot change menu status.",
+        ar: "حساب الكاشير لا يمكنه تغيير حالة المنيو.",
+      });
+      return;
+    }
+
     const userId = req.user!.userId;
     const userRole = req.user!.role;
     const { id } = req.params;
@@ -639,16 +668,36 @@ export async function deleteMenu(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    if (isLinkedOwnerDashboardRole(req.user?.role)) {
+      sendApiError(res, req, 403, {
+        en: "Cashier accounts cannot delete menus.",
+        ar: "حساب الكاشير لا يمكنه حذف المنيو.",
+      });
+      return;
+    }
+
     const userId = req.user!.userId;
     const { id } = req.params;
 
-    const pool = await getPool();
+    const menuIdInt = parseInt(id, 10);
 
-    const result = await pool
-      .request()
-      .input("id", sql.Int, parseInt(id))
-      .input("userId", sql.Int, userId)
-      .query("DELETE FROM Menus WHERE id = @id AND userId = @userId");
+    const result = await executeTransaction(async (transaction) => {
+      await transaction
+        .request()
+        .input("menuId", sql.Int, menuIdInt)
+        .input("userId", sql.Int, userId)
+        .query(`
+          DELETE ump
+          FROM UserMenuPermission ump
+          INNER JOIN Menus m ON m.id = ump.menuId AND m.userId = @userId AND m.id = @menuId
+        `);
+
+      return transaction
+        .request()
+        .input("id", sql.Int, menuIdInt)
+        .input("userId", sql.Int, userId)
+        .query("DELETE FROM Menus WHERE id = @id AND userId = @userId");
+    });
 
     if (result.rowsAffected[0] === 0) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
@@ -668,6 +717,14 @@ export async function checkSlugAvailability(
   res: Response
 ): Promise<void> {
   try {
+    if (isLinkedOwnerDashboardRole(req.user?.role)) {
+      sendApiError(res, req, 403, {
+        en: "Cashier accounts cannot check slugs for new menus.",
+        ar: "حساب الكاشير لا يملك صلاحية التحقق من الرابط لمنيو جديد.",
+      });
+      return;
+    }
+
     const { slug } = req.query;
 
     if (!slug || typeof slug !== "string") {

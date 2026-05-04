@@ -9,6 +9,7 @@ import { logger } from '../utils/logger';
 import { getImageUrl } from '../utils/urlHelper';
 import { sendApiError } from '../utils/apiErrorResponse';
 import { ApiErrors } from '../i18n/apiErrors';
+import { isLinkedOwnerDashboardRole } from '../config/constants';
 
 // Get user profile
 export async function getProfile(req: Request, res: Response): Promise<void> {
@@ -292,12 +293,16 @@ export async function upgradePlan(req: Request, res: Response): Promise<void> {
 // Get user subscription
 export async function getSubscription(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
+    const auth = req.user!;
+    const subUserId =
+      isLinkedOwnerDashboardRole(auth.role) && auth.ownerUserId != null
+        ? auth.ownerUserId
+        : auth.userId;
     const pool = await getPool();
 
     const result = await pool
       .request()
-      .input('userId', sql.Int, userId)
+      .input('userId', sql.Int, subUserId)
       .query(`
         SELECT TOP 1
           s.id, s.userId, s.planId, s.status, s.startDate, s.endDate, 

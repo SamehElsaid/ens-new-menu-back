@@ -12,7 +12,9 @@ async function requireMenuAccess(
   res: Response,
   menuId: string,
 ): Promise<boolean> {
-  const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+  const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+    requiredPageKey: "categories",
+  });
   if (!access.ok) {
     sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
     return false;

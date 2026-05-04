@@ -1,8 +1,8 @@
-import { transporter } from '../config/email';
-import { logger } from '../utils/logger';
+import { transporter } from "../config/email";
+import { logger } from "../utils/logger";
 
 const FROM_EMAIL = process.env.EMAIL_FROM || process.env.SMTP_USER!;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
 interface EmailOptions {
   to: string;
@@ -19,7 +19,7 @@ async function sendEmail(options: EmailOptions): Promise<boolean> {
     logger.info(`Email sent to ${options.to}: ${options.subject}`);
     return true;
   } catch (error) {
-    logger.error('Failed to send email:', error);
+    logger.error("Failed to send email:", error);
     return false;
   }
 }
@@ -28,7 +28,7 @@ async function sendEmail(options: EmailOptions): Promise<boolean> {
 function emailTemplate(content: string, isArabic: boolean = false): string {
   return `
 <!DOCTYPE html>
-<html dir="${isArabic ? 'rtl' : 'ltr'}" lang="${isArabic ? 'ar' : 'en'}">
+<html dir="${isArabic ? "rtl" : "ltr"}" lang="${isArabic ? "ar" : "en"}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -101,8 +101,8 @@ function emailTemplate(content: string, isArabic: boolean = false): string {
             ${content}
         </div>
         <div class="footer">
-            <p>${isArabic ? '© 2024 ensmenu. جميع الحقوق محفوظة.' : '© 2024 ensmenu. All rights reserved.'}</p>
-            <p>${isArabic ? 'إذا لم تطلب هذا البريد، يرجى تجاهله.' : 'If you didn\'t request this email, please ignore it.'}</p>
+            <p>${isArabic ? "© 2024 ensmenu. جميع الحقوق محفوظة." : "© 2024 ensmenu. All rights reserved."}</p>
+            <p>${isArabic ? "إذا لم تطلب هذا البريد، يرجى تجاهله." : "If you didn't request this email, please ignore it."}</p>
         </div>
     </div>
 </body>
@@ -114,11 +114,12 @@ function emailTemplate(content: string, isArabic: boolean = false): string {
 export async function sendWelcomeEmail(
   to: string,
   name: string,
-  locale: 'ar' | 'en' = 'ar'
+  locale: "ar" | "en" = "ar",
 ): Promise<boolean> {
-  const isArabic = locale === 'ar';
-  
-  const content = isArabic ? `
+  const isArabic = locale === "ar";
+
+  const content = isArabic
+    ? `
     <h2>مرحباً ${name}! 👋</h2>
     <p>نشكرك على انضمامك إلى <strong>ensmenu</strong> - منصتك الرقمية لإنشاء منيو احترافي لمطعمك.</p>
     <p>يمكنك الآن البدء في إنشاء منيو رقمي جميل وعرض منتجاتك بشكل احترافي للعملاء.</p>
@@ -131,7 +132,8 @@ export async function sendWelcomeEmail(
         <li>🌐 مشاركة رابط منيوك مع العملاء</li>
     </ul>
     <p>نتمنى لك تجربة رائعة!</p>
-  ` : `
+  `
+    : `
     <h2>Welcome ${name}! 👋</h2>
     <p>Thank you for joining <strong>ensmenu</strong> - your digital platform to create professional menus for your restaurant.</p>
     <p>You can now start creating a beautiful digital menu and showcase your products professionally to customers.</p>
@@ -148,7 +150,7 @@ export async function sendWelcomeEmail(
 
   return sendEmail({
     to,
-    subject: isArabic ? 'مرحباً بك في ensmenu!' : 'Welcome to ensmenu!',
+    subject: isArabic ? "مرحباً بك في ensmenu!" : "Welcome to ensmenu!",
     html: emailTemplate(content, isArabic),
   });
 }
@@ -158,12 +160,13 @@ export async function sendVerificationEmail(
   to: string,
   name: string,
   token: string,
-  locale: 'ar' | 'en' = 'ar'
+  locale: "ar" | "en" = "ar",
 ): Promise<boolean> {
-  const isArabic = locale === 'ar';
+  const isArabic = locale === "ar";
   const verificationLink = `${FRONTEND_URL}/${locale}/verify-email?token=${token}`;
 
-  const content = isArabic ? `
+  const content = isArabic
+    ? `
     <h2>مرحباً ${name}،</h2>
     <p>شكراً لتسجيلك في <strong>ensmenu</strong>!</p>
     <p>لإكمال تسجيلك وتفعيل حسابك، يرجى تأكيد بريدك الإلكتروني بالنقر على الزر أدناه:</p>
@@ -178,7 +181,8 @@ export async function sendVerificationEmail(
     <p style="color: #999; font-size: 13px;">
         <strong>ملاحظة:</strong> هذا الرابط صالح لمدة 24 ساعة فقط.
     </p>
-  ` : `
+  `
+    : `
     <h2>Hello ${name},</h2>
     <p>Thank you for signing up for <strong>ensmenu</strong>!</p>
     <p>To complete your registration and activate your account, please verify your email by clicking the button below:</p>
@@ -197,7 +201,7 @@ export async function sendVerificationEmail(
 
   return sendEmail({
     to,
-    subject: isArabic ? 'تأكيد بريدك الإلكتروني' : 'Verify Your Email',
+    subject: isArabic ? "تأكيد بريدك الإلكتروني" : "Verify Your Email",
     html: emailTemplate(content, isArabic),
   });
 }
@@ -207,12 +211,13 @@ export async function sendPasswordResetEmail(
   to: string,
   name: string,
   token: string,
-  locale: 'ar' | 'en' = 'ar'
+  locale: "ar" | "en" = "ar",
 ): Promise<boolean> {
-  const isArabic = locale === 'ar';
+  const isArabic = locale === "ar";
   const resetLink = `${FRONTEND_URL}/${locale}/reset-password?token=${token}`;
 
-  const content = isArabic ? `
+  const content = isArabic
+    ? `
     <h2>مرحباً ${name}،</h2>
     <p>تلقينا طلباً لإعادة تعيين كلمة مرور حسابك في <strong>ensmenu</strong>.</p>
     <p>لإنشاء كلمة مرور جديدة، انقر على الزر أدناه:</p>
@@ -230,7 +235,8 @@ export async function sendPasswordResetEmail(
     <p style="color: #dc3545; font-size: 13px;">
         إذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذا البريد. حسابك آمن.
     </p>
-  ` : `
+  `
+    : `
     <h2>Hello ${name},</h2>
     <p>We received a request to reset your password for your <strong>ensmenu</strong> account.</p>
     <p>To create a new password, click the button below:</p>
@@ -252,7 +258,7 @@ export async function sendPasswordResetEmail(
 
   return sendEmail({
     to,
-    subject: isArabic ? 'إعادة تعيين كلمة المرور' : 'Reset Your Password',
+    subject: isArabic ? "إعادة تعيين كلمة المرور" : "Reset Your Password",
     html: emailTemplate(content, isArabic),
   });
 }
@@ -261,29 +267,31 @@ export async function sendPasswordResetEmail(
 export async function sendPasswordChangedEmail(
   to: string,
   name: string,
-  locale: 'ar' | 'en' = 'ar'
+  locale: "ar" | "en" = "ar",
 ): Promise<boolean> {
-  const isArabic = locale === 'ar';
+  const isArabic = locale === "ar";
 
-  const content = isArabic ? `
+  const content = isArabic
+    ? `
     <h2>مرحباً ${name}،</h2>
     <p>تم تغيير كلمة مرور حسابك في <strong>ensmenu</strong> بنجاح.</p>
     <p>إذا لم تقم بهذا التغيير، يرجى الاتصال بدعمنا فوراً.</p>
     <div class="divider"></div>
     <p style="color: #28a745; font-weight: bold;">✓ تم تأمين حسابك</p>
-    <p>تاريخ التغيير: ${new Date().toLocaleString('ar-EG')}</p>
-  ` : `
+    <p>تاريخ التغيير: ${new Date().toLocaleString("ar-EG")}</p>
+  `
+    : `
     <h2>Hello ${name},</h2>
     <p>Your <strong>ensmenu</strong> account password has been successfully changed.</p>
     <p>If you didn't make this change, please contact our support immediately.</p>
     <div class="divider"></div>
     <p style="color: #28a745; font-weight: bold;">✓ Your account is secure</p>
-    <p>Change date: ${new Date().toLocaleString('en-US')}</p>
+    <p>Change date: ${new Date().toLocaleString("en-US")}</p>
   `;
 
   return sendEmail({
     to,
-    subject: isArabic ? 'تم تغيير كلمة المرور' : 'Password Changed',
+    subject: isArabic ? "تم تغيير كلمة المرور" : "Password Changed",
     html: emailTemplate(content, isArabic),
   });
 }
@@ -294,31 +302,33 @@ export async function sendSubscriptionEmail(
   name: string,
   planName: string,
   billingCycle: string,
-  locale: 'ar' | 'en' = 'ar'
+  locale: "ar" | "en" = "ar",
 ): Promise<boolean> {
-  const isArabic = locale === 'ar';
+  const isArabic = locale === "ar";
 
-  const content = isArabic ? `
+  const content = isArabic
+    ? `
     <h2>مرحباً ${name}،</h2>
     <p>شكراً لاشتراكك في خطة <strong>${planName}</strong>!</p>
     <p>تفاصيل الاشتراك:</p>
     <ul>
         <li><strong>الخطة:</strong> ${planName}</li>
-        <li><strong>دورة الدفع:</strong> ${billingCycle === 'monthly' ? 'شهري' : billingCycle === 'yearly' ? 'سنوي' : 'مجاني'}</li>
-        <li><strong>تاريخ البدء:</strong> ${new Date().toLocaleDateString('ar-EG')}</li>
+        <li><strong>دورة الدفع:</strong> ${billingCycle === "monthly" ? "شهري" : billingCycle === "yearly" ? "سنوي" : "مجاني"}</li>
+        <li><strong>تاريخ البدء:</strong> ${new Date().toLocaleDateString("ar-EG")}</li>
     </ul>
     <center>
         <a href="${FRONTEND_URL}/${locale}/user/dashboard" class="button">انتقل إلى لوحة التحكم</a>
     </center>
     <p>يمكنك الآن الاستفادة من جميع ميزات خطتك!</p>
-  ` : `
+  `
+    : `
     <h2>Hello ${name},</h2>
     <p>Thank you for subscribing to the <strong>${planName}</strong> plan!</p>
     <p>Subscription details:</p>
     <ul>
         <li><strong>Plan:</strong> ${planName}</li>
         <li><strong>Billing cycle:</strong> ${billingCycle}</li>
-        <li><strong>Start date:</strong> ${new Date().toLocaleDateString('en-US')}</li>
+        <li><strong>Start date:</strong> ${new Date().toLocaleDateString("en-US")}</li>
     </ul>
     <center>
         <a href="${FRONTEND_URL}/${locale}/user/dashboard" class="button">Go to Dashboard</a>
@@ -328,9 +338,7 @@ export async function sendSubscriptionEmail(
 
   return sendEmail({
     to,
-    subject: isArabic ? 'تأكيد الاشتراك' : 'Subscription Confirmation',
+    subject: isArabic ? "تأكيد الاشتراك" : "Subscription Confirmation",
     html: emailTemplate(content, isArabic),
   });
 }
-
-

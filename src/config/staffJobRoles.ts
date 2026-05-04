@@ -1,14 +1,13 @@
 /** Job title for menu staff (distinct from JWT auth role `staff`). */
 export const STAFF_JOB_WAITER = "waiter";
-export const STAFF_JOB_CASHIER = "cashier";
 
-const ALLOWED = new Set([STAFF_JOB_WAITER, STAFF_JOB_CASHIER]);
+const ALLOWED = new Set([STAFF_JOB_WAITER]);
 
-/** Accepts common typo "casher" → cashier. */
+/** Legacy "cashier"/"casher" DB values normalize to waiter. */
 export function normalizeStaffJobRole(input: unknown): string | null {
   if (input == null || input === "") return null;
   const s = String(input).trim().toLowerCase();
-  if (s === "casher") return STAFF_JOB_CASHIER;
+  if (s === "casher" || s === "cashier") return STAFF_JOB_WAITER;
   if (ALLOWED.has(s)) return s;
   return null;
 }
@@ -19,9 +18,4 @@ export function parseStaffJobRoleOrError(
   const n = normalizeStaffJobRole(input);
   if (!n) return { ok: false };
   return { ok: true, value: n };
-}
-
-export function isStaffCashierDbRole(role: unknown): boolean {
-  const n = normalizeStaffJobRole(role);
-  return n === STAFF_JOB_CASHIER;
 }

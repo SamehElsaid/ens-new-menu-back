@@ -12,7 +12,9 @@ async function requireMenuAccess(
   res: Response,
   menuId: string,
 ): Promise<boolean> {
-  const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+  const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+    requiredPageKey: "table",
+  });
   if (!access.ok) {
     sendApiError(res, req, 404, ApiErrors.menuNotFound);
     return false;
@@ -57,7 +59,9 @@ export async function getTableById(
 
     const pool = await getPool();
 
-    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: "table",
+    });
     if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
@@ -154,7 +158,9 @@ export async function updateTable(
 
     const pool = await getPool();
 
-    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: "table",
+    });
     if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
@@ -225,7 +231,9 @@ export async function deleteTable(
 
     const pool = await getPool();
 
-    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: "table",
+    });
     if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;

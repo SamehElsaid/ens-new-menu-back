@@ -38,6 +38,10 @@ export const ApiErrors = {
     en: 'Admin access required',
     ar: 'يتطلب صلاحية مسؤول',
   },
+  restaurantOwnerOnly: {
+    en: 'This action is only available to restaurant accounts.',
+    ar: 'هذا الإجراء متاح لحسابات أصحاب المطاعم فقط.',
+  },
   staffRequired: {
     en: 'Staff access required',
     ar: 'يتطلب صلاحية طاقم',
@@ -227,12 +231,12 @@ export const ApiErrors = {
     ar: 'عمود كلمة المرور غير مهيأ في جدول طاقم المنيو',
   },
   invalidStaffJobRole: {
-    en: 'Staff role must be waiter or cashier',
-    ar: 'يجب أن يكون دور الموظف نادلًا (waiter) أو كاشيرًا (cashier)',
+    en: 'Staff role must be waiter',
+    ar: 'يجب أن يكون دور الموظف نادلاً (waiter)',
   },
-  staffCashierRequired: {
-    en: 'Only cashiers can access the restaurant dashboard',
-    ar: 'الدخول إلى لوحة التحكم متاح للكاشير فقط',
+  staffWebDashboardForbidden: {
+    en: 'The restaurant web dashboard is only available to the menu owner.',
+    ar: 'لوحة التحكم على الويب متاحة لصاحب المنيو فقط.',
   },
   failedGetMenuItems: {
     en: 'Failed to get menu items',

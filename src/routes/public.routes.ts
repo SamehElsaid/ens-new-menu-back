@@ -20,7 +20,11 @@ router.post(
   "/staff-call",
   validate([
     body("menuId").isInt({ min: 1 }).toInt(),
-    body("tableNumber").isString().trim().notEmpty().isLength({ min: 1, max: 50 }),
+    body("tableNumber")
+      .isString()
+      .trim()
+      .notEmpty()
+      .isLength({ min: 1, max: 50 }),
     body("status")
       .optional()
       .isIn(["pending", "confirmed", "cancelled"])
@@ -60,7 +64,7 @@ router.get(
       .isInt({ min: 1 })
       .withMessage("tableId must be a positive integer"),
   ],
-  getPublicMenu
+  getPublicMenu,
 );
 
 // GET /api/public/menu/:slug/ratings - Get recent ratings
@@ -76,7 +80,7 @@ router.post(
     body("comment").optional().isString().trim().isLength({ max: 1000 }),
     body("customerName").optional().isString().trim().isLength({ max: 255 }),
   ]),
-  submitRating
+  submitRating,
 );
 
 // GET /api/public/ads - Get active global ads
@@ -86,7 +90,7 @@ router.get(
     query("position").optional().isString(),
     query("limit").optional().isInt({ min: 1, max: 20 }),
   ],
-  getActiveAds
+  getActiveAds,
 );
 
 // GET /api/public/menu/:menuId/ads - Get menu custom ads
@@ -96,7 +100,7 @@ router.get(
     query("position").optional().isString(),
     query("limit").optional().isInt({ min: 1, max: 20 }),
   ],
-  getMenuCustomAds
+  getMenuCustomAds,
 );
 
 // GET /api/public/plans - Get all active plans

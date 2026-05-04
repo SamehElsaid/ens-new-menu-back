@@ -3,6 +3,7 @@ import sql from 'mssql';
 import { getPool, executeTransaction } from '../config/database';
 import { sendApiError } from '../utils/apiErrorResponse';
 import { ApiErrors } from '../i18n/apiErrors';
+import { getMenuAccessForRequest } from '../utils/menuAccess';
 
 const ERR_MENU_ACCESS = ApiErrors.menuNotFoundOrAccess.en;
 const ERR_CUSTOM_PRO = ApiErrors.customizationsProOnly.en;
@@ -14,6 +15,14 @@ const ERR_CUSTOM_PRO = ApiErrors.customizationsProOnly.en;
 export async function getCustomizations(req: Request, res: Response): Promise<void> {
   try {
     const { menuId } = req.params;
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: 'settings',
+    });
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
+      return;
+    }
+
     const pool = await getPool();
 
     const result = await pool
@@ -57,8 +66,16 @@ export async function getCustomizations(req: Request, res: Response): Promise<vo
  */
 export async function updateCustomizations(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: 'settings',
+    });
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
+
     const {
       primaryColor,
       secondaryColor,
@@ -75,7 +92,7 @@ export async function updateCustomizations(req: Request, res: Response): Promise
       const menuResult = await transaction
         .request()
         .input('menuId', sql.Int, parseInt(menuId))
-        .input('userId', sql.Int, userId)
+        .input('ownerUserId', sql.Int, ownerUserId)
         .query(`
           SELECT m.id, s.billingCycle
           FROM Menus m
@@ -83,7 +100,7 @@ export async function updateCustomizations(req: Request, res: Response): Promise
           LEFT JOIN Subscriptions s ON u.id = s.userId 
             AND s.status = 'active' 
             AND (s.endDate IS NULL OR s.endDate > GETDATE())
-          WHERE m.id = @menuId AND m.userId = @userId
+          WHERE m.id = @menuId AND m.userId = @ownerUserId
         `);
 
       if (menuResult.recordset.length === 0) {
@@ -173,16 +190,23 @@ export async function updateCustomizations(req: Request, res: Response): Promise
  */
 export async function resetCustomizations(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: 'settings',
+    });
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
 
     await executeTransaction(async (transaction) => {
       // Verify menu ownership
       const menuResult = await transaction
         .request()
         .input('menuId', sql.Int, parseInt(menuId))
-        .input('userId', sql.Int, userId)
-        .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
+        .input('ownerUserId', sql.Int, ownerUserId)
+        .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @ownerUserId');
 
       if (menuResult.recordset.length === 0) {
         throw new Error(ERR_MENU_ACCESS);

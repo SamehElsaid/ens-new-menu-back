@@ -20,7 +20,9 @@ export async function listMenuActivityLogsHandler(
       return;
     }
 
-    const access = await getMenuAccessForRequest(req, mid);
+    const access = await getMenuAccessForRequest(req, mid, {
+      requiredPageKey: "history",
+    });
     if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;

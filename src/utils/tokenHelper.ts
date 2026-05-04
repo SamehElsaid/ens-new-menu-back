@@ -6,8 +6,10 @@ export interface TokenPayload {
   userId: number;
   email: string;
   role: string;
-  /** When `role` is `staff`: `waiter` | `cashier` (see `staffJobRoles`). */
+  /** When `role` is `staff`: typically `waiter` (see `staffJobRoles`). */
   staffJobRole?: string;
+  /** For linked dashboard roles (e.g. cashier): owning restaurant user id (subscription + ownership). */
+  ownerUserId?: number;
 }
 
 // Validate JWT secrets on startup

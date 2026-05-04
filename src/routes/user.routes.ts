@@ -2,8 +2,9 @@ import { Router } from 'express';
 import { body } from 'express-validator';
 import * as userController from '../controllers/user.controller';
 import { validate } from '../middleware/validation';
-import { requireAuth } from '../middleware/auth.middleware';
+import { requireAuth, requireRestaurantOwner } from '../middleware/auth.middleware';
 import { uploadMemoryStorage } from '../controllers/upload.controller';
+import * as cashierController from '../controllers/cashier.controller';
 
 const router = Router();
 
@@ -15,6 +16,27 @@ const optionalMultipartProfile = (req: any, res: any, next: any) => {
   if (!req.is('multipart/form-data')) return next();
   return uploadMemoryStorage.single('profileImage')(req, res, next);
 };
+
+// Restaurant owner — cashier (dashboard) accounts
+router.get('/cashiers', requireRestaurantOwner, cashierController.listCashiers);
+router.post(
+  '/cashiers',
+  requireRestaurantOwner,
+  cashierController.cashierValidators.create,
+  cashierController.createCashier,
+);
+router.patch(
+  '/cashiers/:cashierId',
+  requireRestaurantOwner,
+  cashierController.cashierValidators.patch,
+  cashierController.updateCashier,
+);
+router.delete(
+  '/cashiers/:cashierId',
+  requireRestaurantOwner,
+  cashierController.cashierValidators.one,
+  cashierController.deleteCashier,
+);
 
 // GET /api/user/profile - Get user profile
 router.get('/profile', userController.getProfile);

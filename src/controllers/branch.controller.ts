@@ -3,27 +3,23 @@ import { getPool, sql, executeTransaction } from '../config/database';
 import { logger } from '../utils/logger';
 import { sendApiError } from '../utils/apiErrorResponse';
 import { ApiErrors } from '../i18n/apiErrors';
+import { getMenuAccessForRequest } from '../utils/menuAccess';
 
 // Get menu branches
 export async function getBranches(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const { locale = 'ar' } = req.query;
 
-    const pool = await getPool();
-
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input('menuId', sql.Int, parseInt(menuId))
-      .input('userId', sql.Int, userId)
-      .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
-
-    if (menuCheck.recordset.length === 0) {
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: 'settings',
+    });
+    if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
+
+    const pool = await getPool();
 
     // Get branches with translations
     const result = await pool
@@ -50,7 +46,6 @@ export async function getBranches(req: Request, res: Response): Promise<void> {
 // Create branch
 export async function createBranch(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const {
       nameAr,
@@ -71,14 +66,10 @@ export async function createBranch(req: Request, res: Response): Promise<void> {
 
     const pool = await getPool();
 
-    // Verify menu ownership
-    const menuCheck = await pool
-      .request()
-      .input('menuId', sql.Int, parseInt(menuId))
-      .input('userId', sql.Int, userId)
-      .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
-
-    if (menuCheck.recordset.length === 0) {
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: 'settings',
+    });
+    if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
@@ -146,7 +137,6 @@ export async function createBranch(req: Request, res: Response): Promise<void> {
 // Update branch
 export async function updateBranch(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, branchId } = req.params;
     const {
       nameAr,
@@ -165,18 +155,27 @@ export async function updateBranch(req: Request, res: Response): Promise<void> {
       isActive,
     } = req.body;
 
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: 'settings',
+    });
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
+
     await executeTransaction(async (transaction) => {
       // Verify ownership
       const checkResult = await transaction
         .request()
         .input('branchId', sql.Int, parseInt(branchId))
         .input('menuId', sql.Int, parseInt(menuId))
-        .input('userId', sql.Int, userId)
+        .input('ownerUserId', sql.Int, ownerUserId)
         .query(`
           SELECT b.id 
           FROM Branches b
           JOIN Menus m ON b.menuId = m.id
-          WHERE b.id = @branchId AND b.menuId = @menuId AND m.userId = @userId
+          WHERE b.id = @branchId AND b.menuId = @menuId AND m.userId = @ownerUserId
         `);
 
       if (checkResult.recordset.length === 0) {
@@ -269,8 +268,16 @@ export async function updateBranch(req: Request, res: Response): Promise<void> {
 // Delete branch
 export async function deleteBranch(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, branchId } = req.params;
+
+    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10), {
+      requiredPageKey: 'settings',
+    });
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
 
     const pool = await getPool();
 
@@ -278,12 +285,12 @@ export async function deleteBranch(req: Request, res: Response): Promise<void> {
       .request()
       .input('branchId', sql.Int, parseInt(branchId))
       .input('menuId', sql.Int, parseInt(menuId))
-      .input('userId', sql.Int, userId)
+      .input('ownerUserId', sql.Int, ownerUserId)
       .query(`
         DELETE b
         FROM Branches b
         JOIN Menus m ON b.menuId = m.id
-        WHERE b.id = @branchId AND b.menuId = @menuId AND m.userId = @userId
+        WHERE b.id = @branchId AND b.menuId = @menuId AND m.userId = @ownerUserId
       `);
 
     if (result.rowsAffected[0] === 0) {

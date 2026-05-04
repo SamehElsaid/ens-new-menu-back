@@ -1,26 +1,20 @@
 import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+import { getMenuAccessForRequest } from "../utils/menuAccess";
 
 // Create menu ad
 export const createMenuAd = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const { title, titleAr, content, contentAr, imageUrl, linkUrl, position } = req.body;
 
     const pool = await getPool();
 
-    // Verify menu belongs to user
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, menuId)
-      .input("userId", sql.Int, userId)
-      .query(`
-        SELECT id FROM Menus WHERE id = @menuId AND userId = @userId
-      `);
-
-    if (menuCheck.recordset.length === 0) {
+    const access = await getMenuAccessForRequest(req, parseInt(String(menuId), 10), {
+      requiredPageKey: "advertisements",
+    });
+    if (!access.ok) {
       return res.status(404).json({
         success: false,
         message: "Menu not found or you don't have permission",
@@ -85,23 +79,16 @@ export const createMenuAd = async (req: Request, res: Response) => {
 // Get menu ads
 export const getMenuAds = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 10));
 
     const pool = await getPool();
 
-    // Verify menu belongs to user
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, menuId)
-      .input("userId", sql.Int, userId)
-      .query(`
-        SELECT id FROM Menus WHERE id = @menuId AND userId = @userId
-      `);
-
-    if (menuCheck.recordset.length === 0) {
+    const access = await getMenuAccessForRequest(req, parseInt(String(menuId), 10), {
+      requiredPageKey: "advertisements",
+    });
+    if (!access.ok) {
       return res.status(404).json({
         success: false,
         message: "Menu not found or you don't have permission",
@@ -164,22 +151,41 @@ export const getMenuAds = async (req: Request, res: Response) => {
 // Update ad
 export const updateAd = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.userId;
     const { adId } = req.params;
     const { title, titleAr, content, contentAr, imageUrl, linkUrl, position, isActive } = req.body;
 
     const pool = await getPool();
 
-    // Verify ad belongs to user's menu
+    const preMenu = await pool
+      .request()
+      .input("adId", sql.Int, adId)
+      .query(`SELECT menuId FROM Ads WHERE id = @adId AND adType = N'menu'`);
+    if (preMenu.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Ad not found or you don't have permission",
+      });
+    }
+    const mid = preMenu.recordset[0].menuId as number;
+    const access = await getMenuAccessForRequest(req, mid, {
+      requiredPageKey: "advertisements",
+    });
+    if (!access.ok) {
+      return res.status(404).json({
+        success: false,
+        message: "Ad not found or you don't have permission",
+      });
+    }
+
     const adCheck = await pool
       .request()
       .input("adId", sql.Int, adId)
-      .input("userId", sql.Int, userId)
+      .input("ownerUserId", sql.Int, access.ownerUserId)
       .query(`
         SELECT a.id, a.menuId, a.title, a.titleAr
         FROM Ads a
         INNER JOIN Menus m ON a.menuId = m.id
-        WHERE a.id = @adId AND m.userId = @userId AND a.adType = 'menu'
+        WHERE a.id = @adId AND m.userId = @ownerUserId AND a.adType = 'menu'
       `);
 
     if (adCheck.recordset.length === 0) {
@@ -253,21 +259,40 @@ export const updateAd = async (req: Request, res: Response) => {
 // Delete ad
 export const deleteAd = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.userId;
     const { adId } = req.params;
 
     const pool = await getPool();
 
-    // Verify ad belongs to user's menu
+    const preMenu = await pool
+      .request()
+      .input("adId", sql.Int, adId)
+      .query(`SELECT menuId FROM Ads WHERE id = @adId AND adType = N'menu'`);
+    if (preMenu.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Ad not found or you don't have permission",
+      });
+    }
+    const mid = preMenu.recordset[0].menuId as number;
+    const access = await getMenuAccessForRequest(req, mid, {
+      requiredPageKey: "advertisements",
+    });
+    if (!access.ok) {
+      return res.status(404).json({
+        success: false,
+        message: "Ad not found or you don't have permission",
+      });
+    }
+
     const adCheck = await pool
       .request()
       .input("adId", sql.Int, adId)
-      .input("userId", sql.Int, userId)
+      .input("ownerUserId", sql.Int, access.ownerUserId)
       .query(`
         SELECT a.id, a.menuId, a.title, a.titleAr
         FROM Ads a
         INNER JOIN Menus m ON a.menuId = m.id
-        WHERE a.id = @adId AND m.userId = @userId AND a.adType = 'menu'
+        WHERE a.id = @adId AND m.userId = @ownerUserId AND a.adType = 'menu'
       `);
 
     if (adCheck.recordset.length === 0) {
@@ -323,21 +348,40 @@ export const deleteAd = async (req: Request, res: Response) => {
 // Toggle ad status
 export const toggleAdStatus = async (req: Request, res: Response) => {
   try {
-    const userId = req.user!.userId;
     const { adId } = req.params;
 
     const pool = await getPool();
 
-    // Verify ad belongs to user's menu
+    const preMenu = await pool
+      .request()
+      .input("adId", sql.Int, adId)
+      .query(`SELECT menuId FROM Ads WHERE id = @adId AND adType = N'menu'`);
+    if (preMenu.recordset.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Ad not found or you don't have permission",
+      });
+    }
+    const mid = preMenu.recordset[0].menuId as number;
+    const access = await getMenuAccessForRequest(req, mid, {
+      requiredPageKey: "advertisements",
+    });
+    if (!access.ok) {
+      return res.status(404).json({
+        success: false,
+        message: "Ad not found or you don't have permission",
+      });
+    }
+
     const adCheck = await pool
       .request()
       .input("adId", sql.Int, adId)
-      .input("userId", sql.Int, userId)
+      .input("ownerUserId", sql.Int, access.ownerUserId)
       .query(`
         SELECT a.id, a.isActive, a.menuId, a.title, a.titleAr
         FROM Ads a
         INNER JOIN Menus m ON a.menuId = m.id
-        WHERE a.id = @adId AND m.userId = @userId AND a.adType = 'menu'
+        WHERE a.id = @adId AND m.userId = @ownerUserId AND a.adType = 'menu'
       `);
 
     if (adCheck.recordset.length === 0) {

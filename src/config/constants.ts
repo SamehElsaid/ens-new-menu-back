@@ -67,7 +67,20 @@ export const ROLES = {
   USER: 'user',
   ADMIN: 'admin',
   STAFF: 'staff',
+  /** Dashboard user invited by restaurant owner; ACL in UserMenuPermission tables */
+  CASHIER: 'cashier',
 };
+
+/**
+ * Roles that share the same ACL model: `Users.ownerUserId` + `UserMenuPermission`
+ * / `UserDashboardPagePermission`. Extend when adding e.g. `kitchen`, `branch_manager`.
+ */
+export const LINKED_OWNER_DASHBOARD_ROLES = [ROLES.CASHIER] as const;
+
+export function isLinkedOwnerDashboardRole(role: unknown): boolean {
+  if (typeof role !== "string" || !role) return false;
+  return (LINKED_OWNER_DASHBOARD_ROLES as readonly string[]).includes(role);
+}
 
 export const LOCALES = ['ar', 'en'] as const;
 export type Locale = typeof LOCALES[number];
