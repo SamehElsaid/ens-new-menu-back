@@ -18,33 +18,11 @@ export type MenuActivityInsert = {
   detailJson?: string | null;
 };
 
-/** Always re-check so new migrations apply without server restart. */
-async function menuActivityLogHasActorStaffJobColumn(
-  pool: Awaited<ReturnType<typeof getPool>>,
-): Promise<boolean> {
-  const r = await pool.request().query(`
-    SELECT COL_LENGTH(N'dbo.MenuActivityLog', N'actorStaffJobRole') AS len
-  `);
-  return Number(r.recordset[0]?.len ?? 0) > 0;
-}
-
-function mergeActorStaffJobIntoDetailJson(
-  detailJson: string | null | undefined,
-  actor: { actorRole: string; staffJobRole: string | null },
-): string | null {
-  if (actor.actorRole !== ROLES.STAFF || !actor.staffJobRole) {
-    return detailJson ?? null;
-  }
-  try {
-    const obj: Record<string, unknown> = detailJson
-      ? (JSON.parse(detailJson) as Record<string, unknown>)
-      : {};
-    obj.actorStaffJobRole = actor.staffJobRole;
-    return JSON.stringify(obj);
-  } catch {
-    return JSON.stringify({ actorStaffJobRole: actor.staffJobRole });
-  }
-}
+type ParsedDetail = {
+  status?: string;
+  order?: Record<string, unknown>;
+  [key: string]: unknown;
+};
 
 function pickActorStaffJobFromRow(r: Record<string, unknown>): string | null {
   const v =
@@ -69,6 +47,29 @@ function actorStaffJobFromDetailJson(detailJson: unknown): string | null {
     /* ignore */
   }
   return null;
+}
+
+function parseDetailJson(detailJson: string | null | undefined): ParsedDetail {
+  if (!detailJson) return {};
+  try {
+    const parsed = JSON.parse(detailJson) as ParsedDetail;
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+function inferStatus(action: string, detail: ParsedDetail): string {
+  const statusRaw =
+    typeof detail.status === "string" ? detail.status.trim().toLowerCase() : "";
+  if (statusRaw) return statusRaw;
+  if (action === "TABLE_CALL_CONFIRMED") return "confirmed";
+  if (action === "TABLE_CALL_CANCELLED") return "cancelled";
+  if (action === "TABLE_CALL_ITEMS_UPDATED" || action === "TABLE_CALL_UPDATED") {
+    return "updated";
+  }
+  return action;
 }
 
 export async function resolveActorForLog(
@@ -149,42 +150,88 @@ export async function logMenuActivitySafe(
   row: MenuActivityInsert,
 ): Promise<void> {
   try {
+    if (!Number.isFinite(menuId) || menuId <= 0) return;
+    if (!Number.isFinite(row.targetId ?? NaN) || (row.targetId ?? 0) <= 0) return;
+
     const actor = await resolveActorForLog(req);
     const pool = await getPool();
-    const hasStaffJobCol = await menuActivityLogHasActorStaffJobColumn(pool);
-    const mergedDetail = mergeActorStaffJobIntoDetailJson(row.detailJson, actor);
-    const reqBase = pool
+    const orderId = Number(row.targetId);
+    const detailObj = parseDetailJson(row.detailJson);
+    const orderObj =
+      detailObj.order && typeof detailObj.order === "object" ? detailObj.order : {};
+    const nowIso = new Date().toISOString();
+    const actionPayload = {
+      action: row.action,
+      status: inferStatus(row.action, detailObj),
+      waiterName: actor.actorName,
+      waiterRole: actor.staffJobRole ?? actor.actorRole,
+      actorRole: actor.actorRole,
+      actorStaffJobRole: actor.staffJobRole,
+      time: nowIso,
+      summaryAr: row.summaryAr,
+      summaryEn: row.summaryEn,
+      detail: detailObj,
+    };
+
+    const existing = await pool
       .request()
       .input("menuId", sql.Int, menuId)
-      .input("actorRole", sql.NVarChar, actor.actorRole)
-      .input("actorName", sql.NVarChar, actor.actorName)
-      .input("action", sql.NVarChar, row.action)
-      .input("targetType", sql.NVarChar, row.targetType ?? null)
-      .input("targetId", sql.Int, row.targetId ?? null)
-      .input("summaryAr", sql.NVarChar, row.summaryAr)
-      .input("summaryEn", sql.NVarChar, row.summaryEn)
-      .input("detailJson", sql.NVarChar(sql.MAX), mergedDetail);
+      .input("orderId", sql.Int, orderId)
+      .query(`
+        SELECT id, orderJson, actionsJson
+        FROM dbo.MenuOrders
+        WHERE menuId = @menuId AND orderId = @orderId
+      `);
 
-    if (hasStaffJobCol) {
-      await reqBase
+    if ((existing.recordset?.length ?? 0) === 0) {
+      await pool
+        .request()
+        .input("menuId", sql.Int, menuId)
+        .input("orderId", sql.Int, orderId)
+        .input("orderJson", sql.NVarChar(sql.MAX), JSON.stringify(orderObj))
         .input(
-          "actorStaffJobRole",
-          sql.NVarChar,
-          actor.staffJobRole ?? null,
+          "actionsJson",
+          sql.NVarChar(sql.MAX),
+          JSON.stringify([actionPayload]),
         )
         .query(`
-        INSERT INTO dbo.MenuActivityLog
-          (menuId, actorRole, actorName, actorStaffJobRole, action, targetType, targetId, summaryAr, summaryEn, detailJson)
-        VALUES
-          (@menuId, @actorRole, @actorName, @actorStaffJobRole, @action, @targetType, @targetId, @summaryAr, @summaryEn, @detailJson)
-      `);
+          INSERT INTO dbo.MenuOrders (menuId, orderId, orderJson, actionsJson, updatedAt)
+          VALUES (@menuId, @orderId, @orderJson, @actionsJson, SYSUTCDATETIME())
+        `);
     } else {
-      await reqBase.query(`
-        INSERT INTO dbo.MenuActivityLog
-          (menuId, actorRole, actorName, action, targetType, targetId, summaryAr, summaryEn, detailJson)
-        VALUES
-          (@menuId, @actorRole, @actorName, @action, @targetType, @targetId, @summaryAr, @summaryEn, @detailJson)
-      `);
+      const row0 = existing.recordset[0] as {
+        orderJson?: string | null;
+        actionsJson?: string | null;
+      };
+      let prevActions: unknown[] = [];
+      try {
+        const parsed = row0.actionsJson ? JSON.parse(row0.actionsJson) : [];
+        prevActions = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        prevActions = [];
+      }
+      const mergedActions = [...prevActions, actionPayload];
+      let mergedOrder = orderObj;
+      if (Object.keys(mergedOrder).length === 0) {
+        try {
+          mergedOrder = row0.orderJson
+            ? (JSON.parse(row0.orderJson) as Record<string, unknown>)
+            : {};
+        } catch {
+          mergedOrder = {};
+        }
+      }
+      await pool
+        .request()
+        .input("menuId", sql.Int, menuId)
+        .input("orderId", sql.Int, orderId)
+        .input("orderJson", sql.NVarChar(sql.MAX), JSON.stringify(mergedOrder))
+        .input("actionsJson", sql.NVarChar(sql.MAX), JSON.stringify(mergedActions))
+        .query(`
+          UPDATE dbo.MenuOrders
+          SET orderJson = @orderJson, actionsJson = @actionsJson, updatedAt = SYSUTCDATETIME()
+          WHERE menuId = @menuId AND orderId = @orderId
+        `);
     }
   } catch (e) {
     logger.warn("logMenuActivitySafe skipped", e);
@@ -230,31 +277,13 @@ export async function listMenuActivityLogs(
   try {
     const pool = await getPool();
     const tableCheck = await pool.request().query(`
-      SELECT OBJECT_ID(N'dbo.MenuActivityLog', N'U') AS oid
+      SELECT OBJECT_ID(N'dbo.MenuOrders', N'U') AS oid
     `);
     if (!tableCheck.recordset[0]?.oid) {
       return { rows: [], total: 0, page: safePage, limit: safeLimit };
     }
 
     const countReq = pool.request().input("menuId", sql.Int, menuId);
-    if (nameFilter != null) {
-      countReq.input("nameFilter", sql.NVarChar, nameFilter);
-    }
-    const countR = await countReq.query(`
-      SELECT COUNT(*) AS c FROM dbo.MenuActivityLog
-      WHERE menuId = @menuId
-      ${nameFilter != null ? "AND actorName LIKE N'%' + @nameFilter + N'%'" : ""}
-    `);
-    const total = Number(countR.recordset[0]?.c ?? 0);
-
-    const hasStaffJobCol = await menuActivityLogHasActorStaffJobColumn(pool);
-
-    const selectCols = hasStaffJobCol
-      ? `id, menuId, actorRole, actorName, actorStaffJobRole, action, targetType, targetId,
-               summaryAr, summaryEn, detailJson, createdAt`
-      : `id, menuId, actorRole, actorName, action, targetType, targetId,
-               summaryAr, summaryEn, detailJson, createdAt`;
-
     const rowsReq = pool
       .request()
       .input("menuId", sql.Int, menuId)
@@ -262,39 +291,90 @@ export async function listMenuActivityLogs(
       .input("limit", sql.Int, safeLimit);
     if (nameFilter != null) {
       rowsReq.input("nameFilter", sql.NVarChar, nameFilter);
+      countReq.input("nameFilter", sql.NVarChar, nameFilter);
     }
-    const rowsR = await rowsReq.query(`
-        SELECT ${selectCols}
-        FROM dbo.MenuActivityLog
-        WHERE menuId = @menuId
-        ${nameFilter != null ? "AND actorName LIKE N'%' + @nameFilter + N'%'" : ""}
-        ORDER BY createdAt DESC
-        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-      `);
+    const countR = await countReq.query(`
+      SELECT COUNT(*) AS c
+      FROM dbo.MenuOrders mo
+      CROSS APPLY OPENJSON(mo.actionsJson)
+      WITH (
+        waiterName NVARCHAR(255) '$.waiterName'
+      ) a
+      WHERE mo.menuId = @menuId
+      ${nameFilter != null ? "AND a.waiterName LIKE N'%' + @nameFilter + N'%'" : ""}
+    `);
+    const total = Number(countR.recordset[0]?.c ?? 0);
 
-    const rows = (rowsR.recordset as Record<string, unknown>[]).map((r) => ({
-      id: r.id as number,
-      menuId: r.menuId as number,
-      actorRole: String(r.actorRole ?? ""),
-      actorName: String(r.actorName ?? ""),
-      actorStaffJobRole: (() => {
-        const fromCol =
-          hasStaffJobCol ? pickActorStaffJobFromRow(r) : null;
-        const fromDetail = actorStaffJobFromDetailJson(r.detailJson);
-        return fromCol ?? fromDetail ?? null;
-      })(),
-      action: String(r.action ?? ""),
-      targetType:
-        r.targetType != null ? String(r.targetType) : (null as string | null),
-      targetId: r.targetId != null ? Number(r.targetId) : null,
-      summaryAr:
-        r.summaryAr != null ? String(r.summaryAr) : (null as string | null),
-      summaryEn:
-        r.summaryEn != null ? String(r.summaryEn) : (null as string | null),
-      detailJson:
-        r.detailJson != null ? String(r.detailJson) : (null as string | null),
-      createdAt: (r.createdAt as Date).toISOString(),
-    }));
+    const rowsR = await rowsReq.query(`
+      SELECT
+        mo.id AS sourceId,
+        mo.menuId,
+        mo.orderId,
+        a.action,
+        a.status,
+        a.waiterName,
+        a.waiterRole,
+        a.actorRole,
+        a.actorStaffJobRole,
+        a.summaryAr,
+        a.summaryEn,
+        a.[time],
+        a.detail
+      FROM dbo.MenuOrders mo
+      CROSS APPLY OPENJSON(mo.actionsJson)
+      WITH (
+        action NVARCHAR(64) '$.action',
+        status NVARCHAR(32) '$.status',
+        waiterName NVARCHAR(255) '$.waiterName',
+        waiterRole NVARCHAR(64) '$.waiterRole',
+        actorRole NVARCHAR(32) '$.actorRole',
+        actorStaffJobRole NVARCHAR(64) '$.actorStaffJobRole',
+        summaryAr NVARCHAR(1000) '$.summaryAr',
+        summaryEn NVARCHAR(1000) '$.summaryEn',
+        [time] DATETIME2 '$.time',
+        detail NVARCHAR(MAX) '$.detail' AS JSON
+      ) a
+      WHERE mo.menuId = @menuId
+      ${nameFilter != null ? "AND a.waiterName LIKE N'%' + @nameFilter + N'%'" : ""}
+      ORDER BY a.[time] DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
+
+    const rows = (rowsR.recordset as Record<string, unknown>[]).map((r, idx) => {
+      const actorRole = String(r.actorRole ?? r.waiterRole ?? ROLES.STAFF);
+      const detailObj = r.detail != null ? String(r.detail) : null;
+      const detailWithRole = (() => {
+        if (!detailObj) return null;
+        try {
+          const parsed = JSON.parse(detailObj) as Record<string, unknown>;
+          if (!parsed.actorStaffJobRole && r.actorStaffJobRole) {
+            parsed.actorStaffJobRole = String(r.actorStaffJobRole);
+          }
+          return JSON.stringify(parsed);
+        } catch {
+          return detailObj;
+        }
+      })();
+      const createdAtRaw = r.time as Date | string | null | undefined;
+      const createdAt = createdAtRaw
+        ? new Date(createdAtRaw).toISOString()
+        : new Date().toISOString();
+      return {
+        id: Number(r.sourceId ?? 0) * 100000 + idx + 1,
+        menuId: Number(r.menuId ?? menuId),
+        actorRole,
+        actorName: String(r.waiterName ?? ""),
+        actorStaffJobRole:
+          r.actorStaffJobRole != null ? String(r.actorStaffJobRole) : null,
+        action: String(r.action ?? ""),
+        targetType: "order",
+        targetId: Number(r.orderId ?? 0),
+        summaryAr: r.summaryAr != null ? String(r.summaryAr) : null,
+        summaryEn: r.summaryEn != null ? String(r.summaryEn) : null,
+        detailJson: detailWithRole ?? detailObj,
+        createdAt,
+      };
+    });
 
     return { rows, total, page: safePage, limit: safeLimit };
   } catch (error) {

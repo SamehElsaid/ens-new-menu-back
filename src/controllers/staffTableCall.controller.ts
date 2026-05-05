@@ -342,7 +342,18 @@ export async function putStaffTableCall(
       targetId: callId,
       summaryAr: sums.ar,
       summaryEn: sums.en,
-      detailJson: JSON.stringify({ status: result.status }),
+      detailJson: JSON.stringify({
+        status: result.status,
+        order: snapPut
+          ? {
+              tableNumber: snapPut.tableNumber,
+              customerName: snapPut.customerName,
+              items: snapPut.items,
+              orderTotal: snapPut.orderTotal,
+              status: snapPut.status,
+            }
+          : null,
+      }),
     });
   } catch (error) {
     logger.error("putStaffTableCall error:", error);
@@ -411,7 +422,18 @@ export async function patchTableCallStatus(
       targetId: callId,
       summaryAr: sums.ar,
       summaryEn: sums.en,
-      detailJson: JSON.stringify({ status: raw }),
+      detailJson: JSON.stringify({
+        status: raw,
+        order: snapStatus
+          ? {
+              tableNumber: snapStatus.tableNumber,
+              customerName: snapStatus.customerName,
+              items: snapStatus.items,
+              orderTotal: snapStatus.orderTotal,
+              status: snapStatus.status,
+            }
+          : null,
+      }),
     });
   } catch (error) {
     logger.error("patchTableCallStatus error:", error);
@@ -499,7 +521,19 @@ export async function patchTableCallItems(
       targetId: callId,
       summaryAr: sums.ar,
       summaryEn: sums.en,
-      detailJson: JSON.stringify({ staffId, orderStatus: result.status }),
+      detailJson: JSON.stringify({
+        status: result.status,
+        staffId,
+        order: snapItems
+          ? {
+              tableNumber: snapItems.tableNumber,
+              customerName: snapItems.customerName,
+              items: snapItems.items,
+              orderTotal: snapItems.orderTotal,
+              status: snapItems.status,
+            }
+          : null,
+      }),
     });
   } catch (error) {
     logger.error("patchTableCallItems error:", error);
