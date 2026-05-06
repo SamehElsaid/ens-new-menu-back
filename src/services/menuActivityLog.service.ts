@@ -8,6 +8,7 @@ import {
 import { normalizeStaffJobRole } from "../config/staffJobRoles";
 import type { TokenPayload } from "../utils/tokenHelper";
 import { logger } from "../utils/logger";
+import { broadcastMenuActivityUpdated } from "../socket/staffIoBroadcast";
 
 export type MenuActivityInsert = {
   action: string;
@@ -16,6 +17,12 @@ export type MenuActivityInsert = {
   summaryAr: string;
   summaryEn: string;
   detailJson?: string | null;
+};
+
+type MenuOrderActor = {
+  actorRole: string;
+  actorName: string;
+  staffJobRole: string | null;
 };
 
 type ParsedDetail = {
@@ -70,6 +77,95 @@ function inferStatus(action: string, detail: ParsedDetail): string {
     return "updated";
   }
   return action;
+}
+
+async function appendMenuOrderActivity(
+  menuId: number,
+  orderId: number,
+  actor: MenuOrderActor,
+  row: MenuActivityInsert,
+): Promise<void> {
+  const pool = await getPool();
+  const detailObj = parseDetailJson(row.detailJson);
+  const orderObj =
+    detailObj.order && typeof detailObj.order === "object" ? detailObj.order : {};
+  const nowIso = new Date().toISOString();
+  const actionPayload = {
+    action: row.action,
+    status: inferStatus(row.action, detailObj),
+    waiterName: actor.actorName,
+    waiterRole: actor.staffJobRole ?? actor.actorRole,
+    actorRole: actor.actorRole,
+    actorStaffJobRole: actor.staffJobRole,
+    time: nowIso,
+    summaryAr: row.summaryAr,
+    summaryEn: row.summaryEn,
+    detail: detailObj,
+  };
+
+  const existing = await pool
+    .request()
+    .input("menuId", sql.Int, menuId)
+    .input("orderId", sql.Int, orderId)
+    .query(`
+      SELECT id, orderJson, actionsJson
+      FROM dbo.MenuOrders
+      WHERE menuId = @menuId AND orderId = @orderId
+    `);
+
+  if ((existing.recordset?.length ?? 0) === 0) {
+    await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("orderId", sql.Int, orderId)
+      .input("orderJson", sql.NVarChar(sql.MAX), JSON.stringify(orderObj))
+      .input(
+        "actionsJson",
+        sql.NVarChar(sql.MAX),
+        JSON.stringify([actionPayload]),
+      )
+      .query(`
+        INSERT INTO dbo.MenuOrders (menuId, orderId, orderJson, actionsJson, updatedAt)
+        VALUES (@menuId, @orderId, @orderJson, @actionsJson, SYSUTCDATETIME())
+      `);
+    broadcastMenuActivityUpdated(menuId);
+    return;
+  }
+
+  const row0 = existing.recordset[0] as {
+    orderJson?: string | null;
+    actionsJson?: string | null;
+  };
+  let prevActions: unknown[] = [];
+  try {
+    const parsed = row0.actionsJson ? JSON.parse(row0.actionsJson) : [];
+    prevActions = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    prevActions = [];
+  }
+  const mergedActions = [...prevActions, actionPayload];
+  let mergedOrder = orderObj;
+  if (Object.keys(mergedOrder).length === 0) {
+    try {
+      mergedOrder = row0.orderJson
+        ? (JSON.parse(row0.orderJson) as Record<string, unknown>)
+        : {};
+    } catch {
+      mergedOrder = {};
+    }
+  }
+  await pool
+    .request()
+    .input("menuId", sql.Int, menuId)
+    .input("orderId", sql.Int, orderId)
+    .input("orderJson", sql.NVarChar(sql.MAX), JSON.stringify(mergedOrder))
+    .input("actionsJson", sql.NVarChar(sql.MAX), JSON.stringify(mergedActions))
+    .query(`
+      UPDATE dbo.MenuOrders
+      SET orderJson = @orderJson, actionsJson = @actionsJson, updatedAt = SYSUTCDATETIME()
+      WHERE menuId = @menuId AND orderId = @orderId
+    `);
+  broadcastMenuActivityUpdated(menuId);
 }
 
 export async function resolveActorForLog(
@@ -154,87 +250,35 @@ export async function logMenuActivitySafe(
     if (!Number.isFinite(row.targetId ?? NaN) || (row.targetId ?? 0) <= 0) return;
 
     const actor = await resolveActorForLog(req);
-    const pool = await getPool();
     const orderId = Number(row.targetId);
-    const detailObj = parseDetailJson(row.detailJson);
-    const orderObj =
-      detailObj.order && typeof detailObj.order === "object" ? detailObj.order : {};
-    const nowIso = new Date().toISOString();
-    const actionPayload = {
-      action: row.action,
-      status: inferStatus(row.action, detailObj),
-      waiterName: actor.actorName,
-      waiterRole: actor.staffJobRole ?? actor.actorRole,
-      actorRole: actor.actorRole,
-      actorStaffJobRole: actor.staffJobRole,
-      time: nowIso,
-      summaryAr: row.summaryAr,
-      summaryEn: row.summaryEn,
-      detail: detailObj,
-    };
-
-    const existing = await pool
-      .request()
-      .input("menuId", sql.Int, menuId)
-      .input("orderId", sql.Int, orderId)
-      .query(`
-        SELECT id, orderJson, actionsJson
-        FROM dbo.MenuOrders
-        WHERE menuId = @menuId AND orderId = @orderId
-      `);
-
-    if ((existing.recordset?.length ?? 0) === 0) {
-      await pool
-        .request()
-        .input("menuId", sql.Int, menuId)
-        .input("orderId", sql.Int, orderId)
-        .input("orderJson", sql.NVarChar(sql.MAX), JSON.stringify(orderObj))
-        .input(
-          "actionsJson",
-          sql.NVarChar(sql.MAX),
-          JSON.stringify([actionPayload]),
-        )
-        .query(`
-          INSERT INTO dbo.MenuOrders (menuId, orderId, orderJson, actionsJson, updatedAt)
-          VALUES (@menuId, @orderId, @orderJson, @actionsJson, SYSUTCDATETIME())
-        `);
-    } else {
-      const row0 = existing.recordset[0] as {
-        orderJson?: string | null;
-        actionsJson?: string | null;
-      };
-      let prevActions: unknown[] = [];
-      try {
-        const parsed = row0.actionsJson ? JSON.parse(row0.actionsJson) : [];
-        prevActions = Array.isArray(parsed) ? parsed : [];
-      } catch {
-        prevActions = [];
-      }
-      const mergedActions = [...prevActions, actionPayload];
-      let mergedOrder = orderObj;
-      if (Object.keys(mergedOrder).length === 0) {
-        try {
-          mergedOrder = row0.orderJson
-            ? (JSON.parse(row0.orderJson) as Record<string, unknown>)
-            : {};
-        } catch {
-          mergedOrder = {};
-        }
-      }
-      await pool
-        .request()
-        .input("menuId", sql.Int, menuId)
-        .input("orderId", sql.Int, orderId)
-        .input("orderJson", sql.NVarChar(sql.MAX), JSON.stringify(mergedOrder))
-        .input("actionsJson", sql.NVarChar(sql.MAX), JSON.stringify(mergedActions))
-        .query(`
-          UPDATE dbo.MenuOrders
-          SET orderJson = @orderJson, actionsJson = @actionsJson, updatedAt = SYSUTCDATETIME()
-          WHERE menuId = @menuId AND orderId = @orderId
-        `);
-    }
+    await appendMenuOrderActivity(menuId, orderId, actor, row);
   } catch (e) {
     logger.warn("logMenuActivitySafe skipped", e);
+  }
+}
+
+/** For guest-created orders where no authenticated req.user exists. */
+export async function logMenuOrderEventSafe(
+  menuId: number,
+  orderId: number,
+  row: MenuActivityInsert,
+  actor?: {
+    actorName?: string | null;
+    actorRole?: string | null;
+    staffJobRole?: string | null;
+  },
+): Promise<void> {
+  try {
+    if (!Number.isFinite(menuId) || menuId <= 0) return;
+    if (!Number.isFinite(orderId) || orderId <= 0) return;
+    const safeActor: MenuOrderActor = {
+      actorRole: String(actor?.actorRole ?? "guest"),
+      actorName: String(actor?.actorName ?? "Guest"),
+      staffJobRole: actor?.staffJobRole ?? null,
+    };
+    await appendMenuOrderActivity(menuId, orderId, safeActor, row);
+  } catch (e) {
+    logger.warn("logMenuOrderEventSafe skipped", e);
   }
 }
 

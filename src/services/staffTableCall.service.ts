@@ -11,6 +11,7 @@ import {
 } from "../config/menuStaffColumns";
 import { logger } from "../utils/logger";
 import { isUserOnFreePlan } from "./subscriptionPlan.service";
+import { logMenuOrderEventSafe } from "./menuActivityLog.service";
 
 /** Persisted on StaffTableCalls.status (after migration). */
 export type StaffTableCallStatus = "pending" | "confirmed" | "cancelled";
@@ -396,6 +397,36 @@ export async function processGuestStaffCall(
     if (!persisted) {
       return { ok: false, error: "SERVER_ERROR" };
     }
+
+    void logMenuOrderEventSafe(
+      menuId,
+      persisted.id,
+      {
+        action: "TABLE_CALL_CREATED",
+        targetType: "order",
+        targetId: persisted.id,
+        summaryAr: customerName
+          ? `طلب جديد من ${customerName} - طاولة ${safeTable}`
+          : `طلب جديد - طاولة ${safeTable}`,
+        summaryEn: customerName
+          ? `New order from ${customerName} - table ${safeTable}`
+          : `New order - table ${safeTable}`,
+        detailJson: JSON.stringify({
+          status: initialStatus,
+          order: {
+            tableNumber: safeTable,
+            customerName,
+            items: itemsResolved,
+            orderTotal,
+            status: initialStatus,
+          },
+        }),
+      },
+      {
+        actorName: customerName || "Guest",
+        actorRole: "guest",
+      },
+    );
 
     return {
       ok: true,

@@ -40,3 +40,42 @@ export async function getMenuAccessForRequest(
   if (r.recordset.length === 0) return { ok: false };
   return { ok: true, ownerUserId: r.recordset[0].ownerUserId as number };
 }
+
+/**
+ * Same rules as getMenuAccessForRequest, for Socket.IO subscribe (no Request object).
+ */
+export async function verifyMenuAccessForSocket(
+  userId: number,
+  role: string,
+  menuId: number,
+): Promise<boolean> {
+  if (!Number.isFinite(menuId) || menuId <= 0) return false;
+  if (!Number.isFinite(userId) || userId <= 0) return false;
+
+  const pool = await getPool();
+
+  if (role !== ROLES.STAFF) {
+    const r = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("userId", sql.Int, userId)
+      .query(
+        "SELECT 1 AS x FROM Menus WHERE id = @menuId AND userId = @userId",
+      );
+    return r.recordset.length > 0;
+  }
+
+  const r = await pool
+    .request()
+    .input("menuId", sql.Int, menuId)
+    .input("staffId", sql.Int, userId)
+    .query(`
+      SELECT 1 AS x
+      FROM Menus m
+      INNER JOIN MenuStaff s ON s.menuId = m.id AND s.id = @staffId
+      WHERE m.id = @menuId
+        AND LOWER(LTRIM(RTRIM(ISNULL(s.role, '')))) IN ('cashier', 'casher')
+    `);
+
+  return r.recordset.length > 0;
+}
