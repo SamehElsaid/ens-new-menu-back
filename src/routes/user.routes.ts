@@ -5,6 +5,7 @@ import * as pushTokenController from "../controllers/pushToken.controller";
 import { validate } from "../middleware/validation";
 import { requireAuth } from "../middleware/auth.middleware";
 import { uploadMemoryStorage } from "../controllers/upload.controller";
+import { MAX_FCM_TOKEN_LEN } from "../services/fcmPush.service";
 
 const router = Router();
 
@@ -36,6 +37,13 @@ router.put(
     body("gender").optional().isIn(["male", "female", "other"]),
     body("address").optional().isString().trim().isLength({ max: 500 }),
     body("profileImage").optional().isString().trim().isLength({ max: 500 }),
+    body("fcmToken")
+      .optional({ values: "null" })
+      .custom((value) => {
+        if (value === null || value === undefined || value === "") return true;
+        if (typeof value !== "string") return false;
+        return value.trim().length <= MAX_FCM_TOKEN_LEN;
+      }),
   ]),
   userController.updateProfile,
 );
