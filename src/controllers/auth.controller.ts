@@ -24,7 +24,7 @@ import { ApiErrors } from "../i18n/apiErrors";
 // Check Availability (Email or Phone Number)
 export async function checkAvailability(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { email, phoneNumber } = req.query;
@@ -173,7 +173,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     const { email, password } = req.body;
     const ipAddress = (req.ip || req.socket.remoteAddress || "unknown").replace(
       "::ffff:",
-      ""
+      "",
     );
     const userAgent = req.headers["user-agent"];
 
@@ -205,7 +205,7 @@ export async function login(req: Request, res: Response): Promise<void> {
         email,
         ipAddress,
         false,
-        userAgent
+        userAgent,
       );
       await LoginAttemptsService.checkAndLockAccount(email);
 
@@ -227,7 +227,7 @@ export async function login(req: Request, res: Response): Promise<void> {
         email,
         ipAddress,
         false,
-        userAgent
+        userAgent,
       );
       const lockResult = await LoginAttemptsService.checkAndLockAccount(email);
 
@@ -289,9 +289,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     await LoginAttemptsService.resetFailedAttempts(email);
 
     // Get user profile with subscription (same shape as getMe)
-    const profileResult = await pool
-      .request()
-      .input("userId", sql.Int, user.id)
+    const profileResult = await pool.request().input("userId", sql.Int, user.id)
       .query(`
         SELECT 
           u.id, u.email, u.name, u.role, u.phoneNumber, u.country,
@@ -333,7 +331,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     await RefreshTokenService.storeToken(
       user.id,
       refreshToken,
-      refreshTokenExpiry
+      refreshTokenExpiry,
     );
 
     res.json({
@@ -415,7 +413,7 @@ export async function verifyEmail(req: Request, res: Response): Promise<void> {
 // Resend Verification Email
 export async function resendVerification(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { email, locale = "ar" } = req.body;
@@ -472,7 +470,7 @@ export async function resendVerification(
 // Forgot Password
 export async function forgotPassword(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { email, locale = "ar" } = req.body;
@@ -517,7 +515,7 @@ export async function forgotPassword(
       email,
       user.name,
       token,
-      locale as "ar" | "en"
+      locale as "ar" | "en",
     );
 
     res.json({ message: "If the email exists, a reset link will be sent" });
@@ -530,7 +528,7 @@ export async function forgotPassword(
 // Reset Password
 export async function resetPassword(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { token, newPassword, locale = "ar" } = req.body;
@@ -576,7 +574,7 @@ export async function resetPassword(
     await sendPasswordChangedEmail(
       reset.email,
       reset.name,
-      locale as "ar" | "en"
+      locale as "ar" | "en",
     );
 
     res.json({ message: "Password reset successfully" });
@@ -598,6 +596,13 @@ export async function getMe(req: Request, res: Response): Promise<void> {
           u.id, u.email, u.name, u.role, u.phoneNumber, u.country, 
           u.dateOfBirth, u.gender, u.address, u.profileImage,
           u.isEmailVerified, u.createdAt,
+          CAST(
+            CASE
+              WHEN NULLIF(LTRIM(RTRIM(ISNULL(u.fcmToken, N''))), N'') IS NOT NULL
+              THEN 1
+              ELSE 0
+            END
+          AS BIT) AS hasFcmToken,
           s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
         FROM Users u
         LEFT JOIN Subscriptions s ON u.id = s.userId 
@@ -628,6 +633,7 @@ export async function getMe(req: Request, res: Response): Promise<void> {
         profileImage: user.profileImage,
         isEmailVerified: user.isEmailVerified,
         createdAt: user.createdAt,
+        hasFcmToken: Boolean(user.hasFcmToken),
         planType: user.billingCycle || "free", // Add planType from billingCycle
         subscription: {
           planId: user.planId,
@@ -667,7 +673,7 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
       chainSteps < MAX_CHAIN
     ) {
       const nextVerification = await RefreshTokenService.verifyToken(
-        tokenVerification.replacedByToken
+        tokenVerification.replacedByToken,
       );
       chainSteps++;
       tokenToUse = tokenVerification.replacedByToken;
@@ -728,7 +734,7 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
     await RefreshTokenService.rotateToken(
       tokenToUse,
       newRefreshToken,
-      refreshTokenExpiry
+      refreshTokenExpiry,
     );
 
     res.json({
@@ -761,7 +767,7 @@ export async function logout(req: Request, res: Response): Promise<void> {
         userId,
         "access",
         accessTokenExpiry,
-        "User logout"
+        "User logout",
       );
     }
 

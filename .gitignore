@@ -56,3 +56,7 @@ coverage/
 
 # PM2
 .pm2/
+
+# Firebase / GCP service account JSON (secrets — never commit)
+*-firebase-adminsdk-*.json
+**/*firebase-adminsdk*.json

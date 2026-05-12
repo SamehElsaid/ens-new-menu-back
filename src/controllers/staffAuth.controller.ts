@@ -41,10 +41,7 @@ function parseMenuWorkingHours(workingHours: unknown): unknown {
   return workingHours;
 }
 
-export async function staffLogin(
-  req: Request,
-  res: Response
-): Promise<void> {
+export async function staffLogin(req: Request, res: Response): Promise<void> {
   try {
     const { email, password, menuSlug } = req.body;
     const rawExpoToken =
@@ -59,8 +56,7 @@ export async function staffLogin(
     // Find the menu by slug
     const menuResult = await pool
       .request()
-      .input("slug", sql.NVarChar, menuSlug.toLowerCase().trim())
-      .query(`
+      .input("slug", sql.NVarChar, menuSlug.toLowerCase().trim()).query(`
         SELECT
           m.id,
           m.userId,
@@ -118,7 +114,7 @@ export async function staffLogin(
           en: "Staff access requires a Pro plan. Ask the owner to upgrade.",
           ar: "دخول الطاقم يتطلب خطة Pro. اطلب من صاحب المنيو الترقية.",
         },
-        { code: "PRO_REQUIRED" }
+        { code: "PRO_REQUIRED" },
       );
       return;
     }
@@ -136,8 +132,7 @@ export async function staffLogin(
     const staffResult = await pool
       .request()
       .input("email", sql.NVarChar, email.toLowerCase().trim())
-      .input("menuId", sql.Int, menu.id)
-      .query(`
+      .input("menuId", sql.Int, menu.id).query(`
         SELECT *
         FROM MenuStaff
         WHERE ${emailCol} = @email AND menuId = @menuId
@@ -206,8 +201,7 @@ export async function staffLogin(
     }
 
     const norm = normalizeStaffRow(staff, staffMeta);
-    const staffJobRole =
-      normalizeStaffJobRole(norm.role) ?? STAFF_JOB_WAITER;
+    const staffJobRole = normalizeStaffJobRole(norm.role) ?? STAFF_JOB_WAITER;
     const tokenPayload = {
       id: staff.id as number,
       userId: staff.id as number,
@@ -233,20 +227,26 @@ export async function staffLogin(
         await RefreshTokenService.storeToken(
           tokenPayload.userId,
           refreshToken,
-          refreshTokenExpiry
+          refreshTokenExpiry,
         );
       } catch (storeError) {
         // Do not block successful staff login because of refresh-token persistence.
         logger.warn("Staff refresh token was not persisted; login continues", {
           staffId: tokenPayload.userId,
-          error: storeError instanceof Error ? storeError.message : String(storeError),
+          error:
+            storeError instanceof Error
+              ? storeError.message
+              : String(storeError),
         });
         refreshToken = null;
       }
     } else {
-      logger.warn("Skipping staff refresh token persistence: no matching Users row", {
-        staffId: tokenPayload.userId,
-      });
+      logger.warn(
+        "Skipping staff refresh token persistence: no matching Users row",
+        {
+          staffId: tokenPayload.userId,
+        },
+      );
       refreshToken = null;
     }
 
@@ -299,10 +299,7 @@ export async function staffLogin(
   }
 }
 
-export async function getStaffMe(
-  req: Request,
-  res: Response
-): Promise<void> {
+export async function getStaffMe(req: Request, res: Response): Promise<void> {
   try {
     const staffId = req.user!.userId;
 
@@ -310,9 +307,7 @@ export async function getStaffMe(
 
     const meta = await getMenuStaffColumnMeta();
 
-    const result = await pool
-      .request()
-      .input("staffId", sql.Int, staffId)
+    const result = await pool.request().input("staffId", sql.Int, staffId)
       .query(`
         SELECT
           s.*,
@@ -363,7 +358,7 @@ export async function getStaffMe(
           en: "Staff features require a Pro plan.",
           ar: "ميزات الطاقم تتطلب خطة Pro.",
         },
-        { code: "PRO_REQUIRED" }
+        { code: "PRO_REQUIRED" },
       );
       return;
     }
@@ -418,10 +413,7 @@ export async function getStaffMe(
   }
 }
 
-export async function staffLogout(
-  req: Request,
-  res: Response
-): Promise<void> {
+export async function staffLogout(req: Request, res: Response): Promise<void> {
   try {
     const staffId = req.user!.userId;
     const { refreshToken } = req.body;

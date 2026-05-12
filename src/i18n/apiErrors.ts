@@ -386,6 +386,18 @@ export const ApiErrors = {
     en: 'Failed to delete notification',
     ar: 'فشل حذف الإشعار',
   },
+  fcmTokenRequired: {
+    en: 'FCM device token is required',
+    ar: 'رمز الجهاز (FCM) مطلوب',
+  },
+  invalidFcmTokenLength: {
+    en: 'FCM token is too long',
+    ar: 'رمز FCM طويل جداً',
+  },
+  failedSaveFcmToken: {
+    en: 'Failed to save push notification token',
+    ar: 'فشل حفظ رمز الإشعارات',
+  },
   customizationsProOnly: {
     en: 'Customizations are only available for Pro users',
     ar: 'التخصيصات متاحة لمشتركي Pro فقط',

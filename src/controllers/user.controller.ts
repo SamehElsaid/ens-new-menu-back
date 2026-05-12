@@ -1,14 +1,14 @@
-import { Request, Response } from 'express';
-import path from 'path';
-import fs from 'fs/promises';
-import sharp from 'sharp';
-import { v4 as uuidv4 } from 'uuid';
-import { getPool, sql } from '../config/database';
-import bcrypt from 'bcryptjs';
-import { logger } from '../utils/logger';
-import { getImageUrl } from '../utils/urlHelper';
-import { sendApiError } from '../utils/apiErrorResponse';
-import { ApiErrors } from '../i18n/apiErrors';
+import { Request, Response } from "express";
+import path from "path";
+import fs from "fs/promises";
+import sharp from "sharp";
+import { v4 as uuidv4 } from "uuid";
+import { getPool, sql } from "../config/database";
+import bcrypt from "bcryptjs";
+import { logger } from "../utils/logger";
+import { getImageUrl } from "../utils/urlHelper";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 // Get user profile
 export async function getProfile(req: Request, res: Response): Promise<void> {
@@ -17,13 +17,17 @@ export async function getProfile(req: Request, res: Response): Promise<void> {
 
     const pool = await getPool();
 
-    const result = await pool
-      .request()
-      .input('userId', sql.Int, userId)
-      .query(`
+    const result = await pool.request().input("userId", sql.Int, userId).query(`
         SELECT 
           id, email, name, phoneNumber, country, dateOfBirth, gender, address,
-          role, isEmailVerified, createdAt, profileImage
+          role, isEmailVerified, createdAt, profileImage,
+          CAST(
+            CASE
+              WHEN NULLIF(LTRIM(RTRIM(ISNULL(fcmToken, N''))), N'') IS NOT NULL
+              THEN 1
+              ELSE 0
+            END
+          AS BIT) AS hasFcmToken
         FROM Users
         WHERE id = @userId
       `);
@@ -33,76 +37,95 @@ export async function getProfile(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    res.json({ user: result.recordset[0] });
+    const row = result.recordset[0] as Record<string, unknown> & {
+      hasFcmToken?: unknown;
+    };
+    res.json({
+      user: { ...row, hasFcmToken: Boolean(row.hasFcmToken) },
+    });
   } catch (error) {
-    logger.error('Get profile error:', error);
+    logger.error("Get profile error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetProfile);
   }
 }
 
 // Update user profile (supports JSON or multipart/form-data with optional profileImage file)
-export async function updateProfile(req: Request, res: Response): Promise<void> {
+export async function updateProfile(
+  req: Request,
+  res: Response,
+): Promise<void> {
   try {
     const userId = req.user!.userId;
-    const { name, phone, phoneNumber, country, dateOfBirth, gender, address, profileImage: profileImageBody } = req.body;
+    const {
+      name,
+      phone,
+      phoneNumber,
+      country,
+      dateOfBirth,
+      gender,
+      address,
+      profileImage: profileImageBody,
+    } = req.body;
 
     // If client sent multipart with a file, save it and get URL (same as /api/upload type=profile-images)
     let profileImageUrl: string | null = null;
     if ((req as any).file?.buffer) {
       const file = (req as any).file;
-      const uploadDir = path.join(process.cwd(), 'uploads', 'profile-images');
+      const uploadDir = path.join(process.cwd(), "uploads", "profile-images");
       await fs.mkdir(uploadDir, { recursive: true });
       const filename = `${uuidv4()}.webp`;
       const filePath = path.join(uploadDir, filename);
       await sharp(file.buffer)
-        .resize(400, 400, { fit: 'inside', withoutEnlargement: true })
+        .resize(400, 400, { fit: "inside", withoutEnlargement: true })
         .webp({ quality: 85 })
         .toFile(filePath);
       profileImageUrl = getImageUrl(`/uploads/profile-images/${filename}`);
     }
 
-    const profileImage = profileImageUrl ?? (typeof profileImageBody === 'string' ? profileImageBody : undefined);
+    const profileImage =
+      profileImageUrl ??
+      (typeof profileImageBody === "string" ? profileImageBody : undefined);
 
     const pool = await getPool();
 
     const updates: string[] = [];
-    const request = pool.request().input('userId', sql.Int, userId);
+    const request = pool.request().input("userId", sql.Int, userId);
 
     if (name !== undefined) {
-      updates.push('name = @name');
-      request.input('name', sql.NVarChar, name);
+      updates.push("name = @name");
+      request.input("name", sql.NVarChar, name);
     }
 
     // Accept both 'phone' and 'phoneNumber' for compatibility
     const phoneValue = phone ?? phoneNumber;
     if (phoneValue !== undefined) {
-      updates.push('phoneNumber = @phoneNumber');
-      request.input('phoneNumber', sql.NVarChar, phoneValue || null);
+      updates.push("phoneNumber = @phoneNumber");
+      request.input("phoneNumber", sql.NVarChar, phoneValue || null);
     }
 
     if (country !== undefined) {
-      updates.push('country = @country');
-      request.input('country', sql.NVarChar, country || null);
+      updates.push("country = @country");
+      request.input("country", sql.NVarChar, country || null);
     }
 
     if (dateOfBirth !== undefined) {
-      updates.push('dateOfBirth = @dateOfBirth');
-      request.input('dateOfBirth', sql.Date, dateOfBirth || null);
+      updates.push("dateOfBirth = @dateOfBirth");
+      request.input("dateOfBirth", sql.Date, dateOfBirth || null);
     }
 
     if (gender !== undefined) {
-      updates.push('gender = @gender');
-      request.input('gender', sql.NVarChar, gender || null);
+      updates.push("gender = @gender");
+      request.input("gender", sql.NVarChar, gender || null);
     }
 
     if (address !== undefined) {
-      updates.push('address = @address');
-      request.input('address', sql.NVarChar, address || null);
+      updates.push("address = @address");
+      request.input("address", sql.NVarChar, address || null);
     }
 
     if (profileImage !== undefined) {
-      updates.push('profileImage = @profileImage');
-      request.input('profileImage', sql.NVarChar, profileImage || null);
+      updates.push("profileImage = @profileImage");
+      request.input("profileImage", sql.NVarChar, profileImage || null);
     }
 
     if (updates.length === 0) {
@@ -112,34 +135,46 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
 
     await request.query(`
       UPDATE Users 
-      SET ${updates.join(', ')}
+      SET ${updates.join(", ")}
       WHERE id = @userId
     `);
 
     // Get updated user data
-    const userResult = await pool
-      .request()
-      .input('userId', sql.Int, userId)
+    const userResult = await pool.request().input("userId", sql.Int, userId)
       .query(`
         SELECT 
           id, email, name, phoneNumber, country, dateOfBirth, gender, address,
-          role, isEmailVerified, createdAt, profileImage
+          role, isEmailVerified, createdAt, profileImage,
+          CAST(
+            CASE
+              WHEN NULLIF(LTRIM(RTRIM(ISNULL(fcmToken, N''))), N'') IS NOT NULL
+              THEN 1
+              ELSE 0
+            END
+          AS BIT) AS hasFcmToken
         FROM Users
         WHERE id = @userId
       `);
 
-    res.json({ 
-      message: 'Profile updated successfully',
-      user: userResult.recordset[0]
+    const updated = userResult.recordset[0] as Record<string, unknown> & {
+      hasFcmToken?: unknown;
+    };
+
+    res.json({
+      message: "Profile updated successfully",
+      user: { ...updated, hasFcmToken: Boolean(updated.hasFcmToken) },
     });
   } catch (error) {
-    logger.error('Update profile error:', error);
+    logger.error("Update profile error:", error);
     sendApiError(res, req, 500, ApiErrors.failedUpdateProfile);
   }
 }
 
 // Change password
-export async function changePassword(req: Request, res: Response): Promise<void> {
+export async function changePassword(
+  req: Request,
+  res: Response,
+): Promise<void> {
   try {
     const userId = req.user!.userId;
     const { currentPassword, newPassword } = req.body;
@@ -149,8 +184,8 @@ export async function changePassword(req: Request, res: Response): Promise<void>
     // Get current password hash
     const userResult = await pool
       .request()
-      .input('userId', sql.Int, userId)
-      .query('SELECT password FROM Users WHERE id = @userId');
+      .input("userId", sql.Int, userId)
+      .query("SELECT password FROM Users WHERE id = @userId");
 
     if (userResult.recordset.length === 0) {
       sendApiError(res, req, 404, ApiErrors.userNotFound);
@@ -160,7 +195,7 @@ export async function changePassword(req: Request, res: Response): Promise<void>
     // Verify current password
     const isValid = await bcrypt.compare(
       currentPassword,
-      userResult.recordset[0].password
+      userResult.recordset[0].password,
     );
 
     if (!isValid) {
@@ -174,19 +209,22 @@ export async function changePassword(req: Request, res: Response): Promise<void>
     // Update password
     await pool
       .request()
-      .input('userId', sql.Int, userId)
-      .input('password', sql.NVarChar, newPasswordHash)
-      .query('UPDATE Users SET password = @password WHERE id = @userId');
+      .input("userId", sql.Int, userId)
+      .input("password", sql.NVarChar, newPasswordHash)
+      .query("UPDATE Users SET password = @password WHERE id = @userId");
 
-    res.json({ message: 'Password changed successfully' });
+    res.json({ message: "Password changed successfully" });
   } catch (error) {
-    logger.error('Change password error:', error);
+    logger.error("Change password error:", error);
     sendApiError(res, req, 500, ApiErrors.failedChangePassword);
   }
 }
 
 // Get user statistics
-export async function getStatistics(req: Request, res: Response): Promise<void> {
+export async function getStatistics(
+  req: Request,
+  res: Response,
+): Promise<void> {
   try {
     const userId = req.user!.userId;
 
@@ -195,13 +233,11 @@ export async function getStatistics(req: Request, res: Response): Promise<void> 
     // Get menu count
     const menuResult = await pool
       .request()
-      .input('userId', sql.Int, userId)
-      .query('SELECT COUNT(*) as count FROM Menus WHERE userId = @userId');
+      .input("userId", sql.Int, userId)
+      .query("SELECT COUNT(*) as count FROM Menus WHERE userId = @userId");
 
     // Get total items count
-    const itemsResult = await pool
-      .request()
-      .input('userId', sql.Int, userId)
+    const itemsResult = await pool.request().input("userId", sql.Int, userId)
       .query(`
         SELECT COUNT(*) as count 
         FROM MenuItems mi
@@ -210,9 +246,7 @@ export async function getStatistics(req: Request, res: Response): Promise<void> 
       `);
 
     // Get total ratings count and average
-    const ratingsResult = await pool
-      .request()
-      .input('userId', sql.Int, userId)
+    const ratingsResult = await pool.request().input("userId", sql.Int, userId)
       .query(`
         SELECT 
           COUNT(*) as count,
@@ -225,8 +259,7 @@ export async function getStatistics(req: Request, res: Response): Promise<void> 
     // Get active menus count
     const activeMenusResult = await pool
       .request()
-      .input('userId', sql.Int, userId)
-      .query(`
+      .input("userId", sql.Int, userId).query(`
         SELECT COUNT(*) as count 
         FROM Menus 
         WHERE userId = @userId AND isActive = 1
@@ -242,7 +275,7 @@ export async function getStatistics(req: Request, res: Response): Promise<void> 
       },
     });
   } catch (error) {
-    logger.error('Get statistics error:', error);
+    logger.error("Get statistics error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetStatistics);
   }
 }
@@ -269,36 +302,35 @@ export async function upgradePlan(req: Request, res: Response): Promise<void> {
 
     await pool
       .request()
-      .input('userId', sql.Int, userId)
-      .input('planType', sql.NVarChar, planType)
-      .input('menusLimit', sql.Int, planLimits[planType])
-      .query(`
+      .input("userId", sql.Int, userId)
+      .input("planType", sql.NVarChar, planType)
+      .input("menusLimit", sql.Int, planLimits[planType]).query(`
         UPDATE Users 
         SET planType = @planType, menusLimit = @menusLimit
         WHERE id = @userId
       `);
 
     res.json({
-      message: 'Plan upgraded successfully',
+      message: "Plan upgraded successfully",
       planType,
       menusLimit: planLimits[planType],
     });
   } catch (error) {
-    logger.error('Upgrade plan error:', error);
+    logger.error("Upgrade plan error:", error);
     sendApiError(res, req, 500, ApiErrors.failedUpgradePlan);
   }
 }
 
 // Get user subscription
-export async function getSubscription(req: Request, res: Response): Promise<void> {
+export async function getSubscription(
+  req: Request,
+  res: Response,
+): Promise<void> {
   try {
     const userId = req.user!.userId;
     const pool = await getPool();
 
-    const result = await pool
-      .request()
-      .input('userId', sql.Int, userId)
-      .query(`
+    const result = await pool.request().input("userId", sql.Int, userId).query(`
         SELECT TOP 1
           s.id, s.userId, s.planId, s.status, s.startDate, s.endDate, 
           s.billingCycle, s.amount, s.createdAt,
@@ -319,39 +351,45 @@ export async function getSubscription(req: Request, res: Response): Promise<void
         FROM Plans
         WHERE name = 'Free'
       `);
-      const freePlan = freePlanResult.recordset[0] || { maxMenus: 1, maxProductsPerMenu: 20 };
-      
-      res.json({ 
+      const freePlan = freePlanResult.recordset[0] || {
+        maxMenus: 1,
+        maxProductsPerMenu: 20,
+      };
+
+      res.json({
         subscription: {
-          plan: 'Free',
-          planName: 'Free',
-          status: 'active',
-          billingCycle: 'free',
+          plan: "Free",
+          planName: "Free",
+          status: "active",
+          billingCycle: "free",
           startDate: null,
           endDate: null,
           amount: 0,
           maxMenus: freePlan.maxMenus,
-          maxProductsPerMenu: freePlan.maxProductsPerMenu
-        }
+          maxProductsPerMenu: freePlan.maxProductsPerMenu,
+        },
       });
       return;
     }
 
     const subscription = result.recordset[0];
-    res.json({ 
+    res.json({
       subscription: {
         ...subscription,
-        plan: subscription.planName || 'Free'
-      }
+        plan: subscription.planName || "Free",
+      },
     });
   } catch (error) {
-    logger.error('Get subscription error:', error);
+    logger.error("Get subscription error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetSubscription);
   }
 }
 
 // Delete account
-export async function deleteAccount(req: Request, res: Response): Promise<void> {
+export async function deleteAccount(
+  req: Request,
+  res: Response,
+): Promise<void> {
   try {
     const userId = req.user!.userId;
     const { password } = req.body;
@@ -361,8 +399,8 @@ export async function deleteAccount(req: Request, res: Response): Promise<void> 
     // Verify password
     const userResult = await pool
       .request()
-      .input('userId', sql.Int, userId)
-      .query('SELECT password FROM Users WHERE id = @userId');
+      .input("userId", sql.Int, userId)
+      .query("SELECT password FROM Users WHERE id = @userId");
 
     if (userResult.recordset.length === 0) {
       sendApiError(res, req, 404, ApiErrors.userNotFound);
@@ -371,7 +409,7 @@ export async function deleteAccount(req: Request, res: Response): Promise<void> 
 
     const isValid = await bcrypt.compare(
       password,
-      userResult.recordset[0].password
+      userResult.recordset[0].password,
     );
 
     if (!isValid) {
@@ -382,14 +420,12 @@ export async function deleteAccount(req: Request, res: Response): Promise<void> 
     // Delete user (CASCADE will delete all related data)
     await pool
       .request()
-      .input('userId', sql.Int, userId)
-      .query('DELETE FROM Users WHERE id = @userId');
+      .input("userId", sql.Int, userId)
+      .query("DELETE FROM Users WHERE id = @userId");
 
-    res.json({ message: 'Account deleted successfully' });
+    res.json({ message: "Account deleted successfully" });
   } catch (error) {
-    logger.error('Delete account error:', error);
+    logger.error("Delete account error:", error);
     sendApiError(res, req, 500, ApiErrors.failedDeleteAccount);
   }
 }
-
-
