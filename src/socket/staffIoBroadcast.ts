@@ -46,3 +46,10 @@ export function broadcastStaffTableCallChanged(
 ): void {
   ioInstance?.to(`menu:${menuId}`).emit("staff:table_call_changed", payload);
 }
+
+/** Dashboard activity history: notify subscribers to refetch `/activity-logs`. */
+export function broadcastMenuActivityUpdated(menuId: number): void {
+  ioInstance
+    ?.to(`menu:${menuId}`)
+    .emit("menu:activity_updated", { menuId });
+}

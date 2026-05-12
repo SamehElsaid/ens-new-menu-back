@@ -12,6 +12,7 @@ import {
 } from "../services/staffTableCall.service";
 import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
 import { notifyStaffOfTableCall } from "../services/staffNotify.service";
+import { verifyMenuAccessForSocket } from "../utils/menuAccess";
 
 const roomForMenu = (menuId: number) => `menu:${menuId}`;
 
@@ -88,6 +89,59 @@ export function attachStaffNotificationsSocket(
         reply({ ok: false, error: "AUTH_FAILED" });
       }
     });
+
+    socket.on(
+      "dashboard:menu_subscribe",
+      async (
+        payload: { token?: string; menuId?: number },
+        cb?: (data: Record<string, unknown>) => void,
+      ) => {
+        const reply = (data: Record<string, unknown>) => {
+          try {
+            cb?.(data);
+          } catch {
+            /* noop */
+          }
+        };
+
+        try {
+          const raw = payload?.token?.replace(/^Bearer\s+/i, "").trim();
+          if (!raw) {
+            reply({ ok: false, error: "NO_TOKEN" });
+            return;
+          }
+
+          const blacklisted = await TokenBlacklistService.isBlacklisted(raw);
+          if (blacklisted) {
+            reply({ ok: false, error: "REVOKED" });
+            return;
+          }
+
+          const decoded = verifyAccessToken(raw);
+          const menuId = Number(payload?.menuId);
+          if (!Number.isFinite(menuId) || menuId <= 0) {
+            reply({ ok: false, error: "INVALID_MENU" });
+            return;
+          }
+
+          const allowed = await verifyMenuAccessForSocket(
+            decoded.userId,
+            decoded.role,
+            menuId,
+          );
+          if (!allowed) {
+            reply({ ok: false, error: "FORBIDDEN" });
+            return;
+          }
+
+          await socket.join(roomForMenu(menuId));
+          reply({ ok: true, menuId });
+        } catch (e) {
+          logger.warn("dashboard:menu_subscribe failed", e);
+          reply({ ok: false, error: "AUTH_FAILED" });
+        }
+      },
+    );
 
     socket.on(
       "guest:call_staff",
