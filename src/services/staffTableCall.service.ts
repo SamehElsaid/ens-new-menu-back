@@ -97,18 +97,16 @@ export function computeOrderTotalFromItems(items: StaffOrderItem[]): number {
     Math.round(
       items.reduce((s, i) => {
         const line =
-          i.total !== undefined
-            ? i.total
-            : lineTotal(i.price ?? 0, i.quantity);
+          i.total !== undefined ? i.total : lineTotal(i.price ?? 0, i.quantity);
         return s + line;
       }, 0) * 100,
     ) / 100
   );
 }
 
-function parseOrderItemsInput(raw: unknown):
-  | { ok: true; items: StaffOrderItem[] }
-  | { ok: false } {
+function parseOrderItemsInput(
+  raw: unknown,
+): { ok: true; items: StaffOrderItem[] } | { ok: false } {
   if (raw == null || raw === undefined) {
     return { ok: true, items: [] };
   }
@@ -124,7 +122,9 @@ function parseOrderItemsInput(raw: unknown):
       return { ok: false };
     }
     const o = el as Record<string, unknown>;
-    const nameRaw = String(o.name ?? "").trim().slice(0, 500);
+    const nameRaw = String(o.name ?? "")
+      .trim()
+      .slice(0, 500);
 
     let menuItemId: number | undefined;
     if (o.menuItemId != null && o.menuItemId !== "") {
@@ -201,10 +201,7 @@ export async function enrichMenuItemsFromDb(
         .filter((id): id is number => typeof id === "number"),
     ),
   ];
-  const byId = new Map<
-    number,
-    { unitPrice: number; displayName: string }
-  >();
+  const byId = new Map<number, { unitPrice: number; displayName: string }>();
 
   if (ids.length > 0) {
     const pool = await getPool();
@@ -251,11 +248,9 @@ export async function enrichMenuItemsFromDb(
 
     const db = byId.get(it.menuItemId);
     const nameFromClient = String(it.name ?? "").trim();
-    const name =
-      nameFromClient || (db?.displayName ?? `Item ${it.menuItemId}`);
+    const name = nameFromClient || (db?.displayName ?? `Item ${it.menuItemId}`);
 
-    const unit =
-      it.price !== undefined ? it.price : (db?.unitPrice ?? 0);
+    const unit = it.price !== undefined ? it.price : (db?.unitPrice ?? 0);
     const total = lineTotal(unit, it.quantity);
 
     return {
@@ -523,10 +518,7 @@ export async function getStaffPushTokensForMenu(
       : "";
 
     const pool = await getPool();
-    const r = await pool
-      .request()
-      .input("menuId", sql.Int, menuId)
-      .query(`
+    const r = await pool.request().input("menuId", sql.Int, menuId).query(`
         SELECT ${meta.expoTokenColumnQuoted} AS token
         FROM MenuStaff
         WHERE menuId = @menuId
@@ -554,7 +546,9 @@ function parseOrderItemsFromStored(raw: unknown): StaffOrderItem[] {
   for (const el of raw) {
     if (el == null || typeof el !== "object") continue;
     const o = el as Record<string, unknown>;
-    const nameRaw = String(o.name ?? "").trim().slice(0, 500);
+    const nameRaw = String(o.name ?? "")
+      .trim()
+      .slice(0, 500);
 
     let menuItemId: number | undefined;
     if (o.menuItemId != null && o.menuItemId !== "") {
@@ -623,9 +617,7 @@ function parseOrderItemsFromStored(raw: unknown): StaffOrderItem[] {
   return out;
 }
 
-function parseOrderItemsJson(
-  raw: string | null | undefined,
-): StaffOrderItem[] {
+function parseOrderItemsJson(raw: string | null | undefined): StaffOrderItem[] {
   if (raw == null || raw === "") return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -699,7 +691,9 @@ function toStaffTableCallRow(
   if (includeLastEdit) {
     const sid = row.lastEditedByStaffId;
     const sidNum =
-      sid != null && Number.isFinite(Number(sid)) ? Math.floor(Number(sid)) : null;
+      sid != null && Number.isFinite(Number(sid))
+        ? Math.floor(Number(sid))
+        : null;
     base.lastEditedByStaffId = sidNum && sidNum > 0 ? sidNum : null;
     if (row.lastEditedAt != null) {
       const d =
@@ -726,11 +720,9 @@ export async function createStaffTableCall(
 ): Promise<{ id: number; createdAt: Date } | null> {
   try {
     const pool = await getPool();
-    const orderJson =
-      items.length > 0 ? JSON.stringify(items) : null;
+    const orderJson = items.length > 0 ? JSON.stringify(items) : null;
     const statusNorm = parseGuestInitialStaffCallStatus(initialStatus);
-    const acknowledgedAt =
-      statusNorm === "confirmed" ? new Date() : null;
+    const acknowledgedAt = statusNorm === "confirmed" ? new Date() : null;
     const result = await pool
       .request()
       .input("menuId", sql.Int, menuId)
@@ -772,8 +764,7 @@ export async function getStaffTableCallSnapshot(
       result = await pool
         .request()
         .input("menuId", sql.Int, menuId)
-        .input("id", sql.Int, callId)
-        .query(`
+        .input("id", sql.Int, callId).query(`
         SELECT
           c.id,
           c.menuId,
@@ -795,8 +786,7 @@ export async function getStaffTableCallSnapshot(
       result = await pool
         .request()
         .input("menuId", sql.Int, menuId)
-        .input("id", sql.Int, callId)
-        .query(`
+        .input("id", sql.Int, callId).query(`
         SELECT
           id,
           menuId,
@@ -844,8 +834,7 @@ export async function getPendingStaffTableCalls(
     const result = await pool
       .request()
       .input("menuId", sql.Int, menuId)
-      .input("limit", sql.Int, Math.min(Math.max(limit, 1), 500))
-      .query(`
+      .input("limit", sql.Int, Math.min(Math.max(limit, 1), 500)).query(`
         SELECT TOP (@limit)
           id,
           menuId,
@@ -909,9 +898,7 @@ export async function getStaffTableCallsHistory(
     const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 500);
     const offset = (safePage - 1) * safeLimit;
 
-    const totalResult = await pool
-      .request()
-      .input("menuId", sql.Int, menuId)
+    const totalResult = await pool.request().input("menuId", sql.Int, menuId)
       .query(`
         SELECT COUNT(*) as total
         FROM StaffTableCalls
@@ -929,8 +916,7 @@ export async function getStaffTableCallsHistory(
         .request()
         .input("menuId", sql.Int, menuId)
         .input("offset", sql.Int, offset)
-        .input("limit", sql.Int, safeLimit)
-        .query(`
+        .input("limit", sql.Int, safeLimit).query(`
         SELECT
           c.id,
           c.menuId,
@@ -955,8 +941,7 @@ export async function getStaffTableCallsHistory(
         .request()
         .input("menuId", sql.Int, menuId)
         .input("offset", sql.Int, offset)
-        .input("limit", sql.Int, safeLimit)
-        .query(`
+        .input("limit", sql.Int, safeLimit).query(`
         SELECT
           id,
           menuId,
@@ -1108,8 +1093,7 @@ export async function updateStaffTableCallItems(
     const rowResult = await pool
       .request()
       .input("id", sql.Int, callId)
-      .input("menuId", sql.Int, menuId)
-      .query(`
+      .input("menuId", sql.Int, menuId).query(`
         SELECT id, tableNumber, customerName, orderItemsJson, status, acknowledgedAt, createdAt
         FROM StaffTableCalls
         WHERE id = @id AND menuId = @menuId
@@ -1182,8 +1166,7 @@ export async function updateStaffTableCallItems(
         .request()
         .input("id", sql.Int, callId)
         .input("menuId", sql.Int, menuId)
-        .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson)
-        .query(`
+        .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson).query(`
         UPDATE StaffTableCalls
         SET orderItemsJson = @orderItemsJson
         WHERE id = @id AND menuId = @menuId
@@ -1243,8 +1226,7 @@ export async function updateStaffTableCallItemsAndStatus(
     const rowResult = await pool
       .request()
       .input("id", sql.Int, callId)
-      .input("menuId", sql.Int, menuId)
-      .query(`
+      .input("menuId", sql.Int, menuId).query(`
         SELECT id, status, acknowledgedAt
         FROM StaffTableCalls
         WHERE id = @id AND menuId = @menuId
