@@ -20,7 +20,11 @@ import { RefreshTokenService } from "../services/refreshToken.service";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
-import { getUserFcmToken, MAX_FCM_TOKEN_LEN } from "../services/fcmPush.service";
+import {
+  getUserFcmToken,
+  MAX_FCM_TOKEN_LEN,
+  saveUserFcmToken,
+} from "../services/fcmPush.service";
 
 // Check Availability (Email or Phone Number)
 export async function checkAvailability(
@@ -774,6 +778,25 @@ export async function logout(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
     const { refreshToken } = req.body;
+
+    const rawFcm = (req.body as { fcmToken?: unknown }).fcmToken;
+    if (rawFcm !== undefined && rawFcm !== null && rawFcm !== "") {
+      if (typeof rawFcm !== "string") {
+        sendApiError(res, req, 400, ApiErrors.validationFailed);
+        return;
+      }
+      const sent = rawFcm.trim();
+      if (sent.length > MAX_FCM_TOKEN_LEN) {
+        sendApiError(res, req, 400, ApiErrors.invalidFcmTokenLength);
+        return;
+      }
+      if (sent) {
+        const stored = await getUserFcmToken(userId);
+        if (stored !== null && stored === sent) {
+          await saveUserFcmToken(userId, null);
+        }
+      }
+    }
 
     // Get access token from header
     const authHeader = req.headers.authorization;

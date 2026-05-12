@@ -289,6 +289,74 @@ function sanitizeActorNameSearch(raw: string | undefined | null): string | null 
   return t.replace(/[%_\[\]]/g, "");
 }
 
+export async function getMenuActivityLogById(
+  menuId: number,
+  id: number,
+): Promise<{
+  id: string;
+  orderId: string;
+  lastAction: string;
+  actions: any[];
+  order: any;
+  items: any[];
+  totalPrice: number;
+  updatedAt: string | null;
+} | null> {
+  try {
+    const pool = await getPool();
+    const tableCheck = await pool.request().query(`
+      SELECT OBJECT_ID(N'dbo.MenuOrders', N'U') AS oid
+    `);
+    if (!tableCheck.recordset[0]?.oid) return null;
+
+    const result = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("id", sql.Int, id)
+      .query(`
+        SELECT
+          mo.id,
+          mo.orderId,
+          mo.orderJson,
+          mo.actionsJson,
+          mo.updatedAt
+        FROM dbo.MenuOrders mo
+        WHERE mo.menuId = @menuId AND mo.id = @id
+      `);
+
+    if (!result.recordset.length) return null;
+
+    const r = result.recordset[0] as Record<string, unknown>;
+
+    let order: any = {};
+    try {
+      order = r.orderJson ? JSON.parse(String(r.orderJson)) : {};
+    } catch { /* ignore */ }
+
+    let actions: any[] = [];
+    try {
+      actions = r.actionsJson ? JSON.parse(String(r.actionsJson)) : [];
+      if (!Array.isArray(actions)) actions = [];
+    } catch { /* ignore */ }
+
+    const lastAction = actions.length > 0 ? actions[actions.length - 1].action : "";
+
+    return {
+      id: String(r.id),
+      orderId: String(r.orderId),
+      lastAction: String(lastAction),
+      actions,
+      order,
+      items: order.items || [],
+      totalPrice: Number(order.orderTotal || 0),
+      updatedAt: r.updatedAt ? String(r.updatedAt) : null,
+    };
+  } catch (error) {
+    logger.error("getMenuActivityLogById error:", error);
+    return null;
+  }
+}
+
 export async function listMenuActivityLogs(
   menuId: number,
   page: number,

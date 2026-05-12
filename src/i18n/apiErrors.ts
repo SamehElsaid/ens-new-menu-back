@@ -98,6 +98,14 @@ export const ApiErrors = {
     en: 'Failed to load activity history',
     ar: 'فشل تحميل سجل النشاط',
   },
+  activityLogNotFound: {
+    en: 'Activity log entry not found',
+    ar: 'سجل النشاط غير موجود',
+  },
+  failedGetActivityLog: {
+    en: 'Failed to get activity log entry',
+    ar: 'فشل جلب سجل النشاط',
+  },
   failedUpdateMenu: {
     en: 'Failed to update menu',
     ar: 'فشل تحديث المنيو',

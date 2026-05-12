@@ -50,6 +50,16 @@ router.post(
   menuController.createMenu,
 );
 
+// GET /api/menus/:menuId/activity-logs/:id — single activity log entry
+router.get(
+  "/:menuId/activity-logs/:id",
+  validate([
+    param("menuId").isInt(),
+    param("id").isInt(),
+  ]),
+  menuActivityLogController.getMenuActivityLogByIdHandler,
+);
+
 // GET /api/menus/:menuId/activity-logs — audit trail (owner / authorised staff)
 router.get(
   "/:menuId/activity-logs",
