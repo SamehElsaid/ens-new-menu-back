@@ -10,6 +10,7 @@ import {
   emailVerificationLimiter 
 } from '../middleware/rateLimiter';
 import { requireAuth } from '../middleware/auth.middleware';
+import { MAX_FCM_TOKEN_LEN } from '../services/fcmPush.service';
 
 const router = Router();
 
@@ -74,6 +75,21 @@ router.post(
 
 // GET /api/auth/me - Protected route
 router.get('/me', requireAuth, authController.getMe);
+
+// POST /api/auth/me/fcm-token-match — body: { fcmToken }; `{ matches }` vs Users.fcmToken
+router.post(
+  '/me/fcm-token-match',
+  requireAuth,
+  validate([
+    body('fcmToken')
+      .isString()
+      .trim()
+      .notEmpty()
+      .withMessage('fcmToken is required')
+      .isLength({ max: MAX_FCM_TOKEN_LEN }),
+  ]),
+  authController.verifyFcmTokenMatch,
+);
 
 // POST /api/auth/refresh - Refresh access token
 router.post(

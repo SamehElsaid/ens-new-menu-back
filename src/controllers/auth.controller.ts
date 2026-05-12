@@ -20,6 +20,7 @@ import { RefreshTokenService } from "../services/refreshToken.service";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { getUserFcmToken, MAX_FCM_TOKEN_LEN } from "../services/fcmPush.service";
 
 // Check Availability (Email or Phone Number)
 export async function checkAvailability(
@@ -596,13 +597,6 @@ export async function getMe(req: Request, res: Response): Promise<void> {
           u.id, u.email, u.name, u.role, u.phoneNumber, u.country, 
           u.dateOfBirth, u.gender, u.address, u.profileImage,
           u.isEmailVerified, u.createdAt,
-          CAST(
-            CASE
-              WHEN NULLIF(LTRIM(RTRIM(ISNULL(u.fcmToken, N''))), N'') IS NOT NULL
-              THEN 1
-              ELSE 0
-            END
-          AS BIT) AS hasFcmToken,
           s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
         FROM Users u
         LEFT JOIN Subscriptions s ON u.id = s.userId 
@@ -633,7 +627,6 @@ export async function getMe(req: Request, res: Response): Promise<void> {
         profileImage: user.profileImage,
         isEmailVerified: user.isEmailVerified,
         createdAt: user.createdAt,
-        hasFcmToken: Boolean(user.hasFcmToken),
         planType: user.billingCycle || "free", // Add planType from billingCycle
         subscription: {
           planId: user.planId,
@@ -647,6 +640,34 @@ export async function getMe(req: Request, res: Response): Promise<void> {
   } catch (error) {
     logger.error("Get me error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetUserData);
+  }
+}
+
+/** Compare `{ fcmToken }` with `Users.fcmToken` for the authenticated user (no token echoed). */
+export async function verifyFcmTokenMatch(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    const raw = (req.body as { fcmToken?: unknown }).fcmToken;
+    if (typeof raw !== "string" || !raw.trim()) {
+      sendApiError(res, req, 400, ApiErrors.fcmTokenRequired);
+      return;
+    }
+    const sent = raw.trim();
+    if (sent.length > MAX_FCM_TOKEN_LEN) {
+      sendApiError(res, req, 400, ApiErrors.invalidFcmTokenLength);
+      return;
+    }
+
+    const stored = await getUserFcmToken(userId);
+    const matches = Boolean(stored) && stored === sent;
+
+    res.json({ matches });
+  } catch (error) {
+    logger.error("Verify FCM token match error:", error);
+    sendApiError(res, req, 500, ApiErrors.internalServerError);
   }
 }
 

@@ -37,8 +37,7 @@ function resolveCredentialFilePath(spec: string): string {
     if (!candidates.includes(n)) candidates.push(n);
   };
 
-  const base =
-    trimmed.endsWith(".json") ? path.basename(trimmed) : "";
+  const base = trimmed.endsWith(".json") ? path.basename(trimmed) : "";
 
   push(resolvePath(trimmed));
 
@@ -47,7 +46,9 @@ function resolveCredentialFilePath(spec: string): string {
     if (base) {
       push(path.join(__dirname, base));
       push(path.join(process.cwd(), "src", "config", base));
-      push(path.join(process.cwd(), "ens-new-menu-back", "src", "config", base));
+      push(
+        path.join(process.cwd(), "ens-new-menu-back", "src", "config", base),
+      );
     }
   }
 
@@ -79,7 +80,9 @@ function loadServiceAccount(): admin.ServiceAccount {
   );
 }
 
-function projectIdFromAccount(account: admin.ServiceAccount): string | undefined {
+function projectIdFromAccount(
+  account: admin.ServiceAccount,
+): string | undefined {
   const o = account as unknown as { project_id?: string };
   return o.project_id ?? account.projectId;
 }

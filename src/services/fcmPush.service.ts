@@ -36,11 +36,10 @@ export async function saveUserFcmToken(
 ): Promise<boolean> {
   try {
     const pool = await getPool();
-    await pool.request().input("userId", sql.Int, userId).input(
-      "token",
-      sql.NVarChar,
-      token,
-    ).query(`
+    await pool
+      .request()
+      .input("userId", sql.Int, userId)
+      .input("token", sql.NVarChar, token).query(`
         UPDATE Users
         SET fcmToken = @token
         WHERE id = @userId
