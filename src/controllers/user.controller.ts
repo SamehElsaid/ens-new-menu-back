@@ -9,6 +9,7 @@ import { logger } from "../utils/logger";
 import { getImageUrl } from "../utils/urlHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { MAX_FCM_TOKEN_LEN } from "../services/fcmPush.service";
 
 // Get user profile
 export async function getProfile(req: Request, res: Response): Promise<void> {
@@ -65,6 +66,7 @@ export async function updateProfile(
       gender,
       address,
       profileImage: profileImageBody,
+      fcmToken: fcmTokenBody,
     } = req.body;
 
     // If client sent multipart with a file, save it and get URL (same as /api/upload type=profile-images)
@@ -126,6 +128,28 @@ export async function updateProfile(
     if (profileImage !== undefined) {
       updates.push("profileImage = @profileImage");
       request.input("profileImage", sql.NVarChar, profileImage || null);
+    }
+
+    if (fcmTokenBody !== undefined) {
+      if (fcmTokenBody === null || fcmTokenBody === "") {
+        updates.push("fcmToken = @fcmToken");
+        request.input("fcmToken", sql.NVarChar, null);
+      } else if (typeof fcmTokenBody === "string") {
+        const token = fcmTokenBody.trim();
+        if (!token) {
+          updates.push("fcmToken = @fcmToken");
+          request.input("fcmToken", sql.NVarChar, null);
+        } else if (token.length > MAX_FCM_TOKEN_LEN) {
+          sendApiError(res, req, 400, ApiErrors.invalidFcmTokenLength);
+          return;
+        } else {
+          updates.push("fcmToken = @fcmToken");
+          request.input("fcmToken", sql.NVarChar, token);
+        }
+      } else {
+        sendApiError(res, req, 400, ApiErrors.validationFailed);
+        return;
+      }
     }
 
     if (updates.length === 0) {
