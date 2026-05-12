@@ -251,20 +251,7 @@ export async function listMenuActivityLogs(
   limit: number,
   actorNameSearch?: string | null,
 ): Promise<{
-  rows: {
-    id: number;
-    menuId: number;
-    actorRole: string;
-    actorName: string;
-    actorStaffJobRole: string | null;
-    action: string;
-    targetType: string | null;
-    targetId: number | null;
-    summaryAr: string | null;
-    summaryEn: string | null;
-    detailJson: string | null;
-    createdAt: string;
-  }[];
+  rows: any[];
   total: number;
   page: number;
   limit: number;
@@ -289,90 +276,62 @@ export async function listMenuActivityLogs(
       .input("menuId", sql.Int, menuId)
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, safeLimit);
+      
+    let nameCondition = "";
     if (nameFilter != null) {
       rowsReq.input("nameFilter", sql.NVarChar, nameFilter);
       countReq.input("nameFilter", sql.NVarChar, nameFilter);
+      nameCondition = "AND mo.actionsJson LIKE N'%' + @nameFilter + N'%'";
     }
+
     const countR = await countReq.query(`
       SELECT COUNT(*) AS c
       FROM dbo.MenuOrders mo
-      CROSS APPLY OPENJSON(mo.actionsJson)
-      WITH (
-        waiterName NVARCHAR(255) '$.waiterName'
-      ) a
       WHERE mo.menuId = @menuId
-      ${nameFilter != null ? "AND a.waiterName LIKE N'%' + @nameFilter + N'%'" : ""}
+      ${nameCondition}
     `);
     const total = Number(countR.recordset[0]?.c ?? 0);
 
     const rowsR = await rowsReq.query(`
       SELECT
-        mo.id AS sourceId,
-        mo.menuId,
+        mo.id,
         mo.orderId,
-        a.action,
-        a.status,
-        a.waiterName,
-        a.waiterRole,
-        a.actorRole,
-        a.actorStaffJobRole,
-        a.summaryAr,
-        a.summaryEn,
-        a.[time],
-        a.detail
+        mo.orderJson,
+        mo.actionsJson,
+        mo.updatedAt
       FROM dbo.MenuOrders mo
-      CROSS APPLY OPENJSON(mo.actionsJson)
-      WITH (
-        action NVARCHAR(64) '$.action',
-        status NVARCHAR(32) '$.status',
-        waiterName NVARCHAR(255) '$.waiterName',
-        waiterRole NVARCHAR(64) '$.waiterRole',
-        actorRole NVARCHAR(32) '$.actorRole',
-        actorStaffJobRole NVARCHAR(64) '$.actorStaffJobRole',
-        summaryAr NVARCHAR(1000) '$.summaryAr',
-        summaryEn NVARCHAR(1000) '$.summaryEn',
-        [time] DATETIME2 '$.time',
-        detail NVARCHAR(MAX) '$.detail' AS JSON
-      ) a
       WHERE mo.menuId = @menuId
-      ${nameFilter != null ? "AND a.waiterName LIKE N'%' + @nameFilter + N'%'" : ""}
-      ORDER BY a.[time] DESC
+      ${nameCondition}
+      ORDER BY mo.updatedAt DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
-    const rows = (rowsR.recordset as Record<string, unknown>[]).map((r, idx) => {
-      const actorRole = String(r.actorRole ?? r.waiterRole ?? ROLES.STAFF);
-      const detailObj = r.detail != null ? String(r.detail) : null;
-      const detailWithRole = (() => {
-        if (!detailObj) return null;
-        try {
-          const parsed = JSON.parse(detailObj) as Record<string, unknown>;
-          if (!parsed.actorStaffJobRole && r.actorStaffJobRole) {
-            parsed.actorStaffJobRole = String(r.actorStaffJobRole);
-          }
-          return JSON.stringify(parsed);
-        } catch {
-          return detailObj;
-        }
-      })();
-      const createdAtRaw = r.time as Date | string | null | undefined;
-      const createdAt = createdAtRaw
-        ? new Date(createdAtRaw).toISOString()
-        : new Date().toISOString();
+    const rows = (rowsR.recordset as Record<string, unknown>[]).map((r) => {
+      let order: any = {};
+      try {
+        order = r.orderJson ? JSON.parse(String(r.orderJson)) : {};
+      } catch (e) {}
+
+      let actions: any[] = [];
+      try {
+        actions = r.actionsJson ? JSON.parse(String(r.actionsJson)) : [];
+      } catch (e) {}
+      
+      const lastAction = actions.length > 0 ? actions[actions.length - 1].action : "";
+      
+      const actionDetails = actions.map(a => ({
+        waiterName: a.waiterName || "",
+        time: a.time || "",
+        status: a.status || ""
+      }));
+
       return {
-        id: Number(r.sourceId ?? 0) * 100000 + idx + 1,
-        menuId: Number(r.menuId ?? menuId),
-        actorRole,
-        actorName: String(r.waiterName ?? ""),
-        actorStaffJobRole:
-          r.actorStaffJobRole != null ? String(r.actorStaffJobRole) : null,
-        action: String(r.action ?? ""),
-        targetType: "order",
-        targetId: Number(r.orderId ?? 0),
-        summaryAr: r.summaryAr != null ? String(r.summaryAr) : null,
-        summaryEn: r.summaryEn != null ? String(r.summaryEn) : null,
-        detailJson: detailWithRole ?? detailObj,
-        createdAt,
+        id: String(r.id),
+        orderId: String(r.orderId),
+        lastAction: String(lastAction),
+        actionDetails: actionDetails,
+        items: order.items || [],
+        totalPrice: Number(order.orderTotal || 0)
       };
     });
 

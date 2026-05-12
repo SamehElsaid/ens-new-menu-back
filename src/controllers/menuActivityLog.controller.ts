@@ -44,6 +44,7 @@ export async function listMenuActivityLogsHandler(
       limit: result.limit,
       totalPages: Math.max(1, Math.ceil(result.total / result.limit)),
       entries: result.rows,
+      calls: result.rows,
     });
   } catch (error) {
     logger.error("listMenuActivityLogsHandler error:", error);
