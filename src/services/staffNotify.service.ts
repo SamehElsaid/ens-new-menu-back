@@ -11,6 +11,8 @@ import {
   sendExpoPushNotifications,
   type ExpoPushMessage,
 } from "./expoPush.service";
+import { sendFcmToUser } from "./fcmPush.service";
+import { getMenuOwnerUserId } from "../utils/menuAccess";
 
 /** Arabic currency-less summary for a new table call. */
 function buildPushBody(payload: StaffTableCallBroadcastPayload): string {
@@ -40,6 +42,8 @@ function buildPushBody(payload: StaffTableCallBroadcastPayload): string {
  * - Emits `staff:table_call` to the `menu:{menuId}` room (Socket.IO).
  * - Sends an Expo push notification to every active staff member that has
  *   a stored `expoPushToken` for this menu.
+ * - Sends a web FCM notification to the menu owner (dashboard `Users.fcmToken`)
+ *   so the Activity / History page can be surfaced when the browser is in the background.
  *
  * Push failures are swallowed (logged) so they never block the socket
  * broadcast or the REST response.
@@ -49,6 +53,43 @@ export async function notifyStaffOfTableCall(
   payload: StaffTableCallBroadcastPayload,
 ): Promise<void> {
   broadcastStaffTableCall(menuId, payload);
+
+  try {
+    const ownerUserId = await getMenuOwnerUserId(menuId);
+    if (ownerUserId != null) {
+      const base = (
+        process.env.FRONTEND_URL ||
+        process.env.NEXT_PUBLIC_FRONTEND_URL ||
+        ""
+      )
+        .trim()
+        .replace(/\/$/u, "");
+      const historyUrl =
+        base.startsWith("https://") || base.startsWith("http://")
+          ? `${base}/dashboard/${menuId}/history`
+          : undefined;
+
+      void sendFcmToUser(ownerUserId, {
+        title: `طلب جديد - طاولة ${payload.tableNumber}`,
+        body: buildPushBody(payload),
+        data: {
+          type: "table_call",
+          menuId: payload.menuId,
+          callId: payload.id,
+          tableNumber: payload.tableNumber,
+          orderTotal: payload.orderTotal,
+          status: payload.status,
+          at: payload.at,
+          ...(historyUrl ? { url: historyUrl } : {}),
+        },
+      });
+    }
+  } catch (e) {
+    logger.warn("notifyStaffOfTableCall: owner FCM fan-out failed", {
+      menuId,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
 
   try {
     const tokens = await getStaffPushTokensForMenu(menuId);

@@ -1,12 +1,12 @@
 /**
- * Firebase Cloud Messaging device token for the authenticated app user (`Users.fcmToken`).
+ * Firebase Cloud Messaging device tokens for the authenticated app user (`Users.fcmToken` JSON array).
  */
 
 import { Request, Response } from "express";
 import {
-  getUserFcmToken,
+  addUserFcmToken,
+  getUserFcmTokens,
   MAX_FCM_TOKEN_LEN,
-  saveUserFcmToken,
 } from "../services/fcmPush.service";
 import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
@@ -16,7 +16,7 @@ function getUserId(req: Request): number | undefined {
   return req.user?.userId ?? req.user?.id;
 }
 
-/** Whether `Users.fcmToken` has a non-empty value (token string never returned). */
+/** Whether the user has at least one stored FCM token (tokens never returned). */
 export async function getFcmTokenStatus(
   req: Request,
   res: Response,
@@ -28,8 +28,8 @@ export async function getFcmTokenStatus(
       return;
     }
 
-    const token = await getUserFcmToken(userId);
-    res.json({ hasFcmToken: Boolean(token) });
+    const tokens = await getUserFcmTokens(userId);
+    res.json({ hasFcmToken: tokens.length > 0 });
   } catch (error) {
     logger.error("Get FCM token status error:", error);
     sendApiError(res, req, 500, ApiErrors.internalServerError);
@@ -59,12 +59,16 @@ export async function registerFcmToken(
       return;
     }
 
-    const ok = await saveUserFcmToken(userId, token);
-    if (ok) {
-      res.json({ message: "FCM token saved" });
-    } else {
-      sendApiError(res, req, 500, ApiErrors.failedSaveFcmToken);
+    const result = await addUserFcmToken(userId, token);
+    if (result === "max") {
+      sendApiError(res, req, 400, ApiErrors.fcmTooManyDevices);
+      return;
     }
+    if (result === "error") {
+      sendApiError(res, req, 500, ApiErrors.failedSaveFcmToken);
+      return;
+    }
+    res.json({ message: "FCM token saved" });
   } catch (error) {
     logger.error("Register FCM token error:", error);
     sendApiError(res, req, 500, ApiErrors.failedSaveFcmToken);

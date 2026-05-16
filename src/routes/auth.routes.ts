@@ -1,91 +1,95 @@
-import { Router } from 'express';
-import { body } from 'express-validator';
-import * as authController from '../controllers/auth.controller';
-import { validate } from '../middleware/validation';
-import { validateRequest } from '../middleware/zodValidation';
-import { signupSchema, checkAvailabilitySchema, loginSchema } from '../validators/auth.validator';
-import { 
-  authLimiter, 
-  passwordResetLimiter, 
-  emailVerificationLimiter 
-} from '../middleware/rateLimiter';
-import { requireAuth } from '../middleware/auth.middleware';
-import { MAX_FCM_TOKEN_LEN } from '../services/fcmPush.service';
+import { Router } from "express";
+import { body } from "express-validator";
+import * as authController from "../controllers/auth.controller";
+import { validate } from "../middleware/validation";
+import { validateRequest } from "../middleware/zodValidation";
+import {
+  signupSchema,
+  checkAvailabilitySchema,
+  loginSchema,
+} from "../validators/auth.validator";
+import {
+  authLimiter,
+  passwordResetLimiter,
+  emailVerificationLimiter,
+} from "../middleware/rateLimiter";
+import { requireAuth } from "../middleware/auth.middleware";
+import { MAX_FCM_TOKEN_LEN } from "../services/fcmPush.service";
 
 const router = Router();
 
 // GET /api/auth/check-availability?email=xxx&phoneNumber=xxx
 router.get(
-  '/check-availability',
-  validateRequest(checkAvailabilitySchema, 'query'),
-  authController.checkAvailability
+  "/check-availability",
+  validateRequest(checkAvailabilitySchema, "query"),
+  authController.checkAvailability,
 );
 
 // POST /api/auth/signup
 router.post(
-  '/signup',
+  "/signup",
   authLimiter,
-  validateRequest(signupSchema, 'body'),
-  authController.signup
+  validateRequest(signupSchema, "body"),
+  authController.signup,
 );
 
 // POST /api/auth/login
 router.post(
-  '/login',
+  "/login",
   authLimiter,
-  validateRequest(loginSchema, 'body'),
-  authController.login
+  validateRequest(loginSchema, "body"),
+  authController.login,
 );
 
 // GET /api/auth/verify-email?token=xxx
-router.get('/verify-email', authController.verifyEmail);
+router.get("/verify-email", authController.verifyEmail);
 
 // POST /api/auth/resend-verification
 router.post(
-  '/resend-verification',
+  "/resend-verification",
   emailVerificationLimiter,
   validate([
-    body('email').isEmail().normalizeEmail(),
-    body('locale').optional().isIn(['ar', 'en']),
+    body("email").isEmail().normalizeEmail(),
+    body("locale").optional().isIn(["ar", "en"]),
   ]),
-  authController.resendVerification
+  authController.resendVerification,
 );
 
 // POST /api/auth/forgot-password
 router.post(
-  '/forgot-password',
+  "/forgot-password",
   passwordResetLimiter,
   validate([
-    body('email').isEmail().normalizeEmail(),
-    body('locale').optional().isIn(['ar', 'en']),
+    body("email").isEmail().normalizeEmail(),
+    body("locale").optional().isIn(["ar", "en"]),
   ]),
-  authController.forgotPassword
+  authController.forgotPassword,
 );
 
 // POST /api/auth/reset-password
 router.post(
-  '/reset-password',
+  "/reset-password",
   validate([
-    body('token').notEmpty(),
-    body('newPassword').isLength({ min: 8 }),
-    body('locale').optional().isIn(['ar', 'en']),
+    body("token").notEmpty(),
+    body("newPassword").isLength({ min: 8 }),
+    body("locale").optional().isIn(["ar", "en"]),
   ]),
-  authController.resetPassword
+  authController.resetPassword,
 );
 
 // GET /api/auth/me - Protected route
-router.get('/me', requireAuth, authController.getMe);
+router.get("/me", requireAuth, authController.getMe);
 
 // POST /api/auth/me/fcm-token-match — body: { fcmToken }; `{ matches }` vs Users.fcmToken
 router.post(
-  '/me/fcm-token-match',
+  "/me/fcm-token-match",
   requireAuth,
   validate([
-    body('fcmToken')
+    body("fcmToken")
       .isString()
       .trim()
       .notEmpty()
-      .withMessage('fcmToken is required')
+      .withMessage("fcmToken is required")
       .isLength({ max: MAX_FCM_TOKEN_LEN }),
   ]),
   authController.verifyFcmTokenMatch,
@@ -93,20 +97,14 @@ router.post(
 
 // POST /api/auth/refresh - Refresh access token
 router.post(
-  '/refresh',
+  "/refresh",
   validate([
-    body('refreshToken').notEmpty().withMessage('Refresh token is required'),
+    body("refreshToken").notEmpty().withMessage("Refresh token is required"),
   ]),
-  authController.refreshToken
+  authController.refreshToken,
 );
 
 // POST /api/auth/logout - Logout (revoke tokens)
-router.post(
-  '/logout',
-  requireAuth,
-  authController.logout
-);
+router.post("/logout", requireAuth, authController.logout);
 
 export default router;
-
-

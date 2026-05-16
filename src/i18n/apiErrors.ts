@@ -406,6 +406,10 @@ export const ApiErrors = {
     en: 'Failed to save push notification token',
     ar: 'فشل حفظ رمز الإشعارات',
   },
+  fcmTooManyDevices: {
+    en: 'Too many registered devices for push notifications on this account',
+    ar: 'عدد الأجهزة المسجّلة للإشعارات لهذا الحساب تجاوز الحد المسموح',
+  },
   customizationsProOnly: {
     en: 'Customizations are only available for Pro users',
     ar: 'التخصيصات متاحة لمشتركي Pro فقط',

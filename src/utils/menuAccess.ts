@@ -79,3 +79,15 @@ export async function verifyMenuAccessForSocket(
 
   return r.recordset.length > 0;
 }
+
+/** Owner account `Users.id` for a menu (internal server use, e.g. FCM to dashboard owner). */
+export async function getMenuOwnerUserId(menuId: number): Promise<number | null> {
+  if (!Number.isFinite(menuId) || menuId <= 0) return null;
+  const pool = await getPool();
+  const r = await pool.request().input("menuId", sql.Int, menuId).query(`
+      SELECT userId FROM Menus WHERE id = @menuId
+    `);
+  if (!r.recordset.length) return null;
+  const id = r.recordset[0]?.userId;
+  return typeof id === "number" && Number.isFinite(id) ? id : null;
+}

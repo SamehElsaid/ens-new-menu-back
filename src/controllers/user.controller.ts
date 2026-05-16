@@ -9,7 +9,7 @@ import { logger } from "../utils/logger";
 import { getImageUrl } from "../utils/urlHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
-import { MAX_FCM_TOKEN_LEN } from "../services/fcmPush.service";
+import { MAX_FCM_TOKEN_LEN, addUserFcmToken, clearUserFcmTokens } from "../services/fcmPush.service";
 
 // Get user profile
 export async function getProfile(req: Request, res: Response): Promise<void> {
@@ -92,6 +92,7 @@ export async function updateProfile(
 
     const updates: string[] = [];
     const request = pool.request().input("userId", sql.Int, userId);
+    let fcmHandled = false;
 
     if (name !== undefined) {
       updates.push("name = @name");
@@ -131,20 +132,26 @@ export async function updateProfile(
     }
 
     if (fcmTokenBody !== undefined) {
+      fcmHandled = true;
       if (fcmTokenBody === null || fcmTokenBody === "") {
-        updates.push("fcmToken = @fcmToken");
-        request.input("fcmToken", sql.NVarChar, null);
+        await clearUserFcmTokens(userId);
       } else if (typeof fcmTokenBody === "string") {
         const token = fcmTokenBody.trim();
         if (!token) {
-          updates.push("fcmToken = @fcmToken");
-          request.input("fcmToken", sql.NVarChar, null);
+          await clearUserFcmTokens(userId);
         } else if (token.length > MAX_FCM_TOKEN_LEN) {
           sendApiError(res, req, 400, ApiErrors.invalidFcmTokenLength);
           return;
         } else {
-          updates.push("fcmToken = @fcmToken");
-          request.input("fcmToken", sql.NVarChar, token);
+          const addResult = await addUserFcmToken(userId, token);
+          if (addResult === "max") {
+            sendApiError(res, req, 400, ApiErrors.fcmTooManyDevices);
+            return;
+          }
+          if (addResult === "error") {
+            sendApiError(res, req, 500, ApiErrors.failedSaveFcmToken);
+            return;
+          }
         }
       } else {
         sendApiError(res, req, 400, ApiErrors.validationFailed);
@@ -152,16 +159,18 @@ export async function updateProfile(
       }
     }
 
-    if (updates.length === 0) {
+    if (updates.length === 0 && !fcmHandled) {
       sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
       return;
     }
 
-    await request.query(`
+    if (updates.length > 0) {
+      await request.query(`
       UPDATE Users 
       SET ${updates.join(", ")}
       WHERE id = @userId
     `);
+    }
 
     // Get updated user data
     const userResult = await pool.request().input("userId", sql.Int, userId)

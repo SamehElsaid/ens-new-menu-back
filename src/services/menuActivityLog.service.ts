@@ -73,7 +73,10 @@ function inferStatus(action: string, detail: ParsedDetail): string {
   if (statusRaw) return statusRaw;
   if (action === "TABLE_CALL_CONFIRMED") return "confirmed";
   if (action === "TABLE_CALL_CANCELLED") return "cancelled";
-  if (action === "TABLE_CALL_ITEMS_UPDATED" || action === "TABLE_CALL_UPDATED") {
+  if (
+    action === "TABLE_CALL_ITEMS_UPDATED" ||
+    action === "TABLE_CALL_UPDATED"
+  ) {
     return "updated";
   }
   return action;
@@ -88,7 +91,9 @@ async function appendMenuOrderActivity(
   const pool = await getPool();
   const detailObj = parseDetailJson(row.detailJson);
   const orderObj =
-    detailObj.order && typeof detailObj.order === "object" ? detailObj.order : {};
+    detailObj.order && typeof detailObj.order === "object"
+      ? detailObj.order
+      : {};
   const nowIso = new Date().toISOString();
   const actionPayload = {
     action: row.action,
@@ -106,8 +111,7 @@ async function appendMenuOrderActivity(
   const existing = await pool
     .request()
     .input("menuId", sql.Int, menuId)
-    .input("orderId", sql.Int, orderId)
-    .query(`
+    .input("orderId", sql.Int, orderId).query(`
       SELECT id, orderJson, actionsJson
       FROM dbo.MenuOrders
       WHERE menuId = @menuId AND orderId = @orderId
@@ -123,8 +127,7 @@ async function appendMenuOrderActivity(
         "actionsJson",
         sql.NVarChar(sql.MAX),
         JSON.stringify([actionPayload]),
-      )
-      .query(`
+      ).query(`
         INSERT INTO dbo.MenuOrders (menuId, orderId, orderJson, actionsJson, updatedAt)
         VALUES (@menuId, @orderId, @orderJson, @actionsJson, SYSUTCDATETIME())
       `);
@@ -168,9 +171,7 @@ async function appendMenuOrderActivity(
   broadcastMenuActivityUpdated(menuId);
 }
 
-export async function resolveActorForLog(
-  req: Request,
-): Promise<{
+export async function resolveActorForLog(req: Request): Promise<{
   actorRole: string;
   actorName: string;
   staffJobRole: string | null;
@@ -199,7 +200,7 @@ export async function resolveActorForLog(
       const label =
         name != null && String(name).trim() !== ""
           ? String(name).trim()
-          : u.email ?? "Staff";
+          : (u.email ?? "Staff");
       const jobRaw =
         row?.jobRole ??
         row?.JobRole ??
@@ -247,7 +248,15 @@ export async function logMenuActivitySafe(
 ): Promise<void> {
   try {
     if (!Number.isFinite(menuId) || menuId <= 0) return;
-    if (!Number.isFinite(row.targetId ?? NaN) || (row.targetId ?? 0) <= 0) return;
+    if (!Number.isFinite(row.targetId ?? NaN) || (row.targetId ?? 0) <= 0)
+      return;
+
+    const targetType = String(row.targetType ?? "")
+      .trim()
+      .toLowerCase();
+    if (targetType !== "table_call") {
+      return;
+    }
 
     const actor = await resolveActorForLog(req);
     const orderId = Number(row.targetId);
@@ -282,11 +291,32 @@ export async function logMenuOrderEventSafe(
   }
 }
 
-function sanitizeActorNameSearch(raw: string | undefined | null): string | null {
+function sanitizeActorNameSearch(
+  raw: string | undefined | null,
+): string | null {
   if (raw == null) return null;
   const t = String(raw).trim().slice(0, 100);
   if (t.length === 0) return null;
   return t.replace(/[%_\[\]]/g, "");
+}
+
+/**
+ * Activity history is for table orders only: `MenuOrders.orderId` must match
+ * `StaffTableCalls.id`. Other features incorrectly reused `targetId` as `orderId`
+ * (e.g. staff id), which polluted this feed — exclude those rows.
+ */
+async function menuOrdersTableCallExistsSql(): Promise<string> {
+  const pool = await getPool();
+  const oid = await pool.request().query(`
+    SELECT OBJECT_ID(N'dbo.StaffTableCalls', N'U') AS oid
+  `);
+  if (!oid.recordset?.[0]?.oid) return "";
+  return `
+    AND EXISTS (
+      SELECT 1
+      FROM dbo.StaffTableCalls stc
+      WHERE stc.menuId = mo.menuId AND stc.id = mo.orderId
+    )`;
 }
 
 export async function getMenuActivityLogById(
@@ -309,11 +339,12 @@ export async function getMenuActivityLogById(
     `);
     if (!tableCheck.recordset[0]?.oid) return null;
 
+    const tableCallOnly = await menuOrdersTableCallExistsSql();
+
     const result = await pool
       .request()
       .input("menuId", sql.Int, menuId)
-      .input("id", sql.Int, id)
-      .query(`
+      .input("id", sql.Int, id).query(`
         SELECT
           mo.id,
           mo.orderId,
@@ -322,6 +353,7 @@ export async function getMenuActivityLogById(
           mo.updatedAt
         FROM dbo.MenuOrders mo
         WHERE mo.menuId = @menuId AND mo.id = @id
+        ${tableCallOnly}
       `);
 
     if (!result.recordset.length) return null;
@@ -331,15 +363,20 @@ export async function getMenuActivityLogById(
     let order: any = {};
     try {
       order = r.orderJson ? JSON.parse(String(r.orderJson)) : {};
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     let actions: any[] = [];
     try {
       actions = r.actionsJson ? JSON.parse(String(r.actionsJson)) : [];
       if (!Array.isArray(actions)) actions = [];
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
-    const lastAction = actions.length > 0 ? actions[actions.length - 1].action : "";
+    const lastAction =
+      actions.length > 0 ? actions[actions.length - 1].action : "";
 
     return {
       id: String(r.id),
@@ -382,13 +419,15 @@ export async function listMenuActivityLogs(
       return { rows: [], total: 0, page: safePage, limit: safeLimit };
     }
 
+    const tableCallOnly = await menuOrdersTableCallExistsSql();
+
     const countReq = pool.request().input("menuId", sql.Int, menuId);
     const rowsReq = pool
       .request()
       .input("menuId", sql.Int, menuId)
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, safeLimit);
-      
+
     let nameCondition = "";
     if (nameFilter != null) {
       rowsReq.input("nameFilter", sql.NVarChar, nameFilter);
@@ -400,6 +439,7 @@ export async function listMenuActivityLogs(
       SELECT COUNT(*) AS c
       FROM dbo.MenuOrders mo
       WHERE mo.menuId = @menuId
+      ${tableCallOnly}
       ${nameCondition}
     `);
     const total = Number(countR.recordset[0]?.c ?? 0);
@@ -413,6 +453,7 @@ export async function listMenuActivityLogs(
         mo.updatedAt
       FROM dbo.MenuOrders mo
       WHERE mo.menuId = @menuId
+      ${tableCallOnly}
       ${nameCondition}
       ORDER BY mo.updatedAt DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -428,13 +469,14 @@ export async function listMenuActivityLogs(
       try {
         actions = r.actionsJson ? JSON.parse(String(r.actionsJson)) : [];
       } catch (e) {}
-      
-      const lastAction = actions.length > 0 ? actions[actions.length - 1].action : "";
-      
-      const actionDetails = actions.map(a => ({
+
+      const lastAction =
+        actions.length > 0 ? actions[actions.length - 1].action : "";
+
+      const actionDetails = actions.map((a) => ({
         waiterName: a.waiterName || "",
         time: a.time || "",
-        status: a.status || ""
+        status: a.status || "",
       }));
 
       return {
@@ -443,7 +485,7 @@ export async function listMenuActivityLogs(
         lastAction: String(lastAction),
         actionDetails: actionDetails,
         items: order.items || [],
-        totalPrice: Number(order.orderTotal || 0)
+        totalPrice: Number(order.orderTotal || 0),
       };
     });
 

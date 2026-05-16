@@ -21,9 +21,9 @@ import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import {
-  getUserFcmToken,
+  getUserFcmTokens,
   MAX_FCM_TOKEN_LEN,
-  saveUserFcmToken,
+  removeUserFcmToken,
 } from "../services/fcmPush.service";
 
 // Check Availability (Email or Phone Number)
@@ -665,8 +665,8 @@ export async function verifyFcmTokenMatch(
       return;
     }
 
-    const stored = await getUserFcmToken(userId);
-    const matches = Boolean(stored) && stored === sent;
+    const tokens = await getUserFcmTokens(userId);
+    const matches = tokens.includes(sent);
 
     res.json({ matches });
   } catch (error) {
@@ -791,10 +791,7 @@ export async function logout(req: Request, res: Response): Promise<void> {
         return;
       }
       if (sent) {
-        const stored = await getUserFcmToken(userId);
-        if (stored !== null && stored === sent) {
-          await saveUserFcmToken(userId, null);
-        }
+        await removeUserFcmToken(userId, sent);
       }
     }
 
