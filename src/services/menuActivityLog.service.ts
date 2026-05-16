@@ -432,7 +432,11 @@ export async function listMenuActivityLogs(
     if (nameFilter != null) {
       rowsReq.input("nameFilter", sql.NVarChar, nameFilter);
       countReq.input("nameFilter", sql.NVarChar, nameFilter);
-      nameCondition = "AND mo.actionsJson LIKE N'%' + @nameFilter + N'%'";
+      nameCondition = `
+        AND (
+          mo.actionsJson LIKE N'%' + @nameFilter + N'%'
+          OR mo.orderJson LIKE N'%' + @nameFilter + N'%'
+        )`;
     }
 
     const countR = await countReq.query(`
@@ -479,11 +483,17 @@ export async function listMenuActivityLogs(
         status: a.status || "",
       }));
 
+      const customerName =
+        order.customerName != null && String(order.customerName).trim() !== ""
+          ? String(order.customerName).trim()
+          : null;
+
       return {
         id: String(r.id),
         orderId: String(r.orderId),
         lastAction: String(lastAction),
         actionDetails: actionDetails,
+        customerName,
         items: order.items || [],
         totalPrice: Number(order.orderTotal || 0),
       };
