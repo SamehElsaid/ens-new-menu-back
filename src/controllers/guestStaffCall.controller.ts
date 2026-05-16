@@ -64,7 +64,8 @@ export async function postGuestStaffCall(
       return;
     }
 
-    await notifyStaffOfTableCall(result.menuId, {
+    // Do not block the HTTP response on push/FCM (can hang behind proxies → 502).
+    void notifyStaffOfTableCall(result.menuId, {
       id: result.id,
       menuId: result.menuId,
       tableNumber: result.tableNumber,
@@ -73,6 +74,12 @@ export async function postGuestStaffCall(
       items: result.items,
       orderTotal: result.orderTotal,
       status: result.status,
+    }).catch((err) => {
+      logger.warn("notifyStaffOfTableCall failed after staff-call", {
+        menuId: result.menuId,
+        callId: result.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
 
     res.json({

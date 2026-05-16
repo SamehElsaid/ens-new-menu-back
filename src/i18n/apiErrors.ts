@@ -722,4 +722,16 @@ export const ApiErrors = {
     en: 'Name is required in both languages',
     ar: 'الاسم مطلوب باللغتين',
   },
+  versionNotFound: {
+    en: 'App version configuration not found',
+    ar: 'إعدادات إصدار التطبيق غير موجودة',
+  },
+  failedGetVersion: {
+    en: 'Failed to fetch app version',
+    ar: 'فشل جلب إصدار التطبيق',
+  },
+  failedUpdateVersion: {
+    en: 'Failed to update app version',
+    ar: 'فشل تحديث إصدار التطبيق',
+  },
 } as const satisfies Record<string, BilingualMessage>;

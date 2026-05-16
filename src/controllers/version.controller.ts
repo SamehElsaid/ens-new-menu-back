@@ -1,0 +1,32 @@
+import { Request, Response } from "express";
+import { getAppVersion } from "../services/version.service";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
+import { logger } from "../utils/logger";
+
+/** POST /api/public/version — returns current app version config */
+export async function postAppVersion(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const version = await getAppVersion();
+    if (!version) {
+      sendApiError(res, req, 404, ApiErrors.versionNotFound);
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        latestVersion: version.latestVersion,
+        forceUpdate: version.forceUpdate,
+        downloadUrl: version.downloadUrl,
+        releaseNotes: version.releaseNotes,
+      },
+    });
+  } catch (error) {
+    logger.error("Post app version error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedGetVersion);
+  }
+}

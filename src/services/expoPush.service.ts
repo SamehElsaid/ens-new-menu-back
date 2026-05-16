@@ -11,6 +11,7 @@ import { logger } from "../utils/logger";
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 // Expo allows up to 100 messages per request.
 const BATCH_SIZE = 100;
+const EXPO_FETCH_TIMEOUT_MS = 8_000;
 
 export type ExpoPushMessage = {
   to: string | string[];
@@ -82,6 +83,7 @@ export async function sendExpoPushNotifications(
             "Content-Type": "application/json",
           },
           body: JSON.stringify(batch),
+          signal: AbortSignal.timeout(EXPO_FETCH_TIMEOUT_MS),
         });
 
         if (!res.ok) {

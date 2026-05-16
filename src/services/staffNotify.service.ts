@@ -82,6 +82,11 @@ export async function notifyStaffOfTableCall(
           at: payload.at,
           ...(historyUrl ? { url: historyUrl } : {}),
         },
+      }).catch((e) => {
+        logger.warn("notifyStaffOfTableCall: owner FCM send failed", {
+          menuId,
+          error: e instanceof Error ? e.message : String(e),
+        });
       });
     }
   } catch (e) {
