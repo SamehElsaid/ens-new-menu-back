@@ -1,5 +1,6 @@
 import { Response, NextFunction } from "express";
 import { AuthRequest } from "../types/index";
+import { PRO_YEARLY_CURRENCY } from "../config/proYearlyPricing";
 import {
   PaymentService,
   InitiatePaymentData,
@@ -166,6 +167,10 @@ export const handlePaymentRedirect = asyncHandler(
       }
     }
 
+    const paymentCompleted =
+      paymentStatusOut === "completed" ||
+      PaymentService.isBrowserRedirectPaid(status as string);
+
     res.json({
       success: true,
       data: {
@@ -175,6 +180,10 @@ export const handlePaymentRedirect = asyncHandler(
         providerRefNum: providerRefNum || null,
         synced_from_redirect: completedFromRedirect,
         released_from_redirect: releasedFromRedirect,
+        ...(paymentCompleted && {
+          value: Number(payment.amount),
+          currency: PRO_YEARLY_CURRENCY,
+        }),
       },
       message: completedFromRedirect
         ? "Payment confirmed from return URL; order updated."
