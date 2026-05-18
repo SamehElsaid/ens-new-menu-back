@@ -4,7 +4,8 @@ export interface AppVersion {
   latestVersion: string;
   forceUpdate: boolean;
   downloadUrl: string;
-  releaseNotes: string | null;
+  releaseNotes_ar: string | null;
+  releaseNotes_en: string | null;
   updatedAt?: string;
 }
 
@@ -13,8 +14,10 @@ function mapRow(row: Record<string, unknown>): AppVersion {
     latestVersion: String(row.latestVersion ?? ""),
     forceUpdate: Boolean(row.forceUpdate),
     downloadUrl: String(row.downloadUrl ?? ""),
-    releaseNotes:
-      row.releaseNotes != null ? String(row.releaseNotes) : null,
+    releaseNotes_ar:
+      row.releaseNotes_ar != null ? String(row.releaseNotes_ar) : null,
+    releaseNotes_en:
+      row.releaseNotes_en != null ? String(row.releaseNotes_en) : null,
     updatedAt:
       row.updatedAt instanceof Date
         ? row.updatedAt.toISOString()
@@ -31,7 +34,8 @@ export async function getAppVersion(): Promise<AppVersion | null> {
       latestVersion,
       forceUpdate,
       downloadUrl,
-      releaseNotes,
+      releaseNotes_ar,
+      releaseNotes_en,
       updatedAt
     FROM AppVersion
     WHERE id = 1

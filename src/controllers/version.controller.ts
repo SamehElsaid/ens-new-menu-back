@@ -22,7 +22,8 @@ export async function postAppVersion(
         latestVersion: version.latestVersion,
         forceUpdate: version.forceUpdate,
         downloadUrl: version.downloadUrl,
-        releaseNotes: version.releaseNotes,
+        releaseNotes_ar: version.releaseNotes_ar,
+        releaseNotes_en: version.releaseNotes_en,
       },
     });
   } catch (error) {

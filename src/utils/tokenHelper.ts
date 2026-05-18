@@ -17,7 +17,7 @@ export function validateJWTSecrets(): void {
 
   if (!accessSecret || !refreshSecret) {
     throw new Error(
-      "🔴 SECURITY ERROR: JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be set in environment variables!"
+      "🔴 SECURITY ERROR: JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be set in environment variables!",
     );
   }
 
@@ -26,20 +26,20 @@ export function validateJWTSecrets(): void {
 
   if (accessSecret.length < minLength) {
     throw new Error(
-      `🔴 SECURITY ERROR: JWT_ACCESS_SECRET is too short! Minimum ${minLength} characters required. Current: ${accessSecret.length}`
+      `🔴 SECURITY ERROR: JWT_ACCESS_SECRET is too short! Minimum ${minLength} characters required. Current: ${accessSecret.length}`,
     );
   }
 
   if (refreshSecret.length < minLength) {
     throw new Error(
-      `🔴 SECURITY ERROR: JWT_REFRESH_SECRET is too short! Minimum ${minLength} characters required. Current: ${refreshSecret.length}`
+      `🔴 SECURITY ERROR: JWT_REFRESH_SECRET is too short! Minimum ${minLength} characters required. Current: ${refreshSecret.length}`,
     );
   }
 
   // Warn if secrets are the same
   if (accessSecret === refreshSecret) {
     console.warn(
-      "⚠️  WARNING: JWT_ACCESS_SECRET and JWT_REFRESH_SECRET should be different for better security!"
+      "⚠️  WARNING: JWT_ACCESS_SECRET and JWT_REFRESH_SECRET should be different for better security!",
     );
   }
 }
@@ -59,9 +59,11 @@ export function generateStaffAccessToken(payload: TokenPayload): string {
 export function generateRefreshToken(payload: TokenPayload): string {
   // No expiry by default; set JWT_REFRESH_EXPIRY (e.g. "7d") if you want expiry
   const expiresIn = process.env.JWT_REFRESH_EXPIRY;
-  return jwt.sign(payload, process.env.JWT_REFRESH_SECRET!, expiresIn
-    ? { expiresIn } as jwt.SignOptions
-    : {});
+  return jwt.sign(
+    payload,
+    process.env.JWT_REFRESH_SECRET!,
+    expiresIn ? ({ expiresIn } as jwt.SignOptions) : {},
+  );
 }
 
 export function verifyAccessToken(token: string): TokenPayload {
