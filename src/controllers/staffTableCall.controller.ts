@@ -259,7 +259,7 @@ export async function listPendingStaffTableCalls(
 /**
  * PUT /api/staff-auth/table-calls/:id
  * Body: { items: [{ menuItemId, quantity }, ...], status: "pending" | "confirmed" | "cancelled" }
- * Replaces stored order lines with `items` and applies `status` in one step (only while `pending`).
+ * Replaces order lines; status transitions only while `pending`. On `confirmed` orders, `pending`/`confirmed` update items only.
  */
 export async function putStaffTableCall(
   req: Request,
@@ -312,6 +312,10 @@ export async function putStaffTableCall(
       }
       if (result.error === "NOT_PENDING") {
         sendApiError(res, req, 409, ApiErrors.callNotFoundOrNotPending);
+        return;
+      }
+      if (result.error === "NOT_EDITABLE") {
+        sendApiError(res, req, 409, ApiErrors.tableCallNotEditable);
         return;
       }
       if (

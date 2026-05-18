@@ -1001,12 +1001,9 @@ const pendingWhereSql = `
   )
 `;
 
-/** Pending or confirmed — staff may still adjust `orderItemsJson` (not cancelled). */
+/** Pending or confirmed — staff may still adjust `orderItemsJson` (not cancelled). Aligns with `normalizeStaffTableCallStatus` (incl. legacy rows: status NULL + acknowledgedAt set). */
 const editableOrderItemsWhereSql = `
-  (
-    status = N'confirmed'
-    OR (status = N'pending' OR (status IS NULL AND acknowledgedAt IS NULL))
-  )
+  (status IS NULL OR status IN (N'pending', N'confirmed'))
 `;
 
 /**
@@ -1198,8 +1195,9 @@ export async function updateStaffTableCallItems(
 export type UpdateStaffCallItemsAndStatusError = UpdateStaffCallItemsError;
 
 /**
- * Replace order lines and optionally set lifecycle status in one update (only while `pending`).
- * `statusTarget` `"pending"` replaces items only; `confirmed` / `cancelled` also transitions status.
+ * Replace order lines and optionally set lifecycle status.
+ * While `pending`: `statusTarget` may confirm/cancel or replace items only.
+ * While `confirmed`: `statusTarget` `pending` or `confirmed` replaces items only (PUT from staff app).
  */
 export async function updateStaffTableCallItemsAndStatus(
   callId: number,
@@ -1244,8 +1242,8 @@ export async function updateStaffTableCallItemsAndStatus(
       row.status,
       row.acknowledgedAt ?? null,
     );
-    if (st !== "pending") {
-      return { ok: false, error: "NOT_PENDING" };
+    if (st === "cancelled") {
+      return { ok: false, error: "NOT_EDITABLE" };
     }
 
     const idsForCheck = itemsIn
@@ -1271,13 +1269,28 @@ export async function updateStaffTableCallItemsAndStatus(
       itemsResolved.length > 0 ? JSON.stringify(itemsResolved) : null;
 
     let updateSql: string;
-    if (statusTarget === "pending") {
+    let outStatus: StaffTableCallStatus;
+
+    if (st === "confirmed") {
+      if (statusTarget === "cancelled") {
+        return { ok: false, error: "NOT_PENDING" };
+      }
+      updateSql = `
+        UPDATE StaffTableCalls
+        SET orderItemsJson = @orderItemsJson,
+            status = N'confirmed'
+        WHERE id = @id AND menuId = @menuId
+          AND ${editableOrderItemsWhereSql}
+      `;
+      outStatus = "confirmed";
+    } else if (statusTarget === "pending") {
       updateSql = `
         UPDATE StaffTableCalls
         SET orderItemsJson = @orderItemsJson
         WHERE id = @id AND menuId = @menuId
           AND ${pendingWhereSql}
       `;
+      outStatus = "pending";
     } else if (statusTarget === "confirmed") {
       updateSql = `
         UPDATE StaffTableCalls
@@ -1287,6 +1300,7 @@ export async function updateStaffTableCallItemsAndStatus(
         WHERE id = @id AND menuId = @menuId
           AND ${pendingWhereSql}
       `;
+      outStatus = "confirmed";
     } else {
       updateSql = `
         UPDATE StaffTableCalls
@@ -1296,6 +1310,7 @@ export async function updateStaffTableCallItemsAndStatus(
         WHERE id = @id AND menuId = @menuId
           AND ${pendingWhereSql}
       `;
+      outStatus = "cancelled";
     }
 
     const upd = await pool
@@ -1306,15 +1321,11 @@ export async function updateStaffTableCallItemsAndStatus(
       .query(updateSql);
 
     if ((upd.rowsAffected?.[0] ?? 0) === 0) {
-      return { ok: false, error: "NOT_PENDING" };
+      return {
+        ok: false,
+        error: st === "confirmed" ? "NOT_EDITABLE" : "NOT_PENDING",
+      };
     }
-
-    const outStatus: StaffTableCallStatus =
-      statusTarget === "confirmed"
-        ? "confirmed"
-        : statusTarget === "cancelled"
-          ? "cancelled"
-          : "pending";
 
     return {
       ok: true,
