@@ -27,6 +27,27 @@ function mapRow(row: Record<string, unknown>): AppVersion {
   };
 }
 
+export async function getLatestAppVersion(): Promise<AppVersion | null> {
+  const pool = await getPool();
+  const result = await pool.request().query(`
+    SELECT TOP 1
+      latestVersion,
+      forceUpdate,
+      downloadUrl,
+      releaseNotes_ar,
+      releaseNotes_en,
+      updatedAt
+    FROM AppVersion
+    ORDER BY id DESC
+  `);
+
+  if (result.recordset.length === 0) {
+    return null;
+  }
+
+  return mapRow(result.recordset[0] as Record<string, unknown>);
+}
+
 export async function getAppVersion(): Promise<AppVersion | null> {
   const pool = await getPool();
   const result = await pool.request().query(`

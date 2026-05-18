@@ -2,6 +2,7 @@
  * Firebase Admin — load credentials from disk only (never commit JSON keys).
  *
  * Set one of:
+ * - FIREBASE_SERVICE_ACCOUNT_JSON — the full service-account JSON as an inline string (highest priority)
  * - FIREBASE_SERVICE_ACCOUNT_PATH — path to the downloaded service-account JSON (relative to cwd or absolute)
  * - GOOGLE_APPLICATION_CREDENTIALS — standard GCP env var (path to the same JSON)
  *
@@ -60,6 +61,11 @@ function resolveCredentialFilePath(spec: string): string {
 }
 
 function loadServiceAccount(): admin.ServiceAccount {
+  const inlineJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+  if (inlineJson) {
+    return JSON.parse(inlineJson) as admin.ServiceAccount;
+  }
+
   const firebasePath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH?.trim();
   if (firebasePath) {
     return readCertJson(resolveCredentialFilePath(firebasePath));
@@ -75,7 +81,8 @@ function loadServiceAccount(): admin.ServiceAccount {
   }
 
   throw new Error(
-    "Firebase Admin is not configured: set FIREBASE_SERVICE_ACCOUNT_PATH or GOOGLE_APPLICATION_CREDENTIALS " +
+    "Firebase Admin is not configured: set FIREBASE_SERVICE_ACCOUNT_JSON (inline JSON string), " +
+      "FIREBASE_SERVICE_ACCOUNT_PATH, or GOOGLE_APPLICATION_CREDENTIALS " +
       "to a service-account JSON file path (do not commit that file to git).",
   );
 }
