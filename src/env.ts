@@ -47,6 +47,12 @@ console.log(`   DB_NAME: ${process.env.DB_NAME}`);
 console.log(`   DB_USER: ${process.env.DB_USER}`);
 console.log(`   ENCRYPTION_KEY: ${process.env.ENCRYPTION_KEY ? "✅ Set" : "⚠️ Not set"}`);
 console.log(`   SECRET_KEY: ${process.env.SECRET_KEY ? "✅ Set" : "⚠️ Not set"}`);
+console.log(
+  `   RESEND_API_KEY: ${process.env.RESEND_API_KEY?.trim() ? "✅ Set" : "⚠️ Not set"}`,
+);
+console.log(
+  `   EMAIL_FROM: ${process.env.EMAIL_FROM?.trim() || "⚠️ Not set"}`,
+);
 
 // Export for potential use
 export default process.env;

@@ -156,9 +156,13 @@ async function startServer() {
       logger.error("❌ Database connection failed:", dbError);
     }
 
-    testEmailConnection()
-      .then(() => logger.info("✅ Email connection OK"))
-      .catch(() => logger.warn("⚠️ Email disabled"));
+    testEmailConnection().then((ok) => {
+      if (ok) {
+        logger.info("✅ Email (Resend) configured");
+      } else {
+        logger.warn("⚠️ Email disabled: set RESEND_API_KEY and EMAIL_FROM");
+      }
+    });
 
     CleanupService.start();
     startSubscriptionScheduler();

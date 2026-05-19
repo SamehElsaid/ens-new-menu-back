@@ -7,6 +7,7 @@ import {
   signupSchema,
   checkAvailabilitySchema,
   loginSchema,
+  resetPasswordSchema,
 } from "../validators/auth.validator";
 import {
   authLimiter,
@@ -69,11 +70,7 @@ router.post(
 // POST /api/auth/reset-password
 router.post(
   "/reset-password",
-  validate([
-    body("token").notEmpty(),
-    body("newPassword").isLength({ min: 8 }),
-    body("locale").optional().isIn(["ar", "en"]),
-  ]),
+  validateRequest(resetPasswordSchema, "body"),
   authController.resetPassword,
 );
 

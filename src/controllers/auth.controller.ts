@@ -214,7 +214,7 @@ export async function login(req: Request, res: Response): Promise<void> {
       );
       await LoginAttemptsService.checkAndLockAccount(email);
 
-      res.status(405).json({
+      res.status(401).json({
         error:
           "البريد الإلكتروني غير مسجل في النظام. يرجى التحقق من البريد الإلكتروني والمحاولة مرة أخرى.",
         errorType: "EMAIL_NOT_FOUND",
@@ -244,7 +244,7 @@ export async function login(req: Request, res: Response): Promise<void> {
           lockedUntil: lockResult.lockedUntil,
         });
       } else {
-        res.status(405).json({
+        res.status(401).json({
           error:
             "كلمة المرور غير صحيحة. يرجى التحقق من كلمة المرور والمحاولة مرة أخرى.",
           errorType: "INVALID_PASSWORD",
@@ -462,8 +462,16 @@ export async function resendVerification(
         VALUES (@userId, @token, @expiresAt)
       `);
 
-    // Send email
-    await sendVerificationEmail(email, user.name, token, locale as "ar" | "en");
+    const emailSent = await sendVerificationEmail(
+      email,
+      user.name,
+      token,
+      locale as "ar" | "en",
+    );
+    if (!emailSent) {
+      sendApiError(res, req, 500, ApiErrors.failedResendVerification);
+      return;
+    }
 
     res.json({ message: "Verification email sent" });
   } catch (error) {
@@ -515,13 +523,16 @@ export async function forgotPassword(
         VALUES (@userId, @token, @expiresAt)
       `);
 
-    // Send email
-    await sendPasswordResetEmail(
+    const emailSent = await sendPasswordResetEmail(
       email,
       user.name,
       token,
       locale as "ar" | "en",
     );
+    if (!emailSent) {
+      sendApiError(res, req, 500, ApiErrors.failedPasswordResetRequest);
+      return;
+    }
 
     res.json({ message: "If the email exists, a reset link will be sent" });
   } catch (error) {

@@ -90,7 +90,14 @@ export const loginSchema = z.object({
 /**
  * Types inferred from schemas
  */
+export const resetPasswordSchema = z.object({
+  token: z.string({ message: 'Token is required' }).trim().min(1, 'Token is required'),
+  newPassword: signupSchema.shape.password,
+  locale: z.enum(['ar', 'en']).optional().default('ar'),
+});
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type CheckAvailabilityInput = z.infer<typeof checkAvailabilitySchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 

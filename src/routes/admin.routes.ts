@@ -21,10 +21,7 @@ import {
   applyFreePlanLimits,
 } from '../controllers/admin.controller';
 import { requireAdmin } from '../middleware/auth.middleware';
-import {
-  getAdminAppVersion,
-  createAdminAppVersion,
-} from '../controllers/version.controller';
+import { createAdminAppVersion } from '../controllers/version.controller';
 
 const router = Router();
 
@@ -60,8 +57,7 @@ router.get('/admins', getAllAdmins);
 router.post('/admins', createAdmin);
 router.delete('/admins/:id', deleteAdmin);
 
-// App version (mobile updates)
-router.get('/app-version', getAdminAppVersion);
+// App version — POST only (GET is public: /api/public/app-version)
 router.post('/app-version', createAdminAppVersion);
 
 export default router;

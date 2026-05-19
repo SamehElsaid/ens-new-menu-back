@@ -78,8 +78,8 @@ export async function postAppVersion(
   }
 }
 
-/** GET /api/admin/app-version — latest version */
-export async function getAdminAppVersion(
+/** GET /api/public/app-version — latest version (public, no auth) */
+export async function getPublicAppVersion(
   req: Request,
   res: Response,
 ): Promise<void> {
@@ -92,7 +92,7 @@ export async function getAdminAppVersion(
 
     res.json({ version: versionPayload(version) });
   } catch (error) {
-    logger.error("Admin get app version error:", error);
+    logger.error("Get public app version error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetVersion);
   }
 }

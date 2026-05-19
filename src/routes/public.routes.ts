@@ -9,7 +9,11 @@ import {
   getMenuCustomAds,
   getPublicPlans,
 } from "../controllers/public.controller";
-import { postAppVersion, getLatestVersion } from "../controllers/version.controller";
+import {
+  postAppVersion,
+  getLatestVersion,
+  getPublicAppVersion,
+} from "../controllers/version.controller";
 import { postGuestStaffCall } from "../controllers/guestStaffCall.controller";
 import { validate } from "../middleware/validation";
 import { publicLimiter } from "../middleware/rateLimiter";
@@ -108,5 +112,8 @@ router.post("/version", postAppVersion);
 
 // GET /api/public/version/latest - Returns the most recently added version record
 router.get("/version/latest", getLatestVersion);
+
+// GET /api/public/app-version - Latest app version (no auth)
+router.get("/app-version", getPublicAppVersion);
 
 export default router;
