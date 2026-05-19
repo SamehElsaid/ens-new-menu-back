@@ -34,6 +34,7 @@ import uploadRoutes from "./routes/upload.routes";
 import adsRoutes from "./routes/ads.routes";
 import staffAuthRoutes from "./routes/staffAuth.routes";
 import paymentRoutes from "./routes/paymentRoutes";
+import { getPublicAppVersion } from "./controllers/version.controller";
 
 // ------------------------------------------------------------------
 
@@ -120,7 +121,10 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Mobile app version check, public menus, etc.
+// Mobile app version — fully open (no x-api-key, no JWT, no rate limit)
+app.get("/api/public/app-version", getPublicAppVersion);
+
+// Other public routes (menus, plans, …)
 app.use("/api/public", publicRoutes);
 
 // API key for all routes registered below (auth login/signup skip via isPublicRoute)

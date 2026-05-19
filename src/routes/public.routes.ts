@@ -12,7 +12,6 @@ import {
 import {
   postAppVersion,
   getLatestVersion,
-  getPublicAppVersion,
 } from "../controllers/version.controller";
 import { postGuestStaffCall } from "../controllers/guestStaffCall.controller";
 import { validate } from "../middleware/validation";
@@ -113,7 +112,6 @@ router.post("/version", postAppVersion);
 // GET /api/public/version/latest - Returns the most recently added version record
 router.get("/version/latest", getLatestVersion);
 
-// GET /api/public/app-version - Latest app version (no auth)
-router.get("/app-version", getPublicAppVersion);
+// GET /api/public/app-version — registered on app in server.ts (no middleware)
 
 export default router;
