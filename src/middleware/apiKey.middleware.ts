@@ -21,6 +21,7 @@ const publicRoutes = [
     '/api/auth/refresh',
     '/api/public',
     '/api/public/app-version',
+    '/api/public/app-version/latest',
     '/api/public/version',
     '/api/public/version/latest',
 ];
