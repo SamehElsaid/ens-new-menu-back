@@ -123,7 +123,7 @@ app.get("/health", (req, res) => {
 });
 
 // Mobile app version — fully open (no x-api-key, no JWT, no rate limit)
-app.get("/api/public/app-version", getPublicAppVersion);
+
 app.get("/api/public/app-version/latest", getPublicAppVersion);
 
 // Other public routes (menus, plans, …)

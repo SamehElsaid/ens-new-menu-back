@@ -49,7 +49,7 @@ function isPublicRoute(req: Request): boolean {
 
   return candidates.some((path) =>
     publicRoutes.some(
-      (route) => path === route || path.startsWith(`${route}/`),
+      (route) => path === route || path.startsWith(route + "/"),
     ),
   );
 }
