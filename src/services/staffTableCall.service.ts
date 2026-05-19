@@ -23,11 +23,14 @@ export function normalizeStaffTableCallStatus(
   const s = String(statusRaw ?? "")
     .trim()
     .toLowerCase();
-  if (s === "confirmed" || s === "cancelled" || s === "pending") {
-    return s;
+  if (s === "cancelled") {
+    return "cancelled";
   }
-  if (acknowledgedAt) {
+  if (s === "confirmed" || acknowledgedAt) {
     return "confirmed";
+  }
+  if (s === "pending" || s === "") {
+    return "pending";
   }
   return "pending";
 }
@@ -1001,9 +1004,20 @@ const pendingWhereSql = `
   )
 `;
 
-/** Pending or confirmed — staff may still adjust `orderItemsJson` (not cancelled). Aligns with `normalizeStaffTableCallStatus` (incl. legacy rows: status NULL + acknowledgedAt set). */
+/**
+ * Pending or confirmed — staff may adjust `orderItemsJson` (not cancelled).
+ * Mirrors `normalizeStaffTableCallStatus` (case-insensitive status, legacy `acknowledgedAt` without `confirmed`).
+ */
 const editableOrderItemsWhereSql = `
-  (status IS NULL OR status IN (N'pending', N'confirmed'))
+  (
+    LOWER(LTRIM(RTRIM(ISNULL(status, N'')))) <> N'cancelled'
+    AND (
+      acknowledgedAt IS NOT NULL
+      OR LOWER(LTRIM(RTRIM(ISNULL(status, N'')))) IN (N'pending', N'confirmed')
+      OR NULLIF(LTRIM(RTRIM(ISNULL(status, N''))), N'') IS NULL
+      OR LOWER(LTRIM(RTRIM(ISNULL(status, N'')))) NOT IN (N'pending', N'confirmed', N'cancelled')
+    )
+  )
 `;
 
 /**
