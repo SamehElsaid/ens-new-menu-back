@@ -630,13 +630,24 @@ function parseOrderItemsJson(raw: string | null | undefined): StaffOrderItem[] {
   }
 }
 
-type StaffTableCallsLastEditCols = { byId: boolean; at: boolean };
-let staffTableCallsLastEditColsCache: StaffTableCallsLastEditCols | null = null;
+type StaffTableCallsSchemaFlags = {
+  status: boolean;
+  acknowledgedAt: boolean;
+  lastEditedByStaffId: boolean;
+  lastEditedAt: boolean;
+};
 
-/** Optional columns from migration `add-staffTableCalls-lastEdited.sql` (or equivalent). */
-async function getStaffTableCallsLastEditColFlags(): Promise<StaffTableCallsLastEditCols> {
-  if (staffTableCallsLastEditColsCache) {
-    return staffTableCallsLastEditColsCache;
+type StaffTableCallsLastEditCols = {
+  byId: boolean;
+  at: boolean;
+};
+
+let staffTableCallsSchemaCache: StaffTableCallsSchemaFlags | null = null;
+
+/** Cached `StaffTableCalls` columns (status / acknowledgedAt / lastEdited* may be missing on older DBs). */
+async function getStaffTableCallsSchemaFlags(): Promise<StaffTableCallsSchemaFlags> {
+  if (staffTableCallsSchemaCache) {
+    return staffTableCallsSchemaCache;
   }
   const pool = await getPool();
   const r = await pool.request().query(`
@@ -649,11 +660,76 @@ async function getStaffTableCallsLastEditColFlags(): Promise<StaffTableCallsLast
       String(x.COLUMN_NAME).toLowerCase(),
     ),
   );
-  staffTableCallsLastEditColsCache = {
-    byId: lower.has("lasteditedbystaffid"),
-    at: lower.has("lasteditedat"),
+  staffTableCallsSchemaCache = {
+    status: lower.has("status"),
+    acknowledgedAt: lower.has("acknowledgedat"),
+    lastEditedByStaffId: lower.has("lasteditedbystaffid"),
+    lastEditedAt: lower.has("lasteditedat"),
   };
-  return staffTableCallsLastEditColsCache;
+  return staffTableCallsSchemaCache;
+}
+
+/** Optional columns from migration `add-staffTableCalls-lastEdited.sql` (or equivalent). */
+async function getStaffTableCallsLastEditColFlags(): Promise<StaffTableCallsLastEditCols> {
+  const s = await getStaffTableCallsSchemaFlags();
+  return { byId: s.lastEditedByStaffId, at: s.lastEditedAt };
+}
+
+const staffCallRowKeyWhereSql = `id = @id AND menuId = @menuId`;
+
+function buildPendingWhereSql(flags: StaffTableCallsSchemaFlags): string {
+  if (flags.status) {
+    return `(status = N'pending' OR (status IS NULL AND acknowledgedAt IS NULL))`;
+  }
+  if (flags.acknowledgedAt) {
+    return `acknowledgedAt IS NULL`;
+  }
+  return `1 = 1`;
+}
+
+function buildNotCancelledWhereSql(flags: StaffTableCallsSchemaFlags): string {
+  if (!flags.status) {
+    return "1 = 1";
+  }
+  return `(status IS NULL OR LOWER(LTRIM(RTRIM(status))) <> N'cancelled')`;
+}
+
+function buildEditableRowWhereSql(flags: StaffTableCallsSchemaFlags): string {
+  return `${staffCallRowKeyWhereSql} AND ${buildNotCancelledWhereSql(flags)}`;
+}
+
+function buildOrderItemsSetSql(
+  flags: StaffTableCallsSchemaFlags,
+  opts?: {
+    confirm?: boolean;
+    cancel?: boolean;
+    /** First-time confirm from `pending` — always stamp `acknowledgedAt`. */
+    setAcknowledgedNow?: boolean;
+  },
+): string {
+  const sets = ["orderItemsJson = @orderItemsJson"];
+  if (opts?.cancel) {
+    if (flags.status) {
+      sets.push("status = N'cancelled'");
+    }
+    if (flags.acknowledgedAt) {
+      sets.push("acknowledgedAt = NULL");
+    }
+    return sets.join(",\n            ");
+  }
+  if (opts?.confirm) {
+    if (flags.status) {
+      sets.push("status = N'confirmed'");
+    }
+    if (flags.acknowledgedAt) {
+      sets.push(
+        opts.setAcknowledgedNow
+          ? "acknowledgedAt = SYSUTCDATETIME()"
+          : "acknowledgedAt = CASE WHEN acknowledgedAt IS NULL THEN SYSUTCDATETIME() ELSE acknowledgedAt END",
+      );
+    }
+  }
+  return sets.join(",\n            ");
 }
 
 function toStaffTableCallRow(
@@ -997,29 +1073,6 @@ export async function getStaffTableCallsHistory(
   }
 }
 
-const pendingWhereSql = `
-  (
-    status = N'pending'
-    OR (status IS NULL AND acknowledgedAt IS NULL)
-  )
-`;
-
-/**
- * Pending or confirmed — staff may adjust `orderItemsJson` (not cancelled).
- * Mirrors `normalizeStaffTableCallStatus` (case-insensitive status, legacy `acknowledgedAt` without `confirmed`).
- */
-const editableOrderItemsWhereSql = `
-  (
-    LOWER(LTRIM(RTRIM(ISNULL(status, N'')))) <> N'cancelled'
-    AND (
-      acknowledgedAt IS NOT NULL
-      OR LOWER(LTRIM(RTRIM(ISNULL(status, N'')))) IN (N'pending', N'confirmed')
-      OR NULLIF(LTRIM(RTRIM(ISNULL(status, N''))), N'') IS NULL
-      OR LOWER(LTRIM(RTRIM(ISNULL(status, N'')))) NOT IN (N'pending', N'confirmed', N'cancelled')
-    )
-  )
-`;
-
 /**
  * Staff sets order lifecycle: `confirmed` (sets `acknowledgedAt`) or `cancelled`.
  * Only from `pending`.
@@ -1031,27 +1084,48 @@ export async function setStaffTableCallStatus(
 ): Promise<boolean> {
   try {
     const pool = await getPool();
+    const schema = await getStaffTableCallsSchemaFlags();
+    const pendingWhere = buildPendingWhereSql(schema);
     if (nextStatus === "confirmed") {
+      const setParts: string[] = [];
+      if (schema.acknowledgedAt) {
+        setParts.push("acknowledgedAt = SYSUTCDATETIME()");
+      }
+      if (schema.status) {
+        setParts.push("status = N'confirmed'");
+      }
+      if (setParts.length === 0) {
+        return false;
+      }
       const result = await pool
         .request()
         .input("id", sql.Int, callId)
         .input("menuId", sql.Int, menuId).query(`
           UPDATE StaffTableCalls
-          SET acknowledgedAt = SYSUTCDATETIME(),
-              status = N'confirmed'
+          SET ${setParts.join(", ")}
           WHERE id = @id AND menuId = @menuId
-            AND ${pendingWhereSql}
+            AND ${pendingWhere}
         `);
       return (result.rowsAffected?.[0] ?? 0) > 0;
+    }
+    const cancelSets: string[] = [];
+    if (schema.status) {
+      cancelSets.push("status = N'cancelled'");
+    }
+    if (schema.acknowledgedAt) {
+      cancelSets.push("acknowledgedAt = NULL");
+    }
+    if (cancelSets.length === 0) {
+      return false;
     }
     const result = await pool
       .request()
       .input("id", sql.Int, callId)
       .input("menuId", sql.Int, menuId).query(`
         UPDATE StaffTableCalls
-        SET status = N'cancelled'
+        SET ${cancelSets.join(", ")}
         WHERE id = @id AND menuId = @menuId
-          AND ${pendingWhereSql}
+          AND ${pendingWhere}
       `);
     return (result.rowsAffected?.[0] ?? 0) > 0;
   } catch (error) {
@@ -1154,38 +1228,47 @@ export async function updateStaffTableCallItems(
     const orderJson =
       itemsResolved.length > 0 ? JSON.stringify(itemsResolved) : null;
 
-    const flags = await getStaffTableCallsLastEditColFlags();
-    const hasLast = flags.byId && flags.at;
+    const schema = await getStaffTableCallsSchemaFlags();
+    const hasLast = schema.lastEditedByStaffId && schema.lastEditedAt;
 
-    let upd;
-    if (hasLast) {
-      upd = await pool
+    const runItemsUpdate = async (withLastEdit: boolean) => {
+      const req = pool
         .request()
         .input("id", sql.Int, callId)
         .input("menuId", sql.Int, menuId)
-        .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson)
-        .input("editorStaffId", sql.Int, editorStaffId).query(`
-        UPDATE StaffTableCalls
-        SET orderItemsJson = @orderItemsJson,
-            lastEditedByStaffId = @editorStaffId,
-            lastEditedAt = SYSUTCDATETIME()
-        WHERE id = @id AND menuId = @menuId
-          AND ${editableOrderItemsWhereSql}
-      `);
-    } else {
-      upd = await pool
-        .request()
-        .input("id", sql.Int, callId)
-        .input("menuId", sql.Int, menuId)
-        .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson).query(`
+        .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson);
+      if (withLastEdit) {
+        req.input("editorStaffId", sql.Int, editorStaffId);
+        return req.query(`
+          UPDATE StaffTableCalls
+          SET orderItemsJson = @orderItemsJson,
+              lastEditedByStaffId = @editorStaffId,
+              lastEditedAt = SYSUTCDATETIME()
+          WHERE ${buildEditableRowWhereSql(schema)}
+        `);
+      }
+      return req.query(`
         UPDATE StaffTableCalls
         SET orderItemsJson = @orderItemsJson
-        WHERE id = @id AND menuId = @menuId
-          AND ${editableOrderItemsWhereSql}
+        WHERE ${buildEditableRowWhereSql(schema)}
       `);
+    };
+
+    let upd;
+    try {
+      upd = hasLast ? await runItemsUpdate(true) : await runItemsUpdate(false);
+    } catch (updErr) {
+      if (!hasLast) {
+        throw updErr;
+      }
+      logger.warn(
+        "updateStaffTableCallItems lastEdited columns failed, retrying without",
+        updErr,
+      );
+      upd = await runItemsUpdate(false);
     }
     if ((upd.rowsAffected?.[0] ?? 0) === 0) {
-      return { ok: false, error: "NOT_EDITABLE" };
+      return { ok: false, error: "NOT_FOUND" };
     }
 
     return {
@@ -1282,48 +1365,34 @@ export async function updateStaffTableCallItemsAndStatus(
     const orderJson =
       itemsResolved.length > 0 ? JSON.stringify(itemsResolved) : null;
 
-    let updateSql: string;
+    const schema = await getStaffTableCallsSchemaFlags();
+    const pendingWhere = buildPendingWhereSql(schema);
+
+    let setSql: string;
+    let whereSql: string;
     let outStatus: StaffTableCallStatus;
 
     if (st === "confirmed") {
       if (statusTarget === "cancelled") {
         return { ok: false, error: "NOT_PENDING" };
       }
-      updateSql = `
-        UPDATE StaffTableCalls
-        SET orderItemsJson = @orderItemsJson,
-            status = N'confirmed'
-        WHERE id = @id AND menuId = @menuId
-          AND ${editableOrderItemsWhereSql}
-      `;
+      setSql = buildOrderItemsSetSql(schema, { confirm: true });
+      whereSql = buildEditableRowWhereSql(schema);
       outStatus = "confirmed";
     } else if (statusTarget === "pending") {
-      updateSql = `
-        UPDATE StaffTableCalls
-        SET orderItemsJson = @orderItemsJson
-        WHERE id = @id AND menuId = @menuId
-          AND ${pendingWhereSql}
-      `;
+      setSql = buildOrderItemsSetSql(schema);
+      whereSql = `${staffCallRowKeyWhereSql} AND ${pendingWhere}`;
       outStatus = "pending";
     } else if (statusTarget === "confirmed") {
-      updateSql = `
-        UPDATE StaffTableCalls
-        SET orderItemsJson = @orderItemsJson,
-            status = N'confirmed',
-            acknowledgedAt = SYSUTCDATETIME()
-        WHERE id = @id AND menuId = @menuId
-          AND ${pendingWhereSql}
-      `;
+      setSql = buildOrderItemsSetSql(schema, {
+        confirm: true,
+        setAcknowledgedNow: true,
+      });
+      whereSql = `${staffCallRowKeyWhereSql} AND ${pendingWhere}`;
       outStatus = "confirmed";
     } else {
-      updateSql = `
-        UPDATE StaffTableCalls
-        SET orderItemsJson = @orderItemsJson,
-            status = N'cancelled',
-            acknowledgedAt = NULL
-        WHERE id = @id AND menuId = @menuId
-          AND ${pendingWhereSql}
-      `;
+      setSql = buildOrderItemsSetSql(schema, { cancel: true });
+      whereSql = `${staffCallRowKeyWhereSql} AND ${pendingWhere}`;
       outStatus = "cancelled";
     }
 
@@ -1332,12 +1401,16 @@ export async function updateStaffTableCallItemsAndStatus(
       .input("id", sql.Int, callId)
       .input("menuId", sql.Int, menuId)
       .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson)
-      .query(updateSql);
+      .query(`
+        UPDATE StaffTableCalls
+        SET ${setSql}
+        WHERE ${whereSql}
+      `);
 
     if ((upd.rowsAffected?.[0] ?? 0) === 0) {
       return {
         ok: false,
-        error: st === "confirmed" ? "NOT_EDITABLE" : "NOT_PENDING",
+        error: st === "confirmed" ? "NOT_FOUND" : "NOT_PENDING",
       };
     }
 
