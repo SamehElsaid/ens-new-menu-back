@@ -8,8 +8,8 @@ const envFile =
   process.env.NODE_ENV === "production"
     ? ".env.production"
     : process.env.NODE_ENV === "test"
-    ? ".env.test"
-    : ".env.development";
+      ? ".env.test"
+      : ".env.development";
 
 const envPath = path.resolve(process.cwd(), envFile);
 
@@ -24,7 +24,7 @@ if (existsSync(envPath)) {
   }
 } else {
   console.log(
-    `ℹ️  No ${envFile} file found, using system environment variables`
+    `ℹ️  No ${envFile} file found, using system environment variables`,
   );
 }
 
@@ -34,7 +34,7 @@ const missing = requiredVars.filter((v) => !process.env[v]);
 
 if (missing.length > 0) {
   console.error(
-    `❌ Missing required environment variables: ${missing.join(", ")}`
+    `❌ Missing required environment variables: ${missing.join(", ")}`,
   );
   process.exit(1);
 }
@@ -46,18 +46,17 @@ if (!process.env.ENCRYPTION_KEY?.trim() && process.env.SECRET_KEY?.trim()) {
 
 console.log(`✅ Environment ready:`);
 console.log(`   NODE_ENV: ${process.env.NODE_ENV || "development"}`);
-console.log(`   DB_HOST: ${process.env.DB_HOST}`);
-console.log(`   DB_PORT: ${process.env.DB_PORT}`);
-console.log(`   DB_NAME: ${process.env.DB_NAME}`);
-console.log(`   DB_USER: ${process.env.DB_USER}`);
-console.log(`   ENCRYPTION_KEY: ${process.env.ENCRYPTION_KEY ? "✅ Set" : "⚠️ Not set"}`);
-console.log(`   SECRET_KEY: ${process.env.SECRET_KEY ? "✅ Set" : "⚠️ Not set"}`);
+
+console.log(
+  `   ENCRYPTION_KEY: ${process.env.ENCRYPTION_KEY ? "✅ Set" : "⚠️ Not set"}`,
+);
+console.log(
+  `   SECRET_KEY: ${process.env.SECRET_KEY ? "✅ Set" : "⚠️ Not set"}`,
+);
 console.log(
   `   RESEND_API_KEY: ${process.env.RESEND_API_KEY?.trim() ? "✅ Set" : "⚠️ Not set"}`,
 );
-console.log(
-  `   EMAIL_FROM: ${process.env.EMAIL_FROM?.trim() || "⚠️ Not set"}`,
-);
+console.log(`   EMAIL_FROM: ${process.env.EMAIL_FROM?.trim() || "⚠️ Not set"}`);
 
 // Export for potential use
 export default process.env;
