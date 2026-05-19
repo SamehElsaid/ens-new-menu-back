@@ -116,6 +116,7 @@ app.use((req, res, next) => {
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
+    build: "public-app-version-v2",
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });

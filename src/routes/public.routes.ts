@@ -12,12 +12,17 @@ import {
 import {
   postAppVersion,
   getLatestVersion,
+  getPublicAppVersion,
 } from "../controllers/version.controller";
 import { postGuestStaffCall } from "../controllers/guestStaffCall.controller";
 import { validate } from "../middleware/validation";
 import { publicLimiter } from "../middleware/rateLimiter";
 
 const router = Router();
+
+// GET app version — before rate limiter (fully public)
+router.get("/app-version", getPublicAppVersion);
+router.get("/app-version/latest", getPublicAppVersion);
 
 // POST /api/public/staff-call — بدون publicLimiter (طلب نداء الطاقم فقط)
 router.post(

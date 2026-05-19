@@ -60,9 +60,22 @@ function isPublicRoute(req: Request): boolean {
  * Logs the decrypted data for debugging
  * Skips validation for public routes (login, signup, etc.)
  */
+/** Paths that must never require x-api-key (mobile, public menus, health). */
+function isFullyOpenPath(req: Request): boolean {
+    const paths = [req.originalUrl, req.url, req.path]
+        .map((v) => normalizePath(String(v ?? "")))
+        .filter(Boolean);
+
+    return paths.some(
+        (p) =>
+            p === "/health" ||
+            p.startsWith("/api/public"),
+    );
+}
+
 export function decryptApiKey(req: Request, res: Response, next: NextFunction) {
-    // Skip API key validation for public routes
-    if (isPublicRoute(req)) {
+    // Always allow public API + health (works even if route order differs on deploy)
+    if (isFullyOpenPath(req) || isPublicRoute(req)) {
         return next();
     }
 
