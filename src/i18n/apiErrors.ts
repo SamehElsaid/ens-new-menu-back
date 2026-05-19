@@ -86,6 +86,10 @@ export const ApiErrors = {
     en: 'Name is required in both Arabic and English',
     ar: 'الاسم مطلوب بالعربي والإنجليزي',
   },
+  logoRequired: {
+    en: 'Menu logo is required',
+    ar: 'شعار المنيو مطلوب',
+  },
   failedCreateMenu: {
     en: 'Failed to create menu',
     ar: 'فشل إنشاء المنيو',

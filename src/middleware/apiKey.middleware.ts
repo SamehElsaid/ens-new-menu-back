@@ -20,13 +20,37 @@ const publicRoutes = [
     '/api/auth/reset-password',
     '/api/auth/refresh',
     '/api/public',
+    '/api/public/app-version',
+    '/api/public/version',
+    '/api/public/version/latest',
 ];
 
 /**
- * Check if the current route is a public route
+ * Check if the current route is a public route (no x-api-key required)
  */
-function isPublicRoute(path: string): boolean {
-    return publicRoutes.some(route => path.startsWith(route));
+function normalizePath(value: string): string {
+    const pathOnly = value.split('?')[0];
+    if (!pathOnly) return '';
+    return pathOnly.length > 1 && pathOnly.endsWith('/')
+        ? pathOnly.slice(0, -1)
+        : pathOnly;
+}
+
+function isPublicRoute(req: Request): boolean {
+    const candidates = [
+        req.originalUrl,
+        req.url,
+        req.baseUrl && req.path ? `${req.baseUrl}${req.path}` : '',
+        req.path,
+    ]
+        .map((v) => normalizePath(String(v ?? '')))
+        .filter(Boolean);
+
+    return candidates.some((path) =>
+        publicRoutes.some(
+            (route) => path === route || path.startsWith(`${route}/`),
+        ),
+    );
 }
 
 /**
@@ -37,7 +61,7 @@ function isPublicRoute(path: string): boolean {
  */
 export function decryptApiKey(req: Request, res: Response, next: NextFunction) {
     // Skip API key validation for public routes
-    if (isPublicRoute(req.path)) {
+    if (isPublicRoute(req)) {
         return next();
     }
 

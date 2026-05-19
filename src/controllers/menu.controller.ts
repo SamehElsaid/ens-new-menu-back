@@ -69,6 +69,11 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    if (!logo || typeof logo !== "string" || !logo.trim()) {
+      sendApiError(res, req, 400, ApiErrors.logoRequired);
+      return;
+    }
+
     // Generate unique slug from custom slug or Arabic name
     const slug = customSlug
       ? await generateUniqueSlug(customSlug)

@@ -15,6 +15,7 @@ import { getPool, closePool } from "./config/database";
 import { testEmailConnection } from "./config/email";
 import { logger } from "./utils/logger";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { decryptApiKey } from "./middleware/apiKey.middleware";
 import { validateJWTSecrets } from "./utils/tokenHelper";
 import { CleanupService } from "./services/cleanup.service";
 import { ensureUploadDirectories } from "./controllers/upload.controller";
@@ -110,7 +111,7 @@ app.use((req, res, next) => {
 });
 
 // ------------------------------------------------------------------
-// Health check
+// Health + fully public routes (no x-api-key / JWT — must be before decryptApiKey)
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
@@ -119,11 +120,16 @@ app.get("/health", (req, res) => {
   });
 });
 
+// Mobile app version check, public menus, etc.
+app.use("/api/public", publicRoutes);
+
+// API key for all routes registered below (auth login/signup skip via isPublicRoute)
+app.use(decryptApiKey);
+
 // ------------------------------------------------------------------
 // API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/auth", googleAuthRoutes);
-app.use("/api/public", publicRoutes);
 app.use("/api/staff-auth", staffAuthRoutes);
 // Backward-compatible alias for clients that accidentally prefix /api twice.
 app.use("/api/api/staff-auth", staffAuthRoutes);

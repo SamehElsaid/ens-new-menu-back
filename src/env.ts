@@ -39,6 +39,11 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
+// Frontend x-api-key uses NEXT_PUBLIC_SECRET_KEY; align decrypt key on production
+if (!process.env.ENCRYPTION_KEY?.trim() && process.env.SECRET_KEY?.trim()) {
+  process.env.ENCRYPTION_KEY = process.env.SECRET_KEY.trim();
+}
+
 console.log(`✅ Environment ready:`);
 console.log(`   NODE_ENV: ${process.env.NODE_ENV || "development"}`);
 console.log(`   DB_HOST: ${process.env.DB_HOST}`);

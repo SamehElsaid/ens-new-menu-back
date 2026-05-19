@@ -41,7 +41,7 @@ router.post(
     body("descriptionAr").optional().isString().trim().isLength({ max: 1000 }),
     body("descriptionEn").optional().isString().trim().isLength({ max: 1000 }),
     body("slug").optional().isString().trim().isLength({ max: 200 }),
-    body("logo").optional().isString().isLength({ max: 500 }),
+    body("logo").notEmpty().trim().isString().isLength({ max: 500 }),
     body("theme")
       .optional()
       .trim()
