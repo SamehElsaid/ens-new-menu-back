@@ -734,4 +734,16 @@ export const ApiErrors = {
     en: 'Failed to update app version',
     ar: 'فشل تحديث إصدار التطبيق',
   },
+  failedCreateVersion: {
+    en: 'Failed to create app version',
+    ar: 'فشل إضافة إصدار التطبيق',
+  },
+  versionNumberRequired: {
+    en: 'Version number is required',
+    ar: 'رقم الإصدار مطلوب',
+  },
+  downloadUrlRequired: {
+    en: 'Download URL is required',
+    ar: 'رابط التحميل مطلوب',
+  },
 } as const satisfies Record<string, BilingualMessage>;

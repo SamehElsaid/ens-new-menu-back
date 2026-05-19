@@ -18,6 +18,7 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 import { validateJWTSecrets } from "./utils/tokenHelper";
 import { CleanupService } from "./services/cleanup.service";
 import { ensureUploadDirectories } from "./controllers/upload.controller";
+import { ensureAppVersionSchema } from "./services/appVersionSchema.service";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
 // Routes
 import authRoutes from "./routes/auth.routes";
@@ -150,6 +151,7 @@ async function startServer() {
     try {
       await getPool();
       logger.info("✅ Database connected successfully");
+      await ensureAppVersionSchema();
     } catch (dbError) {
       logger.error("❌ Database connection failed:", dbError);
     }
