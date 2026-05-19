@@ -6,6 +6,7 @@ import * as notificationService from "../services/notificationService";
 import { SubscriptionDowngradeService } from "../services/subscriptionDowngrade.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { adminSetPasswordSchema } from "../validators/auth.validator";
 
 // Get Admin Dashboard Statistics
 export async function getAdminStats(
@@ -305,17 +306,16 @@ export async function getUserDetails(
   }
 }
 
-// Suspend/Unsuspend User
+// Suspend / reactivate user (body.isSuspended: true | false)
 export async function toggleUserSuspension(
   req: Request,
   res: Response,
 ): Promise<void> {
   try {
     const { id } = req.params;
-    const { reason } = req.body;
+    const { reason, isSuspended: requestedStatus } = req.body;
     const pool = await getPool();
 
-    // Get current suspension status
     const userResult = await pool.request().input("userId", sql.Int, id).query(`
         SELECT isSuspended FROM Users WHERE id = @userId AND role = 'user'
       `);
@@ -325,16 +325,36 @@ export async function toggleUserSuspension(
       return;
     }
 
-    const isSuspended = userResult.recordset[0].isSuspended;
-    const newStatus = !isSuspended;
+    const currentSuspended = Boolean(userResult.recordset[0].isSuspended);
+    const newStatus =
+      typeof requestedStatus === "boolean"
+        ? requestedStatus
+        : !currentSuspended;
 
-    // Update suspension status
+    if (newStatus === currentSuspended) {
+      res.json({
+        message: newStatus
+          ? "User is already suspended"
+          : "User is already active",
+        isSuspended: newStatus,
+      });
+      return;
+    }
+
+    const suspendReason =
+      newStatus && typeof reason === "string" && reason.trim()
+        ? reason.trim()
+        : newStatus
+          ? "Account suspended by administrator"
+          : null;
+
     await pool
       .request()
       .input("userId", sql.Int, id)
-      .input("isSuspended", sql.Bit, newStatus)
+      .input("isSuspended", sql.Bit, newStatus ? 1 : 0)
       .input("suspendedAt", sql.DateTime2, newStatus ? new Date() : null)
-      .input("suspendedReason", sql.NVarChar, newStatus ? reason : null).query(`
+      .input("suspendedReason", sql.NVarChar, suspendReason)
+      .query(`
         UPDATE Users
         SET isSuspended = @isSuspended,
             suspendedAt = @suspendedAt,
@@ -345,12 +365,49 @@ export async function toggleUserSuspension(
     res.json({
       message: newStatus
         ? "User suspended successfully"
-        : "User unsuspended successfully",
+        : "User reactivated successfully",
       isSuspended: newStatus,
     });
   } catch (error) {
     logger.error("Toggle user suspension error:", error);
     sendApiError(res, req, 500, ApiErrors.failedUpdateUserSuspension);
+  }
+}
+
+/** PUT /api/admin/users/:id/password — set password for any user */
+export async function adminSetUserPassword(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const parsed = adminSetPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      sendApiError(res, req, 400, ApiErrors.invalidPasswordFormat);
+      return;
+    }
+
+    const pool = await getPool();
+    const userResult = await pool.request().input("userId", sql.Int, id).query(`
+        SELECT id FROM Users WHERE id = @userId AND role = 'user'
+      `);
+
+    if (userResult.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
+      return;
+    }
+
+    const hashedPassword = await bcrypt.hash(parsed.data.newPassword, 12);
+    await pool
+      .request()
+      .input("userId", sql.Int, id)
+      .input("password", sql.NVarChar, hashedPassword)
+      .query("UPDATE Users SET password = @password WHERE id = @userId");
+
+    res.json({ message: "Password updated successfully" });
+  } catch (error) {
+    logger.error("Admin set user password error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedAdminSetPassword);
   }
 }
 

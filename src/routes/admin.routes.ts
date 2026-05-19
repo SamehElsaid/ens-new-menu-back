@@ -4,6 +4,7 @@ import {
   getAllUsers,
   getUserDetails,
   toggleUserSuspension,
+  adminSetUserPassword,
   deleteUser,
   getAllPlans,
   updatePlan,
@@ -35,6 +36,7 @@ router.get('/stats', getAdminStats);
 router.get('/users', getAllUsers);
 router.get('/users/:id', getUserDetails);
 router.put('/users/:id/suspend', toggleUserSuspension);
+router.put('/users/:id/password', adminSetUserPassword);
 router.put('/users/:id/subscription', updateUserSubscription);
 router.post('/users/:id/apply-free-limits', applyFreePlanLimits);
 router.delete('/users/:id', deleteUser);

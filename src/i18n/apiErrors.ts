@@ -590,6 +590,14 @@ export const ApiErrors = {
     en: 'Failed to get user details',
     ar: 'فشل جلب تفاصيل المستخدم',
   },
+  invalidPasswordFormat: {
+    en: 'Password must be at least 8 characters and include uppercase, lowercase, number, and special character',
+    ar: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وصغير ورقم ورمز خاص',
+  },
+  failedAdminSetPassword: {
+    en: 'Failed to update user password',
+    ar: 'فشل تحديث كلمة مرور المستخدم',
+  },
   failedUpdateUserSuspension: {
     en: 'Failed to update user suspension status',
     ar: 'فشل تحديث حالة تعليق المستخدم',
