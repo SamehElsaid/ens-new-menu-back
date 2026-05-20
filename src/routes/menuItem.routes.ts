@@ -64,6 +64,7 @@ router.put(
     body('nameEn').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 255 }),
     body('descriptionAr').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ max: 2000 }),
     body('descriptionEn').optional({ nullable: true, checkFalsy: true }).isString().trim().isLength({ max: 2000 }),
+    body('categoryId').optional().isInt({ min: 1 }).toInt(),
     body('category').optional({ nullable: true, checkFalsy: true }).trim().isLength({ max: 100 }),
     body('price').optional().isFloat({ min: 0 }),
     body('image').optional({ nullable: true, checkFalsy: true }).isString().isLength({ max: 500 }),
