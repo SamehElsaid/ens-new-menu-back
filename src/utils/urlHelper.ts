@@ -8,7 +8,9 @@
  * Uses environment variable or falls back to localhost
  */
 export function getBaseUrl(): string {
-  return process.env.API_URL || "http://localhost:5000";
+  const raw = (process.env.API_URL || "http://localhost:5000").trim();
+  // API routes live under /api; static uploads are served at /uploads (not /api/uploads).
+  return raw.replace(/\/api\/?$/, "");
 }
 
 /**

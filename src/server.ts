@@ -1,7 +1,7 @@
 // MUST be imported first to load environment variables
 import "./env";
 
-import express, { Application } from "express";
+import express, { Application, Request, Response, NextFunction } from "express";
 import http from "http";
 import cors from "cors";
 import helmet from "helmet";
@@ -93,16 +93,17 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // ------------------------------------------------------------------
-// Static uploads
-app.use(
-  "/uploads",
-  (req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-    next();
-  },
-  express.static(path.join(__dirname, "../uploads")),
-);
+// Static uploads (public, no x-api-key — must stay before decryptApiKey)
+const uploadsCors = (_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  next();
+};
+const uploadsStatic = express.static(path.join(__dirname, "../uploads"));
+
+app.use("/uploads", uploadsCors, uploadsStatic);
+// Backward compat: URLs built as API_URL + "/uploads/..." when API_URL wrongly included "/api"
+app.use("/api/uploads", uploadsCors, uploadsStatic);
 
 // ------------------------------------------------------------------
 // Request logging
