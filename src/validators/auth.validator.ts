@@ -3,27 +3,19 @@ import { z } from 'zod';
 // Phone number regex - يقبل أرقام الهواتف بصيغ مختلفة
 const phoneRegex = /^[\+]?[(]?[0-9]{1,4}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{1,9}$/;
 
-// Strong Password regex - يجب أن يحتوي على:
-// - حرف كبير واحد على الأقل
-// - حرف صغير واحد على الأقل
-// - رقم واحد على الأقل
-// - رمز خاص واحد على الأقل
-const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^()_+=\-\[\]{};:'",.<>\/\\|`~])[A-Za-z\d@$!%*?&#^()_+=\-\[\]{};:'",.<>\/\\|`~]{8,}$/;
+// Password: exactly 8 digits
+const passwordRegex = /^\d{8}$/;
 
 /**
  * Schema for user signup validation
  * - Email: must be a valid email format
- * - Password: minimum 8 characters, must contain letters and numbers
+ * - Password: exactly 8 digits
  * - Name: required, max 255 characters
  * - Phone Number: required, must match phone number format
  */
 export const strongPasswordSchema = z
   .string({ message: 'Password is required' })
-  .min(8, 'Password must be at least 8 characters')
-  .regex(
-    passwordRegex,
-    'Password must contain: uppercase letter, lowercase letter, number, and special character (@$!%*?&#...)',
-  );
+  .regex(passwordRegex, 'Password must be exactly 8 digits');
 
 export const adminSetPasswordSchema = z.object({
   newPassword: strongPasswordSchema,

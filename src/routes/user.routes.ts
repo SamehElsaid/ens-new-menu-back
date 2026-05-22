@@ -54,9 +54,8 @@ router.post(
   validate([
     body("currentPassword").notEmpty(),
     body("newPassword")
-      .isLength({ min: 8 })
-      .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
-      .withMessage("Password must contain uppercase, lowercase, and number"),
+      .matches(/^\d{8}$/)
+      .withMessage("Password must be exactly 8 digits"),
   ]),
   userController.changePassword,
 );
