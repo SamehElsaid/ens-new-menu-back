@@ -3,19 +3,16 @@ import { z } from 'zod';
 // Phone number regex - يقبل أرقام الهواتف بصيغ مختلفة
 const phoneRegex = /^[\+]?[(]?[0-9]{1,4}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{1,9}$/;
 
-// Password: exactly 8 digits
-const passwordRegex = /^\d{8}$/;
-
 /**
  * Schema for user signup validation
  * - Email: must be a valid email format
- * - Password: exactly 8 digits
+ * - Password: minimum 8 characters
  * - Name: required, max 255 characters
  * - Phone Number: required, must match phone number format
  */
 export const strongPasswordSchema = z
   .string({ message: 'Password is required' })
-  .regex(passwordRegex, 'Password must be exactly 8 digits');
+  .min(8, 'Password must be at least 8 characters');
 
 export const adminSetPasswordSchema = z.object({
   newPassword: strongPasswordSchema,

@@ -54,8 +54,8 @@ router.post(
   validate([
     body("currentPassword").notEmpty(),
     body("newPassword")
-      .matches(/^\d{8}$/)
-      .withMessage("Password must be exactly 8 digits"),
+      .isLength({ min: 8 })
+      .withMessage("Password must be at least 8 characters"),
   ]),
   userController.changePassword,
 );
