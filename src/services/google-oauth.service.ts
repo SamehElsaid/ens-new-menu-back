@@ -8,6 +8,7 @@ import {
 import { RefreshTokenService } from './refreshToken.service';
 import { ROLES } from '../config/constants';
 import { sendWelcomeEmail } from './emailService';
+import { getAuthUserProfile } from './userProfile.service';
 
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
@@ -360,14 +361,10 @@ export class GoogleOAuthService {
     refreshTokenExpiry.setFullYear(refreshTokenExpiry.getFullYear() + 100);
     await RefreshTokenService.storeToken(user.userId, refreshToken, refreshTokenExpiry);
 
+    const userProfile = await getAuthUserProfile(user.userId);
+
     return {
-      user: {
-        id: user.userId,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        profileImage: user.profileImage,
-      },
+      user: userProfile,
       accessToken,
       refreshToken,
     };
