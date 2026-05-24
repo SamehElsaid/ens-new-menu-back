@@ -7,7 +7,6 @@ import {
 } from '../utils/tokenHelper';
 import { RefreshTokenService } from './refreshToken.service';
 import { ROLES } from '../config/constants';
-import { sendWelcomeEmail } from './emailService';
 
 const client = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
@@ -39,7 +38,33 @@ interface GoogleUserinfoResponse {
   error?: { message?: string };
 }
 
+export interface GoogleAuthUser {
+  userId: number;
+  email: string;
+  name: string;
+  role: string;
+  profileImage: string | null;
+  phoneNumber: string | null;
+  isPhoneVerified: boolean;
+  isNew: boolean;
+}
+
 export class GoogleOAuthService {
+  private static async getUserAuthFields(userId: number) {
+    const pool = await getPool();
+    const result = await pool.request().input('userId', sql.Int, userId).query(`
+      SELECT phoneNumber, isPhoneVerified, profileImage
+      FROM Users
+      WHERE id = @userId
+    `);
+    const row = result.recordset[0];
+    return {
+      phoneNumber: (row?.phoneNumber as string | null) ?? null,
+      isPhoneVerified: Boolean(row?.isPhoneVerified),
+      profileImage: (row?.profileImage as string | null) ?? null,
+    };
+  }
+
   /**
    * Get user info from OAuth authorization code (useGoogleLogin flow: 'auth-code')
    * Exchanges code for tokens then fetches user info.
@@ -125,7 +150,10 @@ export class GoogleOAuthService {
   /**
    * Find or create user with Google account
    */
-  static async findOrCreateGoogleUser(googleUserInfo: GoogleUserInfo, locale: 'ar' | 'en' = 'ar') {
+  static async findOrCreateGoogleUser(
+    googleUserInfo: GoogleUserInfo,
+    locale: 'ar' | 'en' = 'ar',
+  ): Promise<GoogleAuthUser> {
     const pool = await getPool();
     
     try {
@@ -177,18 +205,16 @@ export class GoogleOAuthService {
             WHERE id = @userId
           `);
 
-        // Get updated user data
-        const updatedUserResult = await pool
-          .request()
-          .input('userId', sql.Int, user.userId)
-          .query('SELECT profileImage FROM Users WHERE id = @userId');
+        const fields = await this.getUserAuthFields(user.userId);
 
         return {
           userId: user.userId,
           email: user.email,
           name: user.name,
           role: user.role,
-          profileImage: updatedUserResult.recordset[0].profileImage || user.profileImage,
+          profileImage: fields.profileImage || user.profileImage,
+          phoneNumber: fields.phoneNumber,
+          isPhoneVerified: fields.isPhoneVerified,
           isNew: false,
         };
       }
@@ -235,18 +261,16 @@ export class GoogleOAuthService {
             WHERE id = @userId
           `);
 
-        // Get updated user data
-        const updatedUserResult = await pool
-          .request()
-          .input('userId', sql.Int, userId)
-          .query('SELECT profileImage FROM Users WHERE id = @userId');
+        const fields = await this.getUserAuthFields(userId);
 
         return {
           userId: existingUser.id,
           email: existingUser.email,
           name: existingUser.name,
           role: existingUser.role,
-          profileImage: updatedUserResult.recordset[0].profileImage || existingUser.profileImage,
+          profileImage: fields.profileImage || existingUser.profileImage,
+          phoneNumber: fields.phoneNumber,
+          isPhoneVerified: fields.isPhoneVerified,
           isNew: false,
         };
       }
@@ -272,11 +296,11 @@ export class GoogleOAuthService {
           .input('profileImage', sql.NVarChar, googleUserInfo.picture || null)
           .input('isEmailVerified', sql.Bit, googleUserInfo.email_verified ? 1 : 0)
           .query(`
-            INSERT INTO Users (email, name, role, profileImage, isEmailVerified, emailVerifiedAt, password)
+            INSERT INTO Users (email, name, role, profileImage, isEmailVerified, emailVerifiedAt, isPhoneVerified, password)
             OUTPUT INSERTED.id
             VALUES (@email, @name, @role, @profileImage, @isEmailVerified, 
                     CASE WHEN @isEmailVerified = 1 THEN GETDATE() ELSE NULL END,
-                    NULL)
+                    0, NULL)
           `);
 
         const newUserId = userResult.recordset[0].id;
@@ -312,21 +336,14 @@ export class GoogleOAuthService {
       userId = result;
       isNew = true;
 
-      // Send welcome email (non-blocking)
-      try {
-        sendWelcomeEmail(googleUserInfo.email, googleUserInfo.name, locale).catch(() => {
-          logger.warn('Welcome email failed to send (non-critical)');
-        });
-      } catch (error) {
-        // Ignore email errors
-      }
-
       return {
         userId,
         email: googleUserInfo.email,
         name: googleUserInfo.name,
         role: ROLES.USER,
         profileImage: googleUserInfo.picture || null,
+        phoneNumber: null,
+        isPhoneVerified: false,
         isNew,
       };
     } catch (error) {
@@ -344,6 +361,8 @@ export class GoogleOAuthService {
     name: string;
     role: string;
     profileImage: string | null;
+    phoneNumber?: string | null;
+    isPhoneVerified?: boolean;
   }) {
     const tokenPayload = {
       id: user.userId,
@@ -367,6 +386,8 @@ export class GoogleOAuthService {
         name: user.name,
         role: user.role,
         profileImage: user.profileImage,
+        phoneNumber: user.phoneNumber ?? null,
+        isPhoneVerified: user.isPhoneVerified ?? false,
       },
       accessToken,
       refreshToken,

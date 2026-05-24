@@ -71,6 +71,19 @@ export const passwordResetLimiter = rateLimit({
   skip: (req) => process.env.NODE_ENV === "test",
 });
 
+// Phone verification limiter
+export const phoneVerificationLimiter = rateLimit({
+  windowMs: RATE_LIMITS.PHONE_VERIFICATION.windowMs,
+  max: RATE_LIMITS.PHONE_VERIFICATION.max,
+  message: {
+    error: "Too many verification codes sent, please try again later.",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) =>
+    process.env.NODE_ENV === "test" || process.env.NODE_ENV === "development",
+});
+
 // Email verification limiter
 export const emailVerificationLimiter = rateLimit({
   windowMs: RATE_LIMITS.EMAIL_VERIFICATION.windowMs,

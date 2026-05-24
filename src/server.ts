@@ -20,6 +20,7 @@ import { validateJWTSecrets } from "./utils/tokenHelper";
 import { CleanupService } from "./services/cleanup.service";
 import { ensureUploadDirectories } from "./controllers/upload.controller";
 import { ensureAppVersionSchema } from "./services/appVersionSchema.service";
+import { ensurePhoneVerificationSchema } from "./services/phoneVerificationSchema.service";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
 // Routes
 import authRoutes from "./routes/auth.routes";
@@ -165,6 +166,7 @@ async function startServer() {
       await getPool();
       logger.info("✅ Database connected successfully");
       await ensureAppVersionSchema();
+      await ensurePhoneVerificationSchema();
     } catch (dbError) {
       logger.error("❌ Database connection failed:", dbError);
     }

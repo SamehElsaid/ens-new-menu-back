@@ -58,6 +58,8 @@ export async function googleAuth(req: Request, res: Response): Promise<void> {
 
     // Generate tokens
     const authResponse = await GoogleOAuthService.generateAuthTokens(user);
+    const phoneVerificationRequired =
+      !user.phoneNumber?.trim() || !user.isPhoneVerified;
 
     // Debug: Log user data to verify profileImage is included
     logger.info('Google auth response:', {
@@ -65,11 +67,13 @@ export async function googleAuth(req: Request, res: Response): Promise<void> {
       email: user.email,
       profileImage: user.profileImage,
       isNew: user.isNew,
+      phoneVerificationRequired,
     });
 
     res.json({
       message: user.isNew ? 'Account created successfully' : 'Login successful',
       isNew: user.isNew,
+      phoneVerificationRequired,
       ...authResponse,
     });
   } catch (error: any) {

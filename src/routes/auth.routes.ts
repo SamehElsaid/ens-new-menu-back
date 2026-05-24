@@ -8,11 +8,15 @@ import {
   checkAvailabilitySchema,
   loginSchema,
   resetPasswordSchema,
+  verifyPhoneSchema,
+  resendPhoneVerificationSchema,
+  addPhoneSchema,
 } from "../validators/auth.validator";
 import {
   authLimiter,
   passwordResetLimiter,
   emailVerificationLimiter,
+  phoneVerificationLimiter,
 } from "../middleware/rateLimiter";
 import { requireAuth } from "../middleware/auth.middleware";
 import { MAX_FCM_TOKEN_LEN } from "../services/fcmPush.service";
@@ -40,6 +44,29 @@ router.post(
   authLimiter,
   validateRequest(loginSchema, "body"),
   authController.login,
+);
+
+// POST /api/auth/add-phone — save phone + send WhatsApp OTP (authenticated)
+router.post(
+  "/add-phone",
+  requireAuth,
+  validateRequest(addPhoneSchema, "body"),
+  authController.addPhone,
+);
+
+// POST /api/auth/verify-phone
+router.post(
+  "/verify-phone",
+  validateRequest(verifyPhoneSchema, "body"),
+  authController.verifyPhone,
+);
+
+// POST /api/auth/resend-phone-verification
+router.post(
+  "/resend-phone-verification",
+  phoneVerificationLimiter,
+  validateRequest(resendPhoneVerificationSchema, "body"),
+  authController.resendPhoneVerification,
 );
 
 // GET /api/auth/verify-email?token=xxx

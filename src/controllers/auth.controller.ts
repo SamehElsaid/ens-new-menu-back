@@ -7,7 +7,6 @@ import {
   generateRefreshToken,
 } from "../utils/tokenHelper";
 import {
-  sendWelcomeEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendPasswordChangedEmail,
@@ -25,6 +24,11 @@ import {
   MAX_FCM_TOKEN_LEN,
   removeUserFcmToken,
 } from "../services/fcmPush.service";
+import {
+  createAndSendPhoneVerification,
+  verifyPhoneCode,
+} from "../services/phoneVerification.service";
+import { isWawpConfigured } from "../services/wawp.service";
 
 // Check Availability (Email or Phone Number)
 export async function checkAvailability(
@@ -77,11 +81,21 @@ export async function checkAvailability(
 // Sign Up
 export async function signup(req: Request, res: Response): Promise<void> {
   try {
-    const { email, password, name, phoneNumber, locale = "ar" } = req.body;
+    const { email, password, name, businessName, phoneNumber, locale = "ar" } =
+      req.body;
+    const businessNameValue =
+      typeof businessName === "string" && businessName.trim()
+        ? businessName.trim()
+        : null;
 
     // Validate required fields
     if (!phoneNumber) {
       sendApiError(res, req, 400, ApiErrors.phoneRequired);
+      return;
+    }
+
+    if (!isWawpConfigured()) {
+      sendApiError(res, req, 500, ApiErrors.wawpNotConfigured);
       return;
     }
 
@@ -123,48 +137,54 @@ export async function signup(req: Request, res: Response): Promise<void> {
     }
     const freePlanId = freePlanResult.recordset[0].id;
 
-    // Create user with email already verified (no email confirmation required)
+    // Create user pending phone verification
+    let newUserId = 0;
     await executeTransaction(async (transaction) => {
-      // Insert user with isEmailVerified = true
       const userResult = await transaction
         .request()
         .input("email", sql.NVarChar, email.toLowerCase())
         .input("password", sql.NVarChar, hashedPassword)
         .input("name", sql.NVarChar, name)
+        .input("businessName", sql.NVarChar, businessNameValue)
         .input("phoneNumber", sql.NVarChar, phoneNumber)
         .input("role", sql.NVarChar, ROLES.USER).query(`
-          INSERT INTO Users (email, password, name, phoneNumber, role, isEmailVerified)
+          INSERT INTO Users (email, password, name, businessName, phoneNumber, role, isEmailVerified, isPhoneVerified)
           OUTPUT INSERTED.id
-          VALUES (@email, @password, @name, @phoneNumber, @role, 1)
+          VALUES (@email, @password, @name, @businessName, @phoneNumber, @role, 0, 0)
         `);
 
-      const userId = userResult.recordset[0].id;
+      newUserId = userResult.recordset[0].id;
 
-      // Create free subscription (use Free plan ID from DB)
       await transaction
         .request()
-        .input("userId", sql.Int, userId)
+        .input("userId", sql.Int, newUserId)
         .input("planId", sql.Int, freePlanId)
         .input("billingCycle", sql.NVarChar, "free").query(`
           INSERT INTO Subscriptions (userId, planId, billingCycle, status)
           VALUES (@userId, @planId, @billingCycle, 'active')
         `);
-
-      // Note: Email verification is disabled for now
-      // TODO: Re-enable email verification when email service is configured
-
-      // Optionally send welcome email (non-blocking)
-      try {
-        sendWelcomeEmail(email, name, locale as "ar" | "en").catch(() => {
-          logger.warn("Welcome email failed to send (non-critical)");
-        });
-      } catch (error) {
-        // Ignore email errors - account is created successfully
-      }
     });
 
+    const whatsappSent = await createAndSendPhoneVerification(
+      newUserId,
+      phoneNumber,
+      name,
+      locale as "ar" | "en",
+    );
+
+    if (!whatsappSent) {
+      sendApiError(res, req, 500, ApiErrors.failedResendPhoneVerification, {
+        phoneVerificationRequired: true,
+      });
+      return;
+    }
+
     res.status(201).json({
-      message: "Account created successfully! You can now login.",
+      message:
+        locale === "en"
+          ? "Account created! Check WhatsApp for your verification code."
+          : "تم إنشاء الحساب! تحقق من واتساب للحصول على رمز التحقق.",
+      phoneVerificationRequired: true,
     });
   } catch (error) {
     logger.error("Signup error:", error);
@@ -273,6 +293,21 @@ export async function login(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    // Phone verification required before login
+    if (!user.isPhoneVerified) {
+      sendApiError(
+        res,
+        req,
+        403,
+        ApiErrors.phoneVerificationRequired,
+        {
+          phoneVerificationRequired: true,
+          phoneNumber: user.phoneNumber,
+        },
+      );
+      return;
+    }
+
     // Note: Email verification check is disabled
     // TODO: Re-enable when email verification is required
     // if (!user.isEmailVerified) {
@@ -363,6 +398,180 @@ export async function login(req: Request, res: Response): Promise<void> {
   } catch (error) {
     logger.error("Login error:", error);
     sendApiError(res, req, 500, ApiErrors.failedLogin);
+  }
+}
+
+// Add Phone (authenticated — e.g. after Google sign-in)
+export async function addPhone(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    const { phoneNumber, locale = "ar" } = req.body;
+
+    if (!isWawpConfigured()) {
+      sendApiError(res, req, 500, ApiErrors.wawpNotConfigured);
+      return;
+    }
+
+    const pool = await getPool();
+
+    const userResult = await pool
+      .request()
+      .input("userId", sql.Int, userId)
+      .query(`
+        SELECT id, name, phoneNumber, isPhoneVerified
+        FROM Users
+        WHERE id = @userId
+      `);
+
+    if (userResult.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
+      return;
+    }
+
+    const user = userResult.recordset[0];
+
+    if (user.isPhoneVerified) {
+      sendApiError(res, req, 400, ApiErrors.phoneAlreadyVerified);
+      return;
+    }
+
+    const existingPhone = await pool
+      .request()
+      .input("phoneNumber", sql.NVarChar, phoneNumber)
+      .input("userId", sql.Int, userId)
+      .query(`
+        SELECT id FROM Users
+        WHERE phoneNumber = @phoneNumber AND id <> @userId
+      `);
+
+    if (existingPhone.recordset.length > 0) {
+      sendApiError(res, req, 400, ApiErrors.phoneAlreadyRegistered);
+      return;
+    }
+
+    await pool
+      .request()
+      .input("userId", sql.Int, userId)
+      .input("phoneNumber", sql.NVarChar, phoneNumber)
+      .query(`
+        UPDATE Users
+        SET phoneNumber = @phoneNumber, isPhoneVerified = 0
+        WHERE id = @userId
+      `);
+
+    const sent = await createAndSendPhoneVerification(
+      userId,
+      phoneNumber,
+      user.name,
+      locale as "ar" | "en",
+    );
+
+    if (!sent) {
+      sendApiError(res, req, 500, ApiErrors.failedResendPhoneVerification);
+      return;
+    }
+
+    res.json({
+      message:
+        locale === "en"
+          ? "Verification code sent via WhatsApp"
+          : "تم إرسال رمز التحقق عبر واتساب",
+      phoneVerificationRequired: true,
+    });
+  } catch (error) {
+    logger.error("Add phone error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedAddPhone);
+  }
+}
+
+// Verify Phone (WhatsApp OTP)
+export async function verifyPhone(req: Request, res: Response): Promise<void> {
+  try {
+    const { phoneNumber, code } = req.body;
+
+    const result = await verifyPhoneCode(phoneNumber, code);
+
+    if (result.reason === "not_found") {
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
+      return;
+    }
+
+    if (result.reason === "already_verified") {
+      sendApiError(res, req, 400, ApiErrors.phoneAlreadyVerified);
+      return;
+    }
+
+    if (result.reason === "invalid") {
+      sendApiError(res, req, 400, ApiErrors.invalidVerificationCode);
+      return;
+    }
+
+    res.json({
+      message: "Phone verified successfully",
+    });
+  } catch (error) {
+    logger.error("Phone verification error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedVerifyPhone);
+  }
+}
+
+// Resend Phone Verification (WhatsApp OTP)
+export async function resendPhoneVerification(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const { phoneNumber, locale = "ar" } = req.body;
+
+    if (!isWawpConfigured()) {
+      sendApiError(res, req, 500, ApiErrors.wawpNotConfigured);
+      return;
+    }
+
+    const pool = await getPool();
+
+    const userResult = await pool
+      .request()
+      .input("phoneNumber", sql.NVarChar, phoneNumber)
+      .query(`
+        SELECT id, name, isPhoneVerified
+        FROM Users
+        WHERE phoneNumber = @phoneNumber
+      `);
+
+    if (userResult.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
+      return;
+    }
+
+    const user = userResult.recordset[0];
+
+    if (user.isPhoneVerified) {
+      sendApiError(res, req, 400, ApiErrors.phoneAlreadyVerified);
+      return;
+    }
+
+    const sent = await createAndSendPhoneVerification(
+      user.id,
+      phoneNumber,
+      user.name,
+      locale as "ar" | "en",
+    );
+
+    if (!sent) {
+      sendApiError(res, req, 500, ApiErrors.failedResendPhoneVerification);
+      return;
+    }
+
+    res.json({
+      message:
+        locale === "en"
+          ? "Verification code sent via WhatsApp"
+          : "تم إرسال رمز التحقق عبر واتساب",
+    });
+  } catch (error) {
+    logger.error("Resend phone verification error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedResendPhoneVerification);
   }
 }
 
@@ -611,7 +820,7 @@ export async function getMe(req: Request, res: Response): Promise<void> {
         SELECT 
           u.id, u.email, u.name, u.role, u.phoneNumber, u.country, 
           u.dateOfBirth, u.gender, u.address, u.profileImage,
-          u.isEmailVerified, u.createdAt,
+          u.isEmailVerified, u.isPhoneVerified, u.createdAt,
           s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
         FROM Users u
         LEFT JOIN Subscriptions s ON u.id = s.userId 
@@ -641,6 +850,7 @@ export async function getMe(req: Request, res: Response): Promise<void> {
         address: user.address,
         profileImage: user.profileImage,
         isEmailVerified: user.isEmailVerified,
+        isPhoneVerified: Boolean(user.isPhoneVerified),
         createdAt: user.createdAt,
         planType: user.billingCycle || "free", // Add planType from billingCycle
         subscription: {

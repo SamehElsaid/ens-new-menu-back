@@ -50,10 +50,15 @@ export const RATE_LIMITS = {
     windowMs: 60 * 60 * 1000,
     max: 3,
   },
+  PHONE_VERIFICATION: {
+    windowMs: 60 * 60 * 1000,
+    max: 3,
+  },
 };
 
 export const TOKEN_EXPIRY = {
   EMAIL_VERIFICATION: 24 * 60 * 60 * 1000, // 24 hours
+  PHONE_VERIFICATION: 10 * 60 * 1000, // 10 minutes
   PASSWORD_RESET: 60 * 60 * 1000, // 1 hour
 };
 
