@@ -20,6 +20,7 @@ import { validateJWTSecrets } from "./utils/tokenHelper";
 import { CleanupService } from "./services/cleanup.service";
 import { ensureUploadDirectories } from "./controllers/upload.controller";
 import { ensureAppVersionSchema } from "./services/appVersionSchema.service";
+import { ensurePromoSchema } from "./services/promoSchema.service";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
 // Routes
 import authRoutes from "./routes/auth.routes";
@@ -35,6 +36,11 @@ import adsRoutes from "./routes/ads.routes";
 import staffAuthRoutes from "./routes/staffAuth.routes";
 import paymentRoutes from "./routes/paymentRoutes";
 import { getPublicAppVersion } from "./controllers/version.controller";
+import {
+  getPromoHandler,
+  postPromoHandler,
+} from "./controllers/promo.controller";
+import { requireAdmin } from "./middleware/auth.middleware";
 
 // ------------------------------------------------------------------
 
@@ -127,6 +133,9 @@ app.get("/health", (req, res) => {
 
 app.get("/api/public/app-version/latest", getPublicAppVersion);
 
+// Promo — GET is public (no x-api-key)
+app.get("/api/promo", getPromoHandler);
+
 // Other public routes (menus, plans, …)
 app.use("/api/public", publicRoutes);
 
@@ -147,6 +156,7 @@ app.use("/api/payment", paymentRoutes);
 app.use("/api", categoryRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
+app.post("/api/promo", requireAdmin, postPromoHandler);
 app.use("/api/upload", uploadRoutes);
 app.use("/api", adsRoutes);
 // ------------------------------------------------------------------
@@ -165,6 +175,7 @@ async function startServer() {
       await getPool();
       logger.info("✅ Database connected successfully");
       await ensureAppVersionSchema();
+      await ensurePromoSchema();
     } catch (dbError) {
       logger.error("❌ Database connection failed:", dbError);
     }
