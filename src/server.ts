@@ -21,6 +21,7 @@ import { CleanupService } from "./services/cleanup.service";
 import { ensureUploadDirectories } from "./controllers/upload.controller";
 import { ensureAppVersionSchema } from "./services/appVersionSchema.service";
 import { ensurePromoSchema } from "./services/promoSchema.service";
+import { ensureSearchInformationSchema } from "./services/searchInformationSchema.service";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
 // Routes
 import authRoutes from "./routes/auth.routes";
@@ -40,6 +41,11 @@ import {
   getPromoHandler,
   postPromoHandler,
 } from "./controllers/promo.controller";
+import {
+  deleteSearchInformationHandler,
+  getSearchInformationHandler,
+  postSearchInformationHandler,
+} from "./controllers/searchInformation.controller";
 import { requireAdmin } from "./middleware/auth.middleware";
 
 // ------------------------------------------------------------------
@@ -136,6 +142,9 @@ app.get("/api/public/app-version/latest", getPublicAppVersion);
 // Promo — GET is public (no x-api-key)
 app.get("/api/promo", getPromoHandler);
 
+// Search information — GET is public (no x-api-key)
+app.get("/api/searchInformation", getSearchInformationHandler);
+
 // Other public routes (menus, plans, …)
 app.use("/api/public", publicRoutes);
 
@@ -157,6 +166,16 @@ app.use("/api", categoryRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.post("/api/promo", requireAdmin, postPromoHandler);
+app.post(
+  "/api/searchInformation",
+  requireAdmin,
+  postSearchInformationHandler,
+);
+app.delete(
+  "/api/searchInformation",
+  requireAdmin,
+  deleteSearchInformationHandler,
+);
 app.use("/api/upload", uploadRoutes);
 app.use("/api", adsRoutes);
 // ------------------------------------------------------------------
@@ -176,6 +195,7 @@ async function startServer() {
       logger.info("✅ Database connected successfully");
       await ensureAppVersionSchema();
       await ensurePromoSchema();
+      await ensureSearchInformationSchema();
     } catch (dbError) {
       logger.error("❌ Database connection failed:", dbError);
     }
