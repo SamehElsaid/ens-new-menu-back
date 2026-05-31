@@ -33,6 +33,7 @@ import categoryRoutes from "./routes/category.routes";
 import userRoutes from "./routes/user.routes";
 import adminRoutes from "./routes/admin.routes";
 import uploadRoutes from "./routes/upload.routes";
+import structureRoutes from "./routes/structure.routes";
 import adsRoutes from "./routes/ads.routes";
 import staffAuthRoutes from "./routes/staffAuth.routes";
 import paymentRoutes from "./routes/paymentRoutes";
@@ -179,6 +180,7 @@ app.post("/api/searchInformation", requireAdmin, postSearchInformationHandler);
 app.put("/api/searchInformation/:id", requireAdmin, putSearchInformationHandler);
 app.delete("/api/searchInformation/:id", requireAdmin, deleteSearchInformationHandler);
 app.use("/api/upload", uploadRoutes);
+app.use("/api/structure", structureRoutes);
 app.use("/api", adsRoutes);
 // ------------------------------------------------------------------
 // 404 + Error handlers
