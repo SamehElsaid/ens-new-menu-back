@@ -26,6 +26,7 @@ import { startSubscriptionScheduler } from "./services/subscriptionNotificationS
 // Routes
 import authRoutes from "./routes/auth.routes";
 import googleAuthRoutes from "./routes/google-auth.routes";
+import verifykitRoutes from "./routes/verifykit.routes";
 import publicRoutes from "./routes/public.routes";
 import menuRoutes from "./routes/menu.routes";
 import menuItemsRoutes from "./routes/menuItems.routes";
@@ -160,6 +161,7 @@ app.use(decryptApiKey);
 // API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/auth", googleAuthRoutes);
+app.use("/api/verifykit", verifykitRoutes);
 app.use("/api/staff-auth", staffAuthRoutes);
 // Backward-compatible alias for clients that accidentally prefix /api twice.
 app.use("/api/api/staff-auth", staffAuthRoutes);

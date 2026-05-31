@@ -19,6 +19,7 @@ const publicRoutes = [
   "/api/auth/forgot-password",
   "/api/auth/reset-password",
   "/api/auth/refresh",
+  "/api/verifykit",
   "/api/public",
   "/api/public/app-version",
   "/api/public/app-version/latest",

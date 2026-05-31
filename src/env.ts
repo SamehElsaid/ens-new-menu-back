@@ -57,6 +57,9 @@ console.log(
   `   RESEND_API_KEY: ${process.env.RESEND_API_KEY?.trim() ? "✅ Set" : "⚠️ Not set"}`,
 );
 console.log(`   EMAIL_FROM: ${process.env.EMAIL_FROM?.trim() || "⚠️ Not set"}`);
+console.log(
+  `   VERIFYKIT_SERVER_KEY: ${process.env.VERIFYKIT_SERVER_KEY?.trim() ? "✅ Set" : "⚠️ Not set"}`,
+);
 
 // Export for potential use
 export default process.env;

@@ -758,4 +758,36 @@ export const ApiErrors = {
     en: 'Download URL is required',
     ar: 'رابط التحميل مطلوب',
   },
+  verifykitNotConfigured: {
+    en: 'Phone verification service is not configured',
+    ar: 'خدمة التحقق من رقم الجوال غير مهيأة',
+  },
+  verifykitInitFailed: {
+    en: 'Failed to load phone verification options',
+    ar: 'فشل تحميل خيارات التحقق من رقم الجوال',
+  },
+  verifykitStartFailed: {
+    en: 'Failed to start phone verification',
+    ar: 'فشل بدء التحقق من رقم الجوال',
+  },
+  verifykitCheckFailed: {
+    en: 'Failed to check phone verification status',
+    ar: 'فشل التحقق من حالة رقم الجوال',
+  },
+  verifykitCountryFailed: {
+    en: 'Failed to load country list',
+    ar: 'فشل تحميل قائمة الدول',
+  },
+  verifykitSendOtpFailed: {
+    en: 'Failed to send verification code',
+    ar: 'فشل إرسال رمز التحقق',
+  },
+  verifykitResultFailed: {
+    en: 'Failed to complete phone verification',
+    ar: 'فشل إكمال التحقق من رقم الجوال',
+  },
+  verifykitAccessTokenFailed: {
+    en: 'Failed to initialize phone verification widget',
+    ar: 'فشل تهيئة واجهة التحقق من رقم الجوال',
+  },
 } as const satisfies Record<string, BilingualMessage>;
