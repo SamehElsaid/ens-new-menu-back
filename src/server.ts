@@ -42,9 +42,11 @@ import {
   postPromoHandler,
 } from "./controllers/promo.controller";
 import {
-  deleteSearchInformationHandler,
   getSearchInformationHandler,
+  getSearchInformationByIdHandler,
   postSearchInformationHandler,
+  putSearchInformationHandler,
+  deleteSearchInformationHandler,
 } from "./controllers/searchInformation.controller";
 import { requireAdmin } from "./middleware/auth.middleware";
 
@@ -66,6 +68,7 @@ const PORT = Number(process.env.PORT) || 4021;
 // ------------------------------------------------------------------
 // ✅ Trust proxy (REQUIRED for Cloudflare & Coolify)
 app.set("trust proxy", 1);
+app.set("etag", false);
 
 // ------------------------------------------------------------------
 // Security headers
@@ -147,8 +150,9 @@ app.get("/api/public/app-version/latest", getPublicAppVersion);
 // Promo — GET is public (no x-api-key)
 app.get("/api/promo", getPromoHandler);
 
-// Search information — GET is public (no x-api-key)
+// Search information — GET list & GET by id are public (no x-api-key)
 app.get("/api/searchInformation", getSearchInformationHandler);
+app.get("/api/searchInformation/:id", getSearchInformationByIdHandler);
 
 // Other public routes (menus, plans, …)
 app.use("/api/public", publicRoutes);
@@ -171,16 +175,9 @@ app.use("/api", categoryRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.post("/api/promo", requireAdmin, postPromoHandler);
-app.post(
-  "/api/searchInformation",
-  requireAdmin,
-  postSearchInformationHandler,
-);
-app.delete(
-  "/api/searchInformation",
-  requireAdmin,
-  deleteSearchInformationHandler,
-);
+app.post("/api/searchInformation", requireAdmin, postSearchInformationHandler);
+app.put("/api/searchInformation/:id", requireAdmin, putSearchInformationHandler);
+app.delete("/api/searchInformation/:id", requireAdmin, deleteSearchInformationHandler);
 app.use("/api/upload", uploadRoutes);
 app.use("/api", adsRoutes);
 // ------------------------------------------------------------------
