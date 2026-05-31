@@ -69,7 +69,12 @@ app.set("trust proxy", 1);
 
 // ------------------------------------------------------------------
 // Security headers
-app.use(helmet());
+// Allow dashboard/menu frontends on another origin (port/host) to load /uploads in <img>, canvas, etc.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  }),
+);
 
 // ------------------------------------------------------------------
 // ✅ HTTPS FIX (Cloudflare / SSL 526 / redirect loop fix)
