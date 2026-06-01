@@ -4,6 +4,7 @@ import {
   handlePaymentCallback,
   handlePaymentRedirect,
   getPaymentStatus,
+  initiateProMonthlyPayment,
   initiateProYearlyPayment,
 } from "../controllers/paymentController";
 
@@ -41,6 +42,12 @@ router.post(
   requireAuth,
   validate(subscriptionProYearlySchema),
   initiateProYearlyPayment,
+);
+router.post(
+  "/subscription/pro-monthly/initiate",
+  requireAuth,
+  validate(subscriptionProYearlySchema),
+  initiateProMonthlyPayment,
 );
 router.post(
   "/easykash/callback",

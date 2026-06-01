@@ -1,5 +1,10 @@
 import { Request, Response } from "express";
-import { resolveProYearlyAmount } from "../config/proYearlyPricing";
+import {
+  PRO_YEARLY_CURRENCY,
+  getProFirstYearlyAmount,
+  resolveProMonthlyAmount,
+  resolveProYearlyAmount,
+} from "../config/proYearlyPricing";
 import { getPool, sql } from "../config/database";
 import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
@@ -604,18 +609,24 @@ export const getPublicPlans = async (req: Request, res: Response) => {
       const row = plan as Record<string, unknown>;
       let priceMonthly = plan.priceMonthly;
       let priceYearly = plan.priceYearly;
+      let firstYearlyPrice: number | undefined;
+      let currency: string | undefined;
       if (
         String(plan.name ?? "")
           .trim()
           .toLowerCase() === "pro"
       ) {
-        priceMonthly = 0;
+        priceMonthly = resolveProMonthlyAmount(Number(plan.priceMonthly));
         priceYearly = resolveProYearlyAmount(Number(plan.priceYearly));
+        firstYearlyPrice = getProFirstYearlyAmount(priceYearly, priceMonthly);
+        currency = PRO_YEARLY_CURRENCY;
       }
       return {
         ...row,
         priceMonthly,
         priceYearly,
+        ...(firstYearlyPrice != null ? { firstYearlyPrice } : {}),
+        ...(currency ? { currency } : {}),
         features: plan.features ? JSON.parse(String(plan.features)) : [],
       };
     });

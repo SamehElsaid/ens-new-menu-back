@@ -1,7 +1,8 @@
 import { getPool, sql } from "../config/database";
 import {
   PRO_YEARLY_CURRENCY,
-  resolveProYearlyAmount,
+  resolveProMonthlyAmount,
+  resolveProYearlyCheckoutAmount,
 } from "../config/proYearlyPricing";
 import { ApiError } from "../middleware/errorHandler";
 import * as notificationService from "./notificationService";
@@ -582,11 +583,26 @@ export class PaymentService {
     throw lastErr;
   }
 
-  /**
-   * Pro plan — annual billing: insert a `subscriptionCheckout` row, then call EasyKash (same callback path as other payments).
-   */
-  static async initiateProYearlySubscription(
+  private static async fetchActiveProPlan(pool: Awaited<ReturnType<typeof getPool>>) {
+    const planResult = await pool.request().query(`
+      SELECT TOP 1 id, name, priceMonthly, priceYearly
+      FROM Plans
+      WHERE isActive = 1 AND LOWER(LTRIM(RTRIM(name))) = N'pro'
+    `);
+    if (planResult.recordset.length === 0) {
+      throw new ApiError(404, "Pro plan not found");
+    }
+    return planResult.recordset[0] as {
+      id: number;
+      name: string;
+      priceMonthly: number;
+      priceYearly: number;
+    };
+  }
+
+  private static async initiateProSubscriptionCheckout(
     ownerUserId: number,
+    billing: "monthly" | "yearly",
     data: {
       customer_name: string;
       customer_email?: string;
@@ -600,31 +616,35 @@ export class PaymentService {
     orderId: string;
     amount: number;
     planName: string;
+    billingCycle: "monthly" | "yearly";
   }> {
     const pool = await getPool();
-    const planResult = await pool.request().query(`
-      SELECT TOP 1 id, name, priceYearly
-      FROM Plans
-      WHERE isActive = 1 AND LOWER(LTRIM(RTRIM(name))) = N'pro'
-    `);
-    if (planResult.recordset.length === 0) {
-      throw new ApiError(404, "Pro plan not found");
-    }
-    const plan = planResult.recordset[0] as {
-      id: number;
-      name: string;
-      priceYearly: number;
-    };
-    const dbYearly = Number(plan.priceYearly);
-    const price = resolveProYearlyAmount(dbYearly);
-    if (!(Number.isFinite(dbYearly) && dbYearly > 0)) {
-      console.log(
-        `💰 Pro yearly: DB priceYearly invalid (${plan.priceYearly}), using resolved amount ${price}`,
+    const plan = await this.fetchActiveProPlan(pool);
+
+    let price: number;
+    if (billing === "monthly") {
+      price = resolveProMonthlyAmount(Number(plan.priceMonthly));
+      if (!Number.isFinite(price) || price <= 0) {
+        throw new ApiError(500, "Pro monthly price is not configured");
+      }
+    } else {
+      const checkout = await resolveProYearlyCheckoutAmount(
+        pool,
+        ownerUserId,
+        Number(plan.priceYearly),
+        Number(plan.priceMonthly),
       );
+      price = checkout.amount;
+      if (!Number.isFinite(price) || price <= 0) {
+        throw new ApiError(500, "Pro yearly price is not configured");
+      }
+      if (checkout.isFirstYearly) {
+        console.log(
+          `💰 Pro yearly first-time discount: ${checkout.fullYearly} → ${price} ${PRO_YEARLY_CURRENCY}`,
+        );
+      }
     }
-    if (!Number.isFinite(price) || price <= 0) {
-      throw new ApiError(500, "Pro yearly price is not configured");
-    }
+
     const orderId = crypto.randomUUID();
     try {
       await this.insertProSubscriptionOrder(
@@ -644,9 +664,10 @@ export class PaymentService {
       );
     }
 
+    const kind = billing === "monthly" ? "pro_monthly" : "pro_yearly";
     const ref = JSON.stringify({
       orderId,
-      kind: "pro_yearly",
+      kind,
       userId: ownerUserId,
       planId: plan.id,
     });
@@ -668,7 +689,36 @@ export class PaymentService {
       orderId,
       amount: price,
       planName: String(plan.name),
+      billingCycle: billing,
     };
+  }
+
+  /** Pro plan — annual billing via EasyKash. */
+  static async initiateProYearlySubscription(
+    ownerUserId: number,
+    data: {
+      customer_name: string;
+      customer_email?: string;
+      customer_phone: string;
+      currency?: string;
+      redirectUrl?: string;
+    },
+  ) {
+    return this.initiateProSubscriptionCheckout(ownerUserId, "yearly", data);
+  }
+
+  /** Pro plan — monthly billing via EasyKash. */
+  static async initiateProMonthlySubscription(
+    ownerUserId: number,
+    data: {
+      customer_name: string;
+      customer_email?: string;
+      customer_phone: string;
+      currency?: string;
+      redirectUrl?: string;
+    },
+  ) {
+    return this.initiateProSubscriptionCheckout(ownerUserId, "monthly", data);
   }
 
   /**
@@ -705,7 +755,9 @@ export class PaymentService {
       } catch {
         return;
       }
-      if (meta.kind !== "pro_yearly" || !meta.userId || !meta.planId) {
+      const isYearly = meta.kind === "pro_yearly";
+      const isMonthly = meta.kind === "pro_monthly";
+      if ((!isYearly && !isMonthly) || !meta.userId || !meta.planId) {
         return;
       }
 
@@ -721,6 +773,7 @@ export class PaymentService {
         return;
       }
       const planName = String(planCheck.recordset[0].name);
+      const billingCycle = isMonthly ? "monthly" : "yearly";
 
       await pool.request().input("userId", sql.Int, meta.userId).query(`
         UPDATE Subscriptions
@@ -730,13 +783,17 @@ export class PaymentService {
 
       const start = new Date();
       const end = new Date(start);
-      end.setFullYear(end.getFullYear() + 1);
+      if (isMonthly) {
+        end.setMonth(end.getMonth() + 1);
+      } else {
+        end.setFullYear(end.getFullYear() + 1);
+      }
 
       await pool
         .request()
         .input("userId", sql.Int, meta.userId)
         .input("planId", sql.Int, meta.planId)
-        .input("billingCycle", sql.NVarChar(20), "yearly")
+        .input("billingCycle", sql.NVarChar(20), billingCycle)
         .input("startDate", sql.DateTime2, start)
         .input("endDate", sql.DateTime2, end)
         .input("status", sql.NVarChar(20), "active").query(`
@@ -756,7 +813,7 @@ export class PaymentService {
         }
       }
       console.log(
-        `✅ Pro yearly subscription activated for user ${meta.userId} (payment ${paymentId})`,
+        `✅ Pro ${billingCycle} subscription activated for user ${meta.userId} (payment ${paymentId})`,
       );
     } catch (err) {
       console.error("tryActivateSubscriptionForPayment:", err);

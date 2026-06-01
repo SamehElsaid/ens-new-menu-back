@@ -219,46 +219,72 @@ export const getPaymentStatus = asyncHandler(
   },
 );
 
-/**
- * Start EasyKash checkout for Pro plan — yearly billing (logged-in account owner).
- */
+async function initiateProSubscriptionPayment(
+  req: AuthRequest,
+  res: Response,
+  billing: "monthly" | "yearly",
+): Promise<void> {
+  const uid = req.user?.userId;
+  if (uid == null) {
+    throw new ApiError(401, "Authentication required");
+  }
+  const { name, email, mobile, currency, redirectUrl } = req.body;
+  const nameT = String(name ?? "").trim();
+  const mobileT = String(mobile ?? "").trim();
+  if (!nameT || !mobileT) {
+    throw new ApiError(
+      400,
+      "name and mobile are required",
+      true,
+      "الاسم والجوال مطلوبان",
+    );
+  }
+
+  const result =
+    billing === "monthly"
+      ? await PaymentService.initiateProMonthlySubscription(uid, {
+          customer_name: nameT,
+          customer_email: email ? String(email).trim() : undefined,
+          customer_phone: mobileT,
+          currency,
+          redirectUrl: redirectUrl ? String(redirectUrl).trim() : undefined,
+        })
+      : await PaymentService.initiateProYearlySubscription(uid, {
+          customer_name: nameT,
+          customer_email: email ? String(email).trim() : undefined,
+          customer_phone: mobileT,
+          currency,
+          redirectUrl: redirectUrl ? String(redirectUrl).trim() : undefined,
+        });
+
+  res.json({
+    success: true,
+    data: {
+      redirectUrl: result.paymentUrl,
+      order_id: result.orderId,
+      paymentId: result.paymentId,
+      amount: result.amount,
+      currency: PRO_YEARLY_CURRENCY,
+      billingCycle: result.billingCycle,
+      planName: result.planName,
+    },
+    message:
+      billing === "monthly"
+        ? "Pro monthly payment initiated successfully"
+        : "Pro yearly payment initiated successfully",
+  });
+}
+
+/** Start EasyKash checkout for Pro plan — yearly billing. */
 export const initiateProYearlyPayment = asyncHandler(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
-    const uid = req.user?.userId;
-    if (uid == null) {
-      throw new ApiError(401, "Authentication required");
-    }
-    const { name, email, mobile, currency, redirectUrl } = req.body;
-    const nameT = String(name ?? "").trim();
-    const mobileT = String(mobile ?? "").trim();
-    if (!nameT || !mobileT) {
-      throw new ApiError(
-        400,
-        "name and mobile are required",
-        true,
-        "الاسم والجوال مطلوبان",
-      );
-    }
+    await initiateProSubscriptionPayment(req, res, "yearly");
+  },
+);
 
-    const result = await PaymentService.initiateProYearlySubscription(uid, {
-      customer_name: nameT,
-      customer_email: email ? String(email).trim() : undefined,
-      customer_phone: mobileT,
-      currency,
-      redirectUrl: redirectUrl ? String(redirectUrl).trim() : undefined,
-    });
-
-    res.json({
-      success: true,
-      data: {
-        redirectUrl: result.paymentUrl,
-        order_id: result.orderId,
-        paymentId: result.paymentId,
-        amount: result.amount,
-        billingCycle: "yearly",
-        planName: result.planName,
-      },
-      message: "Pro yearly payment initiated successfully",
-    });
+/** Start EasyKash checkout for Pro plan — monthly billing. */
+export const initiateProMonthlyPayment = asyncHandler(
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    await initiateProSubscriptionPayment(req, res, "monthly");
   },
 );
