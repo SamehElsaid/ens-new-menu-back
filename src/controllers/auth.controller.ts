@@ -146,8 +146,8 @@ export async function signup(req: Request, res: Response): Promise<void> {
         .input("userId", sql.Int, userId)
         .input("planId", sql.Int, freePlanId)
         .input("billingCycle", sql.NVarChar, "free").query(`
-          INSERT INTO Subscriptions (userId, planId, billingCycle, status)
-          VALUES (@userId, @planId, @billingCycle, 'active')
+          INSERT INTO Subscriptions (userId, planId, billingCycle, status, paymentStatus, paidAt, amount)
+          VALUES (@userId, @planId, @billingCycle, 'active', 'completed', GETDATE(), 0)
         `);
 
       // Note: Email verification is disabled for now

@@ -25,6 +25,10 @@ const publicRoutes = [
   "/api/public/app-version/latest",
   "/api/public/version",
   "/api/public/version/latest",
+  // EasyKash return URL + webhook (secured by gateway ref / HMAC, not x-api-key)
+  "/api/payment/redirect",
+  "/api/payment/easykash/callback",
+  "/api/payment/easykash/callback/test",
 ];
 
 /**

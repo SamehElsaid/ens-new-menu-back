@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { body, query } from "express-validator";
+import { body, param, query } from "express-validator";
 import {
   getPublicMenu,
   getAllPublicMenus,
@@ -8,6 +8,8 @@ import {
   getActiveAds,
   getMenuCustomAds,
   getPublicPlans,
+  postMenuItemView,
+  postAdClick,
 } from "../controllers/public.controller";
 import {
   postAppVersion,
@@ -15,6 +17,7 @@ import {
   getPublicAppVersion,
 } from "../controllers/version.controller";
 import { postGuestStaffCall } from "../controllers/guestStaffCall.controller";
+import { postMenuBrandingEvent } from "../controllers/brandingEvent.controller";
 import { validate } from "../middleware/validation";
 import { publicLimiter } from "../middleware/rateLimiter";
 
@@ -44,6 +47,17 @@ router.use(publicLimiter);
 // GET /api/public/menus - Get all menus (no token)
 router.get("/menus", getAllPublicMenus);
 
+// POST /api/public/menus/:slug/branding-events — free-plan ENSmenu banner tracking
+router.post(
+  "/menus/:slug/branding-events",
+  validate([
+    body("type")
+      .isIn(["impression", "click"])
+      .withMessage("type must be impression or click"),
+  ]),
+  postMenuBrandingEvent,
+);
+
 // GET /api/public/menu/:slug - Get menu by slug
 router.get(
   "/menu/:slug",
@@ -68,8 +82,18 @@ router.get(
       .optional()
       .isInt({ min: 1 })
       .withMessage("tableId must be a positive integer"),
+    query("src")
+      .optional()
+      .isIn(["qr"])
+      .withMessage("src must be qr when provided"),
   ],
   getPublicMenu
+);
+
+// POST /api/public/menu/:slug/items/:itemId/view — product card click
+router.post(
+  "/menu/:slug/items/:itemId/view",
+  postMenuItemView,
 );
 
 // GET /api/public/menu/:slug/ratings - Get recent ratings
@@ -86,6 +110,15 @@ router.post(
     body("customerName").optional().isString().trim().isLength({ max: 255 }),
   ]),
   submitRating
+);
+
+// POST /api/public/ads/:id/click — track ad click (public menu)
+router.post(
+  "/ads/:id/click",
+  validate([
+    param("id").isInt({ min: 1 }).withMessage("id must be a positive integer"),
+  ]),
+  postAdClick,
 );
 
 // GET /api/public/ads - Get active global ads

@@ -303,8 +303,8 @@ export class GoogleOAuthService {
           .input('planId', sql.Int, freePlanId)
           .input('billingCycle', sql.NVarChar, 'free')
           .query(`
-            INSERT INTO Subscriptions (userId, planId, billingCycle, status)
-            VALUES (@userId, @planId, @billingCycle, 'active')
+            INSERT INTO Subscriptions (userId, planId, billingCycle, status, paymentStatus, paidAt, amount)
+            VALUES (@userId, @planId, @billingCycle, 'active', 'completed', GETDATE(), 0)
           `);
 
         return newUserId;

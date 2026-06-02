@@ -358,6 +358,26 @@ export const ApiErrors = {
     en: 'Failed to upgrade plan',
     ar: 'فشل ترقية الخطة',
   },
+  alreadyOnFreePlan: {
+    en: 'You are already on the Free plan',
+    ar: 'أنت بالفعل على الخطة المجانية',
+  },
+  noPaidSubscriptionToDowngrade: {
+    en: 'No active paid subscription to downgrade',
+    ar: 'لا يوجد اشتراك مدفوع نشط للتخفيض',
+  },
+  failedDowngradePlan: {
+    en: 'Failed to downgrade plan',
+    ar: 'فشل تخفيض الخطة',
+  },
+  pendingSubscriptionPaymentNotFound: {
+    en: 'No subscription payment found to recover',
+    ar: 'لم يُعثر على دفعة اشتراك لاستردادها',
+  },
+  failedRecoverSubscriptionPayment: {
+    en: 'Failed to recover subscription payment',
+    ar: 'فشل استرداد دفع الاشتراك',
+  },
   failedGetSubscription: {
     en: 'Failed to get subscription',
     ar: 'فشل جلب الاشتراك',

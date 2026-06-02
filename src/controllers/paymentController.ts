@@ -159,17 +159,19 @@ export const handlePaymentRedirect = asyncHandler(
         ? "cancelled"
         : payment.payment_status;
 
+    const paymentCompleted =
+      paymentStatusOut === "completed" ||
+      PaymentService.isBrowserRedirectPaid(status as string);
+
+    let subscriptionSynced = false;
     if (PaymentService.isBrowserRedirectPaid(status as string)) {
       try {
         await PaymentService.syncProYearlyFromPaymentId(payment.id);
+        subscriptionSynced = true;
       } catch (e) {
         console.error("syncProYearlyFromPaymentId (post-redirect):", e);
       }
     }
-
-    const paymentCompleted =
-      paymentStatusOut === "completed" ||
-      PaymentService.isBrowserRedirectPaid(status as string);
 
     res.json({
       success: true,
@@ -180,6 +182,7 @@ export const handlePaymentRedirect = asyncHandler(
         providerRefNum: providerRefNum || null,
         synced_from_redirect: completedFromRedirect,
         released_from_redirect: releasedFromRedirect,
+        subscription_synced: subscriptionSynced,
         ...(paymentCompleted && {
           value: Number(payment.amount),
           currency: PRO_YEARLY_CURRENCY,

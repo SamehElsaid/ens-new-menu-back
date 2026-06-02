@@ -63,8 +63,23 @@ router.post(
 // GET /api/user/statistics - Get user statistics
 router.get("/statistics", userController.getStatistics);
 
+// GET /api/user/plans - Plans with personalized Pro intro pricing
+router.get("/plans", userController.getPlans);
+
 // GET /api/user/subscription - Get user subscription
 router.get("/subscription", userController.getSubscription);
+
+// POST /api/user/subscription/recover-payment - Complete pending Pro payment & activate plan
+router.post(
+  "/subscription/recover-payment",
+  userController.recoverSubscriptionPayment,
+);
+
+// POST /api/user/subscription/downgrade-to-free - Downgrade to Free plan
+router.post(
+  "/subscription/downgrade-to-free",
+  userController.downgradeToFree,
+);
 
 // POST /api/user/upgrade-plan - Upgrade subscription plan
 router.post(

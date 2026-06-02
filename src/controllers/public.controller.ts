@@ -1,15 +1,16 @@
 import { Request, Response } from "express";
-import {
-  PRO_YEARLY_CURRENCY,
-  getProFirstYearlyAmount,
-  resolveProMonthlyAmount,
-  resolveProYearlyAmount,
-} from "../config/proYearlyPricing";
 import { getPool, sql } from "../config/database";
+import { getActivePlansForDisplay } from "../services/plans.service";
 import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
+import {
+  recordMenuItemClick,
+  parseMenuEntrySource,
+  recordMenuView,
+} from "../services/menuViewTracker.service";
+import { recordAdClick } from "../services/adTracking.service";
 
 /** Optional table from QR: `?tableNumber=` or `?table=` (max 50 chars). */
 function parsePublicMenuTableNumber(req: Request): string | null {
@@ -449,6 +450,12 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     const tables = await fetchPublicMenuTablesForMenu(pool, menu.id);
     const table = resolvePublicMenuTable(tables, { tableNumber, tableId });
 
+    const entrySource = parseMenuEntrySource(
+      req.query.src,
+      req.get("x-menu-entry-src"),
+    );
+    void recordMenuView(menu.id, { entrySource });
+
     res.json({
       success: true,
       data: {
@@ -503,6 +510,53 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       message: "Failed to fetch menu",
       error: error.message,
     });
+  }
+};
+
+/** POST /api/public/menu/:slug/items/:itemId/view — product card click (analytics). */
+export const postMenuItemView = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const slug = decodeURIComponent(String(req.params.slug ?? "")).trim();
+  const itemId = parseInt(String(req.params.itemId ?? ""), 10);
+
+  if (!slug || !Number.isFinite(itemId) || itemId <= 0) {
+    res.status(400).json({ ok: false });
+    return;
+  }
+
+  try {
+    const pool = await getPool();
+    const menuResult = await pool
+      .request()
+      .input("slug", sql.NVarChar, slug)
+      .query(`SELECT id FROM Menus WHERE slug = @slug AND isActive = 1`);
+
+    const menuId = Number(menuResult.recordset[0]?.id);
+    if (!Number.isFinite(menuId) || menuId <= 0) {
+      res.status(404).send();
+      return;
+    }
+
+    const itemResult = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("itemId", sql.Int, itemId)
+      .query(`
+        SELECT 1 AS ok FROM MenuItems
+        WHERE id = @itemId AND menuId = @menuId
+      `);
+
+    if (!itemResult.recordset.length) {
+      res.status(404).send();
+      return;
+    }
+
+    void recordMenuItemClick(menuId, itemId);
+    res.status(204).send();
+  } catch {
+    res.status(204).send();
   }
 };
 
@@ -586,51 +640,7 @@ export const submitRating = async (req: Request, res: Response) => {
 // Get all active plans for public display (landing page)
 export const getPublicPlans = async (req: Request, res: Response) => {
   try {
-    const pool = await getPool();
-
-    const result = await pool.request().query(`
-      SELECT 
-        id,
-        name,
-        description,
-        priceMonthly,
-        priceYearly,
-        maxMenus,
-        maxProductsPerMenu,
-        allowCustomDomain,
-        hasAds,
-        features
-      FROM Plans
-      WHERE isActive = 1
-      ORDER BY priceMonthly ASC
-    `);
-
-    const plans = result.recordset.map((plan) => {
-      const row = plan as Record<string, unknown>;
-      let priceMonthly = plan.priceMonthly;
-      let priceYearly = plan.priceYearly;
-      let firstYearlyPrice: number | undefined;
-      let currency: string | undefined;
-      if (
-        String(plan.name ?? "")
-          .trim()
-          .toLowerCase() === "pro"
-      ) {
-        priceMonthly = resolveProMonthlyAmount(Number(plan.priceMonthly));
-        priceYearly = resolveProYearlyAmount(Number(plan.priceYearly));
-        firstYearlyPrice = getProFirstYearlyAmount(priceYearly, priceMonthly);
-        currency = PRO_YEARLY_CURRENCY;
-      }
-      return {
-        ...row,
-        priceMonthly,
-        priceYearly,
-        ...(firstYearlyPrice != null ? { firstYearlyPrice } : {}),
-        ...(currency ? { currency } : {}),
-        features: plan.features ? JSON.parse(String(plan.features)) : [],
-      };
-    });
-
+    const plans = await getActivePlansForDisplay(null);
     res.json({
       success: true,
       plans,
@@ -867,3 +877,22 @@ export const getMenuCustomAds = async (req: Request, res: Response) => {
     });
   }
 };
+
+/** POST /api/public/ads/:id/click — track ad click from public menu */
+export async function postAdClick(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const adId = parseInt(String(req.params.id ?? ""), 10);
+  if (!Number.isFinite(adId) || adId < 1) {
+    res.status(400).json({ ok: false });
+    return;
+  }
+
+  try {
+    const recorded = await recordAdClick(adId);
+    res.status(recorded ? 204 : 404).send();
+  } catch {
+    res.status(204).send();
+  }
+}

@@ -7,6 +7,11 @@ import { SubscriptionDowngradeService } from "../services/subscriptionDowngrade.
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { adminSetPasswordSchema } from "../validators/auth.validator";
+import {
+  getAdminPermissionsMap,
+  normalizePermissionKeys,
+  saveAdminPermissions,
+} from "../services/adminPermissions.service";
 
 // Get Admin Dashboard Statistics
 export async function getAdminStats(
@@ -862,7 +867,7 @@ export async function deleteGlobalAd(
 // Create New Admin
 export async function createAdmin(req: Request, res: Response): Promise<void> {
   try {
-    const { email, password, name } = req.body;
+    const { email, password, name, permissions } = req.body;
 
     if (!email || !password || !name) {
       sendApiError(res, req, 400, ApiErrors.adminCredentialsRequired);
@@ -894,16 +899,53 @@ export async function createAdmin(req: Request, res: Response): Promise<void> {
       .input("name", sql.NVarChar, name)
       .input("role", sql.NVarChar, "admin").query(`
         INSERT INTO Users (email, password, name, role, isEmailVerified)
-        OUTPUT INSERTED.id
+        OUTPUT INSERTED.id, INSERTED.name, INSERTED.email
         VALUES (@email, @password, @name, @role, 1)
       `);
 
+    const adminId = result.recordset[0].id as number;
+    const normalizedPermissions = normalizePermissionKeys(permissions);
+    await saveAdminPermissions(adminId, normalizedPermissions);
+
     res.status(201).json({
-      message: "Admin created successfully",
-      adminId: result.recordset[0].id,
+      id: adminId,
+      name: result.recordset[0].name,
+      email: result.recordset[0].email,
+      permissions: normalizedPermissions,
     });
   } catch (error) {
     logger.error("Create admin error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedCreateAdmin);
+  }
+}
+
+export async function patchAdminPermissions(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const adminId = Number(req.params.id);
+    if (!Number.isFinite(adminId)) {
+      sendApiError(res, req, 400, ApiErrors.adminNotFound);
+      return;
+    }
+
+    const pool = await getPool();
+    const userResult = await pool.request().input("userId", sql.Int, adminId).query(`
+      SELECT id FROM Users WHERE id = @userId AND role = 'admin'
+    `);
+
+    if (!userResult.recordset.length) {
+      sendApiError(res, req, 404, ApiErrors.adminNotFound);
+      return;
+    }
+
+    const normalized = normalizePermissionKeys(req.body?.permissions);
+    await saveAdminPermissions(adminId, normalized);
+
+    res.json({ id: adminId, permissions: normalized });
+  } catch (error) {
+    logger.error("Patch admin permissions error:", error);
     sendApiError(res, req, 500, ApiErrors.failedCreateAdmin);
   }
 }
@@ -936,7 +978,8 @@ export async function deleteAdmin(req: Request, res: Response): Promise<void> {
     }
 
     await pool.request().input("userId", sql.Int, id).query(`
-      DELETE FROM Users WHERE id = @userId
+      DELETE FROM AdminPermissions WHERE adminUserId = @userId;
+      DELETE FROM Users WHERE id = @userId;
     `);
 
     res.json({ message: "Administrator deleted successfully" });
@@ -1011,8 +1054,19 @@ export async function getAllAdmins(req: Request, res: Response): Promise<void> {
       pool.request().query(statsQuery),
     ]);
 
+    const adminIds = adminsResult.recordset.map(
+      (a: { id: number }) => a.id as number,
+    );
+    const permissionsMap = await getAdminPermissionsMap(adminIds);
+
+    const admins = adminsResult.recordset.map((a: { id: number }) => ({
+      ...a,
+      permissions:
+        a.id in permissionsMap ? permissionsMap[a.id] : null,
+    }));
+
     res.json({
-      admins: adminsResult.recordset,
+      admins,
       pagination: {
         currentPage: Number(page),
         totalPages: Math.ceil(countResult.recordset[0].total / Number(limit)),
@@ -1149,9 +1203,15 @@ export async function updateUserSubscription(
       .input("startDate", sql.DateTime2, subscriptionStartDate)
       .input("endDate", sql.DateTime2, subscriptionEndDate)
       .input("status", sql.NVarChar, status).query(`
-        INSERT INTO Subscriptions (userId, planId, billingCycle, startDate, endDate, status, notificationSent)
+        INSERT INTO Subscriptions (
+          userId, planId, billingCycle, startDate, endDate, status,
+          notificationSent, paymentStatus, paidAt, amount
+        )
         OUTPUT INSERTED.id
-        VALUES (@userId, @planId, @billingCycle, @startDate, @endDate, @status, 1)
+        VALUES (
+          @userId, @planId, @billingCycle, @startDate, @endDate, @status,
+          1, 'completed', GETDATE(), 0
+        )
       `);
 
     const planName = planResult.recordset[0].name;

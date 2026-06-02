@@ -80,6 +80,28 @@ export async function verifyMenuAccessForSocket(
   return r.recordset.length > 0;
 }
 
+/** Throws if the user does not own the menu (staff cannot access owner analytics). */
+export async function assertMenuOwnerAccess(
+  menuId: number,
+  userId: number,
+  role: string,
+): Promise<void> {
+  if (role === ROLES.STAFF) {
+    throw new Error("Forbidden");
+  }
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input("menuId", sql.Int, menuId)
+    .input("userId", sql.Int, userId)
+    .query(
+      "SELECT 1 AS x FROM Menus WHERE id = @menuId AND userId = @userId",
+    );
+  if (!r.recordset.length) {
+    throw new Error("Forbidden");
+  }
+}
+
 /** Owner account `Users.id` for a menu (internal server use, e.g. FCM to dashboard owner). */
 export async function getMenuOwnerUserId(menuId: number): Promise<number | null> {
   if (!Number.isFinite(menuId) || menuId <= 0) return null;

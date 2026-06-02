@@ -1,7 +1,7 @@
 import { getPool, sql } from "../config/database";
 import {
   PRO_YEARLY_CURRENCY,
-  resolveProMonthlyAmount,
+  resolveProMonthlyCheckoutAmount,
   resolveProYearlyCheckoutAmount,
 } from "../config/proYearlyPricing";
 import { ApiError } from "../middleware/errorHandler";
@@ -240,7 +240,19 @@ export class PaymentService {
         `);
 
       if (!payUp.rowsAffected[0]) {
+        const existingPay = await trx
+          .request()
+          .input("paymentId", sql.UniqueIdentifier, paymentId)
+          .query(`
+            SELECT payment_status FROM payments WHERE id = @paymentId
+          `);
+        const existingStatus = String(
+          existingPay.recordset[0]?.payment_status ?? "",
+        ).toLowerCase();
         await trx.rollback();
+        if (existingStatus === "completed") {
+          await this.tryActivateSubscriptionForPayment(paymentId);
+        }
         return;
       }
 
@@ -623,9 +635,19 @@ export class PaymentService {
 
     let price: number;
     if (billing === "monthly") {
-      price = resolveProMonthlyAmount(Number(plan.priceMonthly));
+      const checkout = await resolveProMonthlyCheckoutAmount(
+        pool,
+        ownerUserId,
+        Number(plan.priceMonthly),
+      );
+      price = checkout.amount;
       if (!Number.isFinite(price) || price <= 0) {
         throw new ApiError(500, "Pro monthly price is not configured");
+      }
+      if (checkout.isFirstMonthly) {
+        console.log(
+          `💰 Pro monthly first-month offer: ${checkout.fullMonthly} → ${price} ${PRO_YEARLY_CURRENCY}`,
+        );
       }
     } else {
       const checkout = await resolveProYearlyCheckoutAmount(
@@ -736,7 +758,10 @@ export class PaymentService {
       const row = await pool
         .request()
         .input("id", sql.UniqueIdentifier, paymentId)
-        .query(`SELECT customer_reference FROM payments WHERE id = @id`);
+        .query(`
+          SELECT customer_reference, amount, updated_at, created_at
+          FROM payments WHERE id = @id
+        `);
       if (row.recordset.length === 0) {
         return;
       }
@@ -775,6 +800,34 @@ export class PaymentService {
       const planName = String(planCheck.recordset[0].name);
       const billingCycle = isMonthly ? "monthly" : "yearly";
 
+      const paidAmount = Number(row.recordset[0].amount ?? 0);
+      const paidAt =
+        row.recordset[0].updated_at ?? row.recordset[0].created_at ?? new Date();
+
+      const existingSub = await pool
+        .request()
+        .input("userId", sql.Int, meta.userId)
+        .input("planId", sql.Int, meta.planId)
+        .input("billingCycle", sql.NVarChar(20), billingCycle)
+        .input("paidAt", sql.DateTime2, paidAt)
+        .input("amount", sql.Decimal(12, 2), paidAmount).query(`
+          SELECT TOP 1 id
+          FROM Subscriptions
+          WHERE userId = @userId
+            AND planId = @planId
+            AND LOWER(LTRIM(RTRIM(ISNULL(billingCycle, '')))) = LOWER(@billingCycle)
+            AND LOWER(LTRIM(RTRIM(ISNULL(paymentStatus, '')))) = N'completed'
+            AND ABS(DATEDIFF(minute, ISNULL(paidAt, startDate), @paidAt)) <= 180
+            AND ABS(ISNULL(amount, 0) - @amount) <= 0.01
+        `);
+
+      if (existingSub.recordset.length > 0) {
+        console.log(
+          `ℹ️ Subscription already active for payment ${paymentId} (user ${meta.userId})`,
+        );
+        return;
+      }
+
       await pool.request().input("userId", sql.Int, meta.userId).query(`
         UPDATE Subscriptions
         SET status = 'expired', endDate = GETDATE()
@@ -796,9 +849,18 @@ export class PaymentService {
         .input("billingCycle", sql.NVarChar(20), billingCycle)
         .input("startDate", sql.DateTime2, start)
         .input("endDate", sql.DateTime2, end)
-        .input("status", sql.NVarChar(20), "active").query(`
-          INSERT INTO Subscriptions (userId, planId, billingCycle, startDate, endDate, status, notificationSent)
-          VALUES (@userId, @planId, @billingCycle, @startDate, @endDate, @status, 1)
+        .input("status", sql.NVarChar(20), "active")
+        .input("paymentStatus", sql.NVarChar(50), "completed")
+        .input("paidAt", sql.DateTime2, paidAt)
+        .input("amount", sql.Decimal(12, 2), paidAmount).query(`
+          INSERT INTO Subscriptions (
+            userId, planId, billingCycle, startDate, endDate, status,
+            notificationSent, paymentStatus, paidAt, amount
+          )
+          VALUES (
+            @userId, @planId, @billingCycle, @startDate, @endDate, @status,
+            1, @paymentStatus, @paidAt, @amount
+          )
         `);
 
       if (!/^free$/i.test(planName)) {

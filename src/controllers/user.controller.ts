@@ -10,6 +10,9 @@ import { getImageUrl } from "../utils/urlHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { MAX_FCM_TOKEN_LEN, addUserFcmToken, clearUserFcmTokens } from "../services/fcmPush.service";
+import { SubscriptionDowngradeService } from "../services/subscriptionDowngrade.service";
+import { PaymentService } from "../services/paymentService";
+import { getActivePlansForDisplay } from "../services/plans.service";
 
 // Get user profile
 export async function getProfile(req: Request, res: Response): Promise<void> {
@@ -354,6 +357,18 @@ export async function upgradePlan(req: Request, res: Response): Promise<void> {
   }
 }
 
+// Get active plans with personalized Pro intro pricing for logged-in user
+export async function getPlans(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    const plans = await getActivePlansForDisplay(userId);
+    res.json({ success: true, plans });
+  } catch (error) {
+    logger.error("Get user plans error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedGetPlans);
+  }
+}
+
 // Get user subscription
 export async function getSubscription(
   req: Request,
@@ -415,6 +430,159 @@ export async function getSubscription(
   } catch (error) {
     logger.error("Get subscription error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetSubscription);
+  }
+}
+
+// Recover subscription after EasyKash payment when redirect/webhook missed (user already paid)
+export async function recoverSubscriptionPayment(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    const orderId =
+      typeof req.body?.orderId === "string" ? req.body.orderId.trim() : "";
+
+    const pool = await getPool();
+    const request = pool.request().input("userId", sql.Int, userId);
+
+    let orderFilter = "";
+    if (orderId) {
+      request.input("orderId", sql.UniqueIdentifier, orderId);
+      orderFilter = "AND p.order_id = @orderId";
+    }
+
+    const payResult = await request.query(`
+        SELECT TOP 1
+          p.id, p.order_id, p.payment_method, p.payment_status, p.payment_provider, p.easykash_ref
+        FROM payments p
+        INNER JOIN [subscriptionCheckout] o ON p.order_id = o.id
+        WHERE o.user_id = @userId
+          AND p.payment_method = N'easykash'
+          AND (
+            p.customer_reference LIKE N'%"kind":"pro_monthly"%'
+            OR p.customer_reference LIKE N'%"kind":"pro_yearly"%'
+          )
+          ${orderFilter}
+        ORDER BY p.created_at DESC
+      `);
+
+    if (payResult.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.pendingSubscriptionPaymentNotFound);
+      return;
+    }
+
+    const payment = payResult.recordset[0] as {
+      id: string;
+      order_id: string;
+      payment_method: string;
+      payment_status: string;
+      easykash_ref?: string | null;
+    };
+
+    if (payment.payment_status === "pending") {
+      await PaymentService.maybeCompleteEasykashFromRedirect(
+        payment,
+        "PAID",
+        payment.easykash_ref ?? undefined,
+      );
+    }
+
+    await PaymentService.syncProYearlyFromPaymentId(payment.id);
+
+    res.json({
+      message: "Subscription recovery attempted",
+      orderId: payment.order_id,
+    });
+  } catch (error) {
+    logger.error("Recover subscription payment error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedRecoverSubscriptionPayment);
+  }
+}
+
+// Downgrade active paid subscription to Free (self-service)
+export async function downgradeToFree(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    const pool = await getPool();
+
+    const activeSubResult = await pool.request().input("userId", sql.Int, userId).query(`
+        SELECT TOP 1
+          s.id, s.planId, p.name AS planName, p.priceMonthly
+        FROM Subscriptions s
+        JOIN Plans p ON s.planId = p.id
+        WHERE s.userId = @userId
+          AND s.status = 'active'
+          AND (s.endDate IS NULL OR s.endDate > GETDATE())
+        ORDER BY s.id DESC
+      `);
+
+    if (activeSubResult.recordset.length === 0) {
+      sendApiError(res, req, 400, ApiErrors.noPaidSubscriptionToDowngrade);
+      return;
+    }
+
+    const activeSub = activeSubResult.recordset[0];
+    const planName = String(activeSub.planName ?? "").toLowerCase();
+    const priceMonthly = Number(activeSub.priceMonthly ?? 0);
+
+    if (planName === "free" || priceMonthly === 0) {
+      sendApiError(res, req, 400, ApiErrors.alreadyOnFreePlan);
+      return;
+    }
+
+    const freePlanResult = await pool.request().query(`
+        SELECT TOP 1 id, name, maxMenus
+        FROM Plans
+        WHERE LOWER(name) = 'free' OR priceMonthly = 0
+        ORDER BY CASE WHEN LOWER(name) = 'free' THEN 0 ELSE 1 END, id ASC
+      `);
+
+    if (freePlanResult.recordset.length === 0) {
+      sendApiError(res, req, 500, ApiErrors.planNotFound);
+      return;
+    }
+
+    const freePlan = freePlanResult.recordset[0];
+
+    await pool.request().input("userId", sql.Int, userId).query(`
+        UPDATE Subscriptions
+        SET status = 'expired', endDate = GETDATE()
+        WHERE userId = @userId AND status = 'active'
+      `);
+
+    const insertResult = await pool
+      .request()
+      .input("userId", sql.Int, userId)
+      .input("planId", sql.Int, freePlan.id)
+      .query(`
+        INSERT INTO Subscriptions (
+          userId, planId, billingCycle, startDate, endDate, status,
+          notificationSent, paymentStatus, paidAt, amount
+        )
+        OUTPUT INSERTED.id
+        VALUES (
+          @userId, @planId, 'free', GETDATE(), NULL, 'active',
+          1, 'completed', GETDATE(), 0
+        )
+      `);
+
+    try {
+      await SubscriptionDowngradeService.handleDowngradeToFree(userId);
+      logger.info(`User ${userId} downgraded to free plan (subscription limits applied)`);
+    } catch (error) {
+      logger.error(`Failed to apply free plan limits after downgrade for user ${userId}:`, error);
+      // Subscription row already updated — do not fail the request
+    }
+
+    res.json({
+      message: "Downgraded to Free plan successfully",
+      subscriptionId: insertResult.recordset[0]?.id,
+      planName: freePlan.name,
+    });
+  } catch (error) {
+    logger.error("Downgrade to free error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedDowngradePlan);
   }
 }
 

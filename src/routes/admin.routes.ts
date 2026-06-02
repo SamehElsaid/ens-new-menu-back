@@ -20,9 +20,18 @@ import {
   updateUserSubscription,
   getPlansForSubscription,
   applyFreePlanLimits,
+  patchAdminPermissions,
 } from '../controllers/admin.controller';
 import { requireAdmin } from '../middleware/auth.middleware';
 import { createAdminAppVersion } from '../controllers/version.controller';
+import { getAdminAnalytics } from '../controllers/adminAnalytics.controller';
+import { getAdminPayments } from '../controllers/adminPayments.controller';
+import {
+  getFollowUpQueue,
+  getFollowUpCalls,
+  postFollowUpCall,
+  getFollowUpReport,
+} from '../controllers/adminFollowUp.controller';
 
 const router = Router();
 
@@ -31,6 +40,14 @@ router.use(requireAdmin);
 
 // Dashboard Stats
 router.get('/stats', getAdminStats);
+router.get('/analytics', getAdminAnalytics);
+router.get('/payments', getAdminPayments);
+
+// Customer follow-ups
+router.get('/follow-ups/queue', getFollowUpQueue);
+router.get('/follow-ups/calls', getFollowUpCalls);
+router.post('/follow-ups/calls', postFollowUpCall);
+router.get('/follow-ups/report', getFollowUpReport);
 
 // Users Management
 router.get('/users', getAllUsers);
@@ -57,6 +74,7 @@ router.get('/ads/:id/analytics', getAdAnalytics);
 // Admin Management
 router.get('/admins', getAllAdmins);
 router.post('/admins', createAdmin);
+router.patch('/admins/:id/permissions', patchAdminPermissions);
 router.delete('/admins/:id', deleteAdmin);
 
 // App version — POST only (GET is public: /api/public/app-version)

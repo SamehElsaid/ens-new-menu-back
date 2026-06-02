@@ -2,6 +2,7 @@ import { Router } from "express";
 import { body, query, param } from "express-validator";
 import * as menuController from "../controllers/menu.controller";
 import * as menuActivityLogController from "../controllers/menuActivityLog.controller";
+import { getMenuAnalytics } from "../controllers/menuAnalytics.controller";
 import { ALLOWED_MENU_THEMES } from "../constants/menuThemes";
 import { validate } from "../middleware/validation";
 import { requireAuth } from "../middleware/auth.middleware";
@@ -48,6 +49,16 @@ router.post(
       .isIn([...ALLOWED_MENU_THEMES]),
   ]),
   menuController.createMenu,
+);
+
+// GET /api/menus/:menuId/analytics — Pro menu analytics (owner)
+router.get(
+  "/:menuId/analytics",
+  validate([
+    param("menuId").isInt(),
+    query("period").optional().isIn(["7d", "30d", "90d"]),
+  ]),
+  getMenuAnalytics,
 );
 
 // GET /api/menus/:menuId/activity-logs/:id — single activity log entry

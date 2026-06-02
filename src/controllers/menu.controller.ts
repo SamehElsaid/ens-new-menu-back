@@ -263,6 +263,18 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
 
     const stats = statsResult.recordset[0];
 
+    const viewsResult = await pool
+      .request()
+      .input("menuId", sql.Int, menuIdNum)
+      .query(`
+        SELECT
+          ISNULL(viewCount, 0) AS viewCount,
+          ISNULL(qrScanCount, 0) AS qrScanCount
+        FROM Menus WHERE id = @menuId
+      `);
+    const menuViews = Number(viewsResult.recordset[0]?.viewCount ?? 0);
+    const menuQrScans = Number(viewsResult.recordset[0]?.qrScanCount ?? 0);
+
     const ownerUserId = menu.userId as number;
     const freeUser = await isUserOnFreePlan(ownerUserId);
 
@@ -277,7 +289,8 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
         tablesCount: 0,
         menuStaff: [],
         menuTables: [],
-        views: 0,
+        views: menuViews,
+        qrScans: menuQrScans,
       });
       return;
     }
@@ -308,7 +321,8 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       menuTables: (tablesResult.recordset as Record<string, unknown>[]).map(
         (row) => normalizeMenuTableRow(row),
       ),
-      views: 0,
+      views: menuViews,
+      qrScans: menuQrScans,
     });
   } catch (error) {
     logger.error("Get menu by ID error:", error);

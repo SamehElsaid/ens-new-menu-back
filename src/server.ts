@@ -22,6 +22,7 @@ import { ensureUploadDirectories } from "./controllers/upload.controller";
 import { ensureAppVersionSchema } from "./services/appVersionSchema.service";
 import { ensurePromoSchema } from "./services/promoSchema.service";
 import { ensureSearchInformationSchema } from "./services/searchInformationSchema.service";
+import { ensureAnalyticsSchema } from "./services/analyticsSchema.service";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
 // Routes
 import authRoutes from "./routes/auth.routes";
@@ -202,6 +203,7 @@ async function startServer() {
       await ensureAppVersionSchema();
       await ensurePromoSchema();
       await ensureSearchInformationSchema();
+      await ensureAnalyticsSchema();
     } catch (dbError) {
       logger.error("❌ Database connection failed:", dbError);
     }
