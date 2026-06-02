@@ -31,12 +31,12 @@ function sendVerifyKitResponse(
   res.status(status).json(body);
 }
 
-export async function startWhatsAppOtp(
+export async function startWhatsAppDeeplink(
   req: Request,
   res: Response,
 ): Promise<void> {
   try {
-    const result = await VerifyKitService.startWhatsAppOtp(
+    const result = await VerifyKitService.startWhatsAppDeeplink(
       getClientIp(req),
       req.body,
     );
@@ -46,16 +46,15 @@ export async function startWhatsAppOtp(
   }
 }
 
-export async function checkWhatsAppOtp(
+export async function checkValidation(
   req: Request,
   res: Response,
 ): Promise<void> {
   try {
-    const { reference, code } = req.body;
-    const result = await VerifyKitService.checkWhatsAppOtp(
+    const { reference } = req.body;
+    const result = await VerifyKitService.checkValidation(
       getClientIp(req),
       reference,
-      code,
     );
     sendVerifyKitResponse(res, result.status, result.body);
   } catch (error) {

@@ -1,14 +1,14 @@
 import { z } from "zod";
 
-/** WhatsApp OTP — phone number required; app is always "whatsapp" on the server. */
-export const verifykitWhatsAppStartSchema = z.object({
-  phoneNumber: z.string().trim().min(5).max(20),
+/** WhatsApp deeplink — no phoneNumber; server uses app "whatsapp" + deeplink. */
+export const verifykitStartSchema = z.object({
   lang: z.enum(["en", "ar", "tr", "ru"]).optional(),
+  deeplink: z.boolean().optional(),
+  qrCode: z.boolean().optional(),
 });
 
-export const verifykitCheckWhatsAppSchema = z.object({
+export const verifykitCheckSchema = z.object({
   reference: z.string().trim().min(1, "reference is required"),
-  code: z.string().trim().min(4).max(10),
 });
 
 export const verifykitSessionSchema = z.object({

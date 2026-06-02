@@ -3,30 +3,30 @@ import * as verifykitController from "../controllers/verifykit.controller";
 import { validateRequest } from "../middleware/zodValidation";
 import { authLimiter } from "../middleware/rateLimiter";
 import {
-  verifykitCheckWhatsAppSchema,
+  verifykitCheckSchema,
   verifykitSessionSchema,
-  verifykitWhatsAppStartSchema,
+  verifykitStartSchema,
 } from "../validators/verifykit.validator";
 
 const router = Router();
 
 router.use(authLimiter);
 
-// POST /api/verifykit/start — send WhatsApp OTP to phoneNumber
+// POST /api/verifykit/start — WhatsApp deeplink (reference + deeplink / qrCode)
 router.post(
   "/start",
-  validateRequest(verifykitWhatsAppStartSchema, "body"),
-  verifykitController.startWhatsAppOtp,
+  validateRequest(verifykitStartSchema, "body"),
+  verifykitController.startWhatsAppDeeplink,
 );
 
-// POST /api/verifykit/check-whatsapp — verify OTP code
+// POST /api/verifykit/check — poll after user sends WhatsApp message
 router.post(
-  "/check-whatsapp",
-  validateRequest(verifykitCheckWhatsAppSchema, "body"),
-  verifykitController.checkWhatsAppOtp,
+  "/check",
+  validateRequest(verifykitCheckSchema, "body"),
+  verifykitController.checkValidation,
 );
 
-// POST /api/verifykit/result — fetch verified phone number by sessionId
+// POST /api/verifykit/result — verified phone number from sessionId
 router.post(
   "/result",
   validateRequest(verifykitSessionSchema, "body"),
