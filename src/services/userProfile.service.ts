@@ -4,7 +4,7 @@ const AUTH_USER_PROFILE_QUERY = `
   SELECT 
     u.id, u.email, u.name, u.role, u.phoneNumber, u.country,
     u.dateOfBirth, u.gender, u.address, u.profileImage,
-    u.isEmailVerified, u.createdAt,
+    u.isEmailVerified, u.isPhoneVerified, u.phoneVerifiedAt, u.createdAt,
     s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
   FROM Users u
   LEFT JOIN Subscriptions s ON u.id = s.userId
@@ -26,6 +26,8 @@ export function formatAuthUserProfile(profile: {
   address: string | null;
   profileImage: string | null;
   isEmailVerified: boolean;
+  isPhoneVerified?: boolean | number | null;
+  phoneVerifiedAt?: Date | null;
   createdAt: Date;
   planId?: number | null;
   billingCycle?: string | null;
@@ -47,6 +49,8 @@ export function formatAuthUserProfile(profile: {
     address: profile.address,
     profileImage: profile.profileImage,
     isEmailVerified: profile.isEmailVerified,
+    isPhoneVerified: Boolean(profile.isPhoneVerified),
+    phoneVerifiedAt: profile.phoneVerifiedAt ?? null,
     createdAt: profile.createdAt,
     planType,
     subscription: {

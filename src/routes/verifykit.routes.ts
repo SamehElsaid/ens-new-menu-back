@@ -2,6 +2,7 @@ import { Router } from "express";
 import * as verifykitController from "../controllers/verifykit.controller";
 import { validateRequest } from "../middleware/zodValidation";
 import { authLimiter } from "../middleware/rateLimiter";
+import { requireAuth } from "../middleware/auth.middleware";
 import {
   verifykitCheckSchema,
   verifykitSessionSchema,
@@ -31,6 +32,14 @@ router.post(
   "/result",
   validateRequest(verifykitSessionSchema, "body"),
   verifykitController.getResult,
+);
+
+// POST /api/verifykit/complete — save phone + isPhoneVerified (requires login)
+router.post(
+  "/complete",
+  requireAuth,
+  validateRequest(verifykitSessionSchema, "body"),
+  verifykitController.completePhoneVerification,
 );
 
 export default router;

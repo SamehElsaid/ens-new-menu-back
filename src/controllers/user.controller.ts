@@ -24,7 +24,7 @@ export async function getProfile(req: Request, res: Response): Promise<void> {
     const result = await pool.request().input("userId", sql.Int, userId).query(`
         SELECT 
           id, email, name, phoneNumber, country, dateOfBirth, gender, address,
-          role, isEmailVerified, createdAt, profileImage,
+          role, isEmailVerified, isPhoneVerified, phoneVerifiedAt, createdAt, profileImage,
           CAST(
             CASE
               WHEN NULLIF(LTRIM(RTRIM(ISNULL(fcmToken, N''))), N'') IS NOT NULL
@@ -180,7 +180,7 @@ export async function updateProfile(
       .query(`
         SELECT 
           id, email, name, phoneNumber, country, dateOfBirth, gender, address,
-          role, isEmailVerified, createdAt, profileImage,
+          role, isEmailVerified, isPhoneVerified, phoneVerifiedAt, createdAt, profileImage,
           CAST(
             CASE
               WHEN NULLIF(LTRIM(RTRIM(ISNULL(fcmToken, N''))), N'') IS NOT NULL

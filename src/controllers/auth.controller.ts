@@ -299,7 +299,7 @@ export async function login(req: Request, res: Response): Promise<void> {
         SELECT 
           u.id, u.email, u.name, u.role, u.phoneNumber, u.country,
           u.dateOfBirth, u.gender, u.address, u.profileImage,
-          u.isEmailVerified, u.createdAt,
+          u.isEmailVerified, u.isPhoneVerified, u.phoneVerifiedAt, u.createdAt,
           s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
         FROM Users u
         LEFT JOIN Subscriptions s ON u.id = s.userId
@@ -353,6 +353,8 @@ export async function login(req: Request, res: Response): Promise<void> {
         address: profile.address,
         profileImage: profile.profileImage,
         isEmailVerified: profile.isEmailVerified,
+        isPhoneVerified: Boolean(profile.isPhoneVerified),
+        phoneVerifiedAt: profile.phoneVerifiedAt ?? null,
         createdAt: profile.createdAt,
         planType,
         subscription,
@@ -611,7 +613,7 @@ export async function getMe(req: Request, res: Response): Promise<void> {
         SELECT 
           u.id, u.email, u.name, u.role, u.phoneNumber, u.country, 
           u.dateOfBirth, u.gender, u.address, u.profileImage,
-          u.isEmailVerified, u.createdAt,
+          u.isEmailVerified, u.isPhoneVerified, u.phoneVerifiedAt, u.createdAt,
           s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
         FROM Users u
         LEFT JOIN Subscriptions s ON u.id = s.userId 
@@ -641,6 +643,8 @@ export async function getMe(req: Request, res: Response): Promise<void> {
         address: user.address,
         profileImage: user.profileImage,
         isEmailVerified: user.isEmailVerified,
+        isPhoneVerified: Boolean(user.isPhoneVerified),
+        phoneVerifiedAt: user.phoneVerifiedAt ?? null,
         createdAt: user.createdAt,
         planType: user.billingCycle || "free", // Add planType from billingCycle
         subscription: {

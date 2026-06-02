@@ -21,6 +21,7 @@ import { CleanupService } from "./services/cleanup.service";
 import { ensureUploadDirectories } from "./controllers/upload.controller";
 import { ensureAppVersionSchema } from "./services/appVersionSchema.service";
 import { ensurePromoSchema } from "./services/promoSchema.service";
+import { ensurePhoneVerifiedSchema } from "./services/verifykitUser.service";
 import { ensureSearchInformationSchema } from "./services/searchInformationSchema.service";
 import { ensureAnalyticsSchema } from "./services/analyticsSchema.service";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
@@ -202,6 +203,7 @@ async function startServer() {
       logger.info("✅ Database connected successfully");
       await ensureAppVersionSchema();
       await ensurePromoSchema();
+      await ensurePhoneVerifiedSchema();
       await ensureSearchInformationSchema();
       await ensureAnalyticsSchema();
     } catch (dbError) {
