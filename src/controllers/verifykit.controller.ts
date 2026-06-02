@@ -65,10 +65,20 @@ export async function checkValidation(
 export async function getResult(req: Request, res: Response): Promise<void> {
   try {
     const { sessionId } = req.body;
+    const clientIp = getClientIp(req);
     const result = await VerifyKitService.getValidationResult(
-      getClientIp(req),
+      clientIp,
       sessionId,
     );
+
+    console.log("[VerifyKit] POST /v1.0/result", {
+      sessionId,
+      clientIp,
+      httpStatus: result.status,
+      meta: result.body.meta,
+      result: result.body.result,
+    });
+
     sendVerifyKitResponse(res, result.status, result.body);
   } catch (error) {
     handleVerifyKitError(res, req, error, ApiErrors.verifykitResultFailed);
