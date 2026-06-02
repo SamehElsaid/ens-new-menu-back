@@ -1,4 +1,5 @@
 import { getPool, sql } from '../config/database';
+import { ensurePhoneVerifiedSchema } from './verifykitUser.service';
 
 const AUTH_USER_PROFILE_QUERY = `
   SELECT 
@@ -64,6 +65,8 @@ export function formatAuthUserProfile(profile: {
 }
 
 export async function getAuthUserProfile(userId: number) {
+  await ensurePhoneVerifiedSchema();
+
   const pool = await getPool();
   const profileResult = await pool
     .request()

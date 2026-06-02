@@ -43,9 +43,16 @@ export async function getProfile(req: Request, res: Response): Promise<void> {
 
     const row = result.recordset[0] as Record<string, unknown> & {
       hasFcmToken?: unknown;
+      isPhoneVerified?: boolean | number | null;
+      phoneVerifiedAt?: Date | null;
     };
     res.json({
-      user: { ...row, hasFcmToken: Boolean(row.hasFcmToken) },
+      user: {
+        ...row,
+        hasFcmToken: Boolean(row.hasFcmToken),
+        isPhoneVerified: Boolean(row.isPhoneVerified),
+        phoneVerifiedAt: row.phoneVerifiedAt ?? null,
+      },
     });
   } catch (error) {
     logger.error("Get profile error:", error);
@@ -194,11 +201,18 @@ export async function updateProfile(
 
     const updated = userResult.recordset[0] as Record<string, unknown> & {
       hasFcmToken?: unknown;
+      isPhoneVerified?: boolean | number | null;
+      phoneVerifiedAt?: Date | null;
     };
 
     res.json({
       message: "Profile updated successfully",
-      user: { ...updated, hasFcmToken: Boolean(updated.hasFcmToken) },
+      user: {
+        ...updated,
+        hasFcmToken: Boolean(updated.hasFcmToken),
+        isPhoneVerified: Boolean(updated.isPhoneVerified),
+        phoneVerifiedAt: updated.phoneVerifiedAt ?? null,
+      },
     });
   } catch (error) {
     logger.error("Update profile error:", error);

@@ -20,6 +20,7 @@ import { RefreshTokenService } from "../services/refreshToken.service";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { getAuthUserProfile } from "../services/userProfile.service";
 import {
   getUserFcmTokens,
   MAX_FCM_TOKEN_LEN,
@@ -606,57 +607,13 @@ export async function resetPassword(
 export async function getMe(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
-    const pool = await getPool();
-
-    const userResult = await pool.request().input("userId", sql.Int, userId)
-      .query(`
-        SELECT 
-          u.id, u.email, u.name, u.role, u.phoneNumber, u.country, 
-          u.dateOfBirth, u.gender, u.address, u.profileImage,
-          u.isEmailVerified, u.isPhoneVerified, u.phoneVerifiedAt, u.createdAt,
-          s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
-        FROM Users u
-        LEFT JOIN Subscriptions s ON u.id = s.userId 
-          AND s.status = 'active' 
-          AND (s.endDate IS NULL OR s.endDate > GETDATE())
-        LEFT JOIN Plans p ON s.planId = p.id
-        WHERE u.id = @userId
-      `);
-
-    if (userResult.recordset.length === 0) {
+    const user = await getAuthUserProfile(userId);
+    res.json({ user });
+  } catch (error) {
+    if (error instanceof Error && error.message === "User not found") {
       sendApiError(res, req, 404, ApiErrors.userNotFound);
       return;
     }
-
-    const user = userResult.recordset[0];
-
-    res.json({
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        phoneNumber: user.phoneNumber,
-        country: user.country,
-        dateOfBirth: user.dateOfBirth,
-        gender: user.gender,
-        address: user.address,
-        profileImage: user.profileImage,
-        isEmailVerified: user.isEmailVerified,
-        isPhoneVerified: Boolean(user.isPhoneVerified),
-        phoneVerifiedAt: user.phoneVerifiedAt ?? null,
-        createdAt: user.createdAt,
-        planType: user.billingCycle || "free", // Add planType from billingCycle
-        subscription: {
-          planId: user.planId,
-          planName: user.planName,
-          billingCycle: user.billingCycle,
-          maxMenus: user.maxMenus,
-          maxProductsPerMenu: user.maxProductsPerMenu,
-        },
-      },
-    });
-  } catch (error) {
     logger.error("Get me error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetUserData);
   }
