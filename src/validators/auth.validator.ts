@@ -18,7 +18,15 @@ export const adminSetPasswordSchema = z.object({
   newPassword: strongPasswordSchema,
 });
 
-export const signupSchema = z.object({
+const optionalRestaurantNameSchema = z
+  .string()
+  .trim()
+  .max(255, 'Restaurant name is too long')
+  .optional()
+  .transform((val) => (val && val.length > 0 ? val : undefined));
+
+export const signupSchema = z
+  .object({
   email: z
     .string({ message: 'Email is required' })
     .email('Invalid email format')
@@ -40,18 +48,19 @@ export const signupSchema = z.object({
     .min(8, 'Phone number is too short')
     .max(50, 'Phone number is too long'),
 
-  restaurantName: z
-    .string()
-    .trim()
-    .max(255, 'Restaurant name is too long')
-    .optional()
-    .transform((val) => (val && val.length > 0 ? val : undefined)),
+  restaurantName: optionalRestaurantNameSchema,
+  /** Legacy typo from RegisterForm — mapped to restaurantName below */
+  resturantName: optionalRestaurantNameSchema,
   
   locale: z
     .enum(['ar', 'en'])
     .optional()
     .default('ar'),
-});
+})
+  .transform(({ resturantName, restaurantName, ...rest }) => ({
+    ...rest,
+    restaurantName: restaurantName ?? resturantName,
+  }));
 
 /**
  * Schema for email/phone availability check
@@ -94,7 +103,7 @@ export const loginSchema = z.object({
  */
 export const resetPasswordSchema = z.object({
   token: z.string({ message: 'Token is required' }).trim().min(1, 'Token is required'),
-  newPassword: signupSchema.shape.password,
+  newPassword: strongPasswordSchema,
   locale: z.enum(['ar', 'en']).optional().default('ar'),
 });
 
