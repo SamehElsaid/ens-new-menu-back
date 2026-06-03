@@ -132,6 +132,65 @@ export async function getAdminStats(
   }
 }
 
+const USER_LIST_SUBSCRIPTION_JOIN = `
+  LEFT JOIN Subscriptions s ON u.id = s.userId
+    AND s.status = 'active'
+    AND (s.endDate IS NULL OR s.endDate > GETDATE())
+  LEFT JOIN Plans p ON s.planId = p.id`;
+
+const USER_FREE_PLAN_SQL = `(
+  p.name IS NULL
+  OR LOWER(ISNULL(p.name, '')) LIKE '%free%'
+  OR p.name = N'مجاني'
+  OR LOWER(ISNULL(p.name, '')) LIKE '%trial%'
+  OR ISNULL(p.priceMonthly, 0) = 0
+)`;
+
+const USER_PRO_PLAN_SQL = `(
+  p.name IS NOT NULL
+  AND LOWER(p.name) NOT LIKE '%free%'
+  AND p.name <> N'مجاني'
+  AND LOWER(p.name) NOT LIKE '%trial%'
+  AND ISNULL(p.priceMonthly, 0) > 0
+)`;
+
+function applyUserListFilter(
+  filter: string,
+  whereConditions: string[],
+): void {
+  switch (filter) {
+    case "active":
+      whereConditions.push("u.isSuspended = 0");
+      break;
+    case "suspended":
+      whereConditions.push("u.isSuspended = 1");
+      break;
+    case "trial":
+      whereConditions.push(
+        `(s.id IS NOT NULL AND ISNULL(p.priceMonthly, 0) = 0)`,
+      );
+      break;
+    case "free":
+      whereConditions.push(USER_FREE_PLAN_SQL);
+      break;
+    case "pro":
+      whereConditions.push(USER_PRO_PLAN_SQL);
+      break;
+    case "no-menu":
+      whereConditions.push(
+        "(SELECT COUNT(*) FROM Menus m WHERE m.userId = u.id) = 0",
+      );
+      break;
+    case "inactive":
+      whereConditions.push(
+        "(u.lastLoginAt IS NULL OR u.lastLoginAt < DATEADD(day, -30, GETDATE()))",
+      );
+      break;
+    default:
+      break;
+  }
+}
+
 // Get All Users with filters and pagination
 export async function getAllUsers(req: Request, res: Response): Promise<void> {
   try {
@@ -139,17 +198,25 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
       page = 1,
       limit = 10,
       search = "",
-      status = "all", // all, active, suspended
-      plan = "all", // all, free, monthly, yearly
+      status = "all", // all, active, suspended (legacy)
+      plan = "all", // all, free, monthly, yearly (legacy)
+      filter: filterQuery,
       sortBy = "createdAt",
       sortOrder = "DESC",
     } = req.query;
+
+    const filter =
+      filterQuery && String(filterQuery) !== "all"
+        ? String(filterQuery)
+        : status !== "all"
+          ? String(status)
+          : "all";
 
     const pool = await getPool();
     const offset = (Number(page) - 1) * Number(limit);
 
     let whereConditions = ["u.role = 'user'"];
-    const inputs: any = {
+    const inputs: Record<string, string | number> = {
       limit: Number(limit),
       offset: offset,
     };
@@ -161,16 +228,18 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
       inputs.search = String(search);
     }
 
-    if (status === "suspended") {
+    if (filter !== "all") {
+      applyUserListFilter(filter, whereConditions);
+    } else if (status === "suspended") {
       whereConditions.push("u.isSuspended = 1");
     } else if (status === "active") {
       whereConditions.push("u.isSuspended = 0");
     }
 
     let joinPlanFilter = "";
-    if (plan !== "all") {
+    if (filter === "all" && plan !== "all") {
       joinPlanFilter = `AND p.name = @planName`;
-      inputs.planName = plan;
+      inputs.planName = String(plan);
     }
 
     const whereClause = whereConditions.join(" AND ");
@@ -184,10 +253,7 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
         s.startDate, s.endDate, s.billingCycle,
         (SELECT COUNT(*) FROM Menus WHERE userId = u.id) as menusCount
       FROM Users u
-      LEFT JOIN Subscriptions s ON u.id = s.userId 
-        AND s.status = 'active' 
-        AND (s.endDate IS NULL OR s.endDate > GETDATE())
-      LEFT JOIN Plans p ON s.planId = p.id ${joinPlanFilter}
+      ${USER_LIST_SUBSCRIPTION_JOIN} ${joinPlanFilter}
       WHERE ${whereClause}
       ORDER BY u.${sortBy} ${sortOrder}
       OFFSET @offset ROWS
@@ -195,12 +261,9 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
     `;
 
     const countQuery = `
-      SELECT COUNT(*) as total
+      SELECT COUNT(DISTINCT u.id) as total
       FROM Users u
-      LEFT JOIN Subscriptions s ON u.id = s.userId 
-        AND s.status = 'active' 
-        AND (s.endDate IS NULL OR s.endDate > GETDATE())
-      LEFT JOIN Plans p ON s.planId = p.id ${joinPlanFilter}
+      ${USER_LIST_SUBSCRIPTION_JOIN} ${joinPlanFilter}
       WHERE ${whereClause}
     `;
 
@@ -209,7 +272,7 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
       request.input(key, inputs[key]);
     });
 
-    // Get statistics (always get total stats, regardless of filters)
+    // Get statistics (always get total stats, regardless of list filters)
     const statsQuery = `
       SELECT 
         COUNT(*) as totalUsers,
@@ -219,11 +282,33 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
       WHERE u.role = 'user'
     `;
 
-    const [usersResult, countResult, statsResult] = await Promise.all([
-      request.query(query),
-      request.query(countQuery),
-      pool.request().query(statsQuery),
-    ]);
+    const noMenuStatsQuery = `
+      SELECT COUNT(*) as usersWithoutMenu
+      FROM Users u
+      WHERE u.role = 'user'
+        AND NOT EXISTS (SELECT 1 FROM Menus m WHERE m.userId = u.id)
+    `;
+
+    const planStatsQuery = `
+      SELECT
+        COUNT(DISTINCT CASE WHEN ${USER_FREE_PLAN_SQL} THEN u.id END) as freeUsers,
+        COUNT(DISTINCT CASE WHEN ${USER_PRO_PLAN_SQL} THEN u.id END) as proUsers
+      FROM Users u
+      ${USER_LIST_SUBSCRIPTION_JOIN}
+      WHERE u.role = 'user'
+    `;
+
+    const [usersResult, countResult, statsResult, noMenuStatsResult, planStatsResult] =
+      await Promise.all([
+        request.query(query),
+        request.query(countQuery),
+        pool.request().query(statsQuery),
+        pool.request().query(noMenuStatsQuery),
+        pool.request().query(planStatsQuery),
+      ]);
+
+    const statsRow = statsResult.recordset[0];
+    const planStatsRow = planStatsResult.recordset[0];
 
     res.json({
       users: usersResult.recordset,
@@ -234,9 +319,12 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
         itemsPerPage: Number(limit),
       },
       stats: {
-        totalUsers: statsResult.recordset[0].totalUsers,
-        activeUsers: statsResult.recordset[0].activeUsers,
-        suspendedUsers: statsResult.recordset[0].suspendedUsers,
+        totalUsers: statsRow.totalUsers,
+        activeUsers: statsRow.activeUsers,
+        suspendedUsers: statsRow.suspendedUsers,
+        freeUsers: planStatsRow.freeUsers ?? 0,
+        proUsers: planStatsRow.proUsers ?? 0,
+        usersWithoutMenu: noMenuStatsResult.recordset[0]?.usersWithoutMenu ?? 0,
       },
     });
   } catch (error) {
