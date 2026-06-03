@@ -7,6 +7,7 @@ const AUTH_USER_PROFILE_QUERY = `
     u.id, u.email, u.name, u.restaurantName, u.role, u.phoneNumber, u.country,
     u.dateOfBirth, u.gender, u.address, u.profileImage,
     u.isEmailVerified, u.isPhoneVerified, u.phoneVerifiedAt, u.createdAt,
+    u.isSuspended, u.suspendedReason,
     s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
   FROM Users u
   LEFT JOIN Subscriptions s ON u.id = s.userId
@@ -32,6 +33,8 @@ export function formatAuthUserProfile(profile: {
   isPhoneVerified?: boolean | number | null;
   phoneVerifiedAt?: Date | null;
   createdAt: Date;
+  isSuspended?: boolean | number | null;
+  suspendedReason?: string | null;
   planId?: number | null;
   billingCycle?: string | null;
   planName?: string | null;
@@ -56,6 +59,8 @@ export function formatAuthUserProfile(profile: {
     isPhoneVerified: Boolean(profile.isPhoneVerified),
     phoneVerifiedAt: profile.phoneVerifiedAt ?? null,
     createdAt: profile.createdAt,
+    isSuspended: Boolean(profile.isSuspended),
+    note: profile.suspendedReason ?? null,
     planType,
     subscription: {
       planId: profile.planId ?? null,
