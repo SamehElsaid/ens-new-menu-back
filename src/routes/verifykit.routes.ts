@@ -1,7 +1,6 @@
 import { Router } from "express";
 import * as verifykitController from "../controllers/verifykit.controller";
 import { validateRequest } from "../middleware/zodValidation";
-import { authLimiter } from "../middleware/rateLimiter";
 import {
   optionalAuth,
   requireAuth,
@@ -13,8 +12,6 @@ import {
 } from "../validators/verifykit.validator";
 
 const router = Router();
-
-router.use(authLimiter);
 
 // POST /api/verifykit/start — WhatsApp deeplink (reference + deeplink / qrCode)
 router.post(
