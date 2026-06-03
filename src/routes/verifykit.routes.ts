@@ -2,7 +2,10 @@ import { Router } from "express";
 import * as verifykitController from "../controllers/verifykit.controller";
 import { validateRequest } from "../middleware/zodValidation";
 import { authLimiter } from "../middleware/rateLimiter";
-import { requireAuth } from "../middleware/auth.middleware";
+import {
+  optionalAuth,
+  requireAuth,
+} from "../middleware/auth.middleware";
 import {
   verifykitCheckSchema,
   verifykitSessionSchema,
@@ -23,6 +26,7 @@ router.post(
 // POST /api/verifykit/check — poll after user sends WhatsApp message
 router.post(
   "/check",
+  optionalAuth,
   validateRequest(verifykitCheckSchema, "body"),
   verifykitController.checkValidation,
 );
@@ -30,6 +34,7 @@ router.post(
 // POST /api/verifykit/result — verified phone number from sessionId
 router.post(
   "/result",
+  optionalAuth,
   validateRequest(verifykitSessionSchema, "body"),
   verifykitController.getResult,
 );

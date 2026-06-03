@@ -25,12 +25,63 @@ function handleVerifyKitError(
   sendApiError(res, req, 500, fallback);
 }
 
+type VerifyKitApiResponse = VerifyKitResponseBody & {
+  user?: Awaited<ReturnType<typeof getAuthUserProfile>>;
+};
+
 function sendVerifyKitResponse(
   res: Response,
   status: number,
-  body: VerifyKitResponseBody,
+  body: VerifyKitApiResponse,
 ): void {
   res.status(status).json(body);
+}
+
+function extractSessionId(body: VerifyKitResponseBody): string | null {
+  const sessionId = body.result?.sessionId;
+  return typeof sessionId === "string" && sessionId.trim().length > 0
+    ? sessionId.trim()
+    : null;
+}
+
+function isCheckValidationSuccessful(body: VerifyKitResponseBody): boolean {
+  const status = body.result?.validationStatus;
+  return status === true || status === 1 || status === "true";
+}
+
+async function persistVerifiedPhoneForUser(
+  userId: number,
+  clientIp: string,
+  sessionId: string,
+): Promise<Awaited<ReturnType<typeof getAuthUserProfile>> | null> {
+  const vk = await VerifyKitService.getValidationResult(clientIp, sessionId);
+
+  if (vk.status < 200 || vk.status >= 300) {
+    logger.warn("VerifyKit result failed during phone persist", {
+      userId,
+      sessionId,
+      httpStatus: vk.status,
+      errorCode: vk.body.meta?.errorCode,
+    });
+    return null;
+  }
+
+  const phoneNumber =
+    typeof vk.body.result?.phoneNumber === "string"
+      ? vk.body.result.phoneNumber.trim()
+      : "";
+  if (!phoneNumber) {
+    logger.warn("VerifyKit result missing phoneNumber", { userId, sessionId });
+    return null;
+  }
+
+  const countryCode =
+    typeof vk.body.result?.countryCode === "string"
+      ? vk.body.result.countryCode
+      : null;
+
+  await markUserPhoneVerified(userId, phoneNumber, countryCode);
+  return getAuthUserProfile(userId);
 }
 
 export async function startWhatsAppDeeplink(
@@ -54,11 +105,31 @@ export async function checkValidation(
 ): Promise<void> {
   try {
     const { reference } = req.body;
-    const result = await VerifyKitService.checkValidation(
-      getClientIp(req),
-      reference,
-    );
-    sendVerifyKitResponse(res, result.status, result.body);
+    const clientIp = getClientIp(req);
+    const result = await VerifyKitService.checkValidation(clientIp, reference);
+
+    const responseBody: VerifyKitApiResponse = { ...result.body };
+
+    if (
+      req.user &&
+      result.status >= 200 &&
+      result.status < 300 &&
+      isCheckValidationSuccessful(result.body)
+    ) {
+      const sessionId = extractSessionId(result.body);
+      if (sessionId) {
+        const user = await persistVerifiedPhoneForUser(
+          req.user.userId,
+          clientIp,
+          sessionId,
+        );
+        if (user) {
+          responseBody.user = user;
+        }
+      }
+    }
+
+    sendVerifyKitResponse(res, result.status, responseBody);
   } catch (error) {
     handleVerifyKitError(res, req, error, ApiErrors.verifykitCheckFailed);
   }
@@ -81,7 +152,20 @@ export async function getResult(req: Request, res: Response): Promise<void> {
       result: result.body.result,
     });
 
-    sendVerifyKitResponse(res, result.status, result.body);
+    const responseBody: VerifyKitApiResponse = { ...result.body };
+
+    if (req.user && result.status >= 200 && result.status < 300) {
+      const user = await persistVerifiedPhoneForUser(
+        req.user.userId,
+        clientIp,
+        sessionId,
+      );
+      if (user) {
+        responseBody.user = user;
+      }
+    }
+
+    sendVerifyKitResponse(res, result.status, responseBody);
   } catch (error) {
     handleVerifyKitError(res, req, error, ApiErrors.verifykitResultFailed);
   }
@@ -97,44 +181,26 @@ export async function completePhoneVerification(
     const { sessionId } = req.body;
     const clientIp = getClientIp(req);
 
-    const vk = await VerifyKitService.getValidationResult(clientIp, sessionId);
-
-    console.log("[VerifyKit] complete → /v1.0/result", {
+    console.log("[VerifyKit] complete → persist", {
       userId,
       sessionId,
       clientIp,
-      httpStatus: vk.status,
-      meta: vk.body.meta,
-      result: vk.body.result,
     });
 
-    if (vk.status < 200 || vk.status >= 300) {
-      sendVerifyKitResponse(res, vk.status, vk.body);
-      return;
-    }
+    const user = await persistVerifiedPhoneForUser(
+      userId,
+      clientIp,
+      sessionId,
+    );
 
-    const phoneNumber =
-      typeof vk.body.result?.phoneNumber === "string"
-        ? vk.body.result.phoneNumber.trim()
-        : "";
-    if (!phoneNumber) {
+    if (!user) {
       sendApiError(res, req, 400, ApiErrors.verifykitResultFailed);
       return;
     }
 
-    const countryCode =
-      typeof vk.body.result?.countryCode === "string"
-        ? vk.body.result.countryCode
-        : null;
-
-    await markUserPhoneVerified(userId, phoneNumber, countryCode);
-
-    const user = await getAuthUserProfile(userId);
-
     res.json({
       message: "Phone verified successfully",
       user,
-      verifyKit: vk.body.result,
     });
   } catch (error) {
     handleVerifyKitError(res, req, error, ApiErrors.verifykitResultFailed);

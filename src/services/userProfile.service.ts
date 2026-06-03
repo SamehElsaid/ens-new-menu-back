@@ -1,9 +1,10 @@
 import { getPool, sql } from '../config/database';
 import { ensurePhoneVerifiedSchema } from './verifykitUser.service';
+import { ensureRestaurantNameSchema } from './userSchema.service';
 
 const AUTH_USER_PROFILE_QUERY = `
   SELECT 
-    u.id, u.email, u.name, u.role, u.phoneNumber, u.country,
+    u.id, u.email, u.name, u.restaurantName, u.role, u.phoneNumber, u.country,
     u.dateOfBirth, u.gender, u.address, u.profileImage,
     u.isEmailVerified, u.isPhoneVerified, u.phoneVerifiedAt, u.createdAt,
     s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
@@ -19,6 +20,7 @@ export function formatAuthUserProfile(profile: {
   id: number;
   email: string;
   name: string;
+  restaurantName: string | null;
   role: string;
   phoneNumber: string | null;
   country: string | null;
@@ -42,6 +44,7 @@ export function formatAuthUserProfile(profile: {
     id: profile.id,
     email: profile.email,
     name: profile.name,
+    restaurantName: profile.restaurantName ?? null,
     role: profile.role,
     phoneNumber: profile.phoneNumber,
     country: profile.country,
@@ -66,6 +69,7 @@ export function formatAuthUserProfile(profile: {
 
 export async function getAuthUserProfile(userId: number) {
   await ensurePhoneVerifiedSchema();
+  await ensureRestaurantNameSchema();
 
   const pool = await getPool();
   const profileResult = await pool

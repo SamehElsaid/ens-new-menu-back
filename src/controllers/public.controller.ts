@@ -154,13 +154,17 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           mt.name,
           mt.description,
           mt.locale,
-          s.billingCycle as ownerPlanType
+          CASE
+            WHEN p.id IS NULL OR ISNULL(p.priceMonthly, 0) = 0 OR LOWER(p.name) = 'free' THEN 'free'
+            ELSE LOWER(p.name)
+          END as ownerPlanType
         FROM Menus m
         LEFT JOIN MenuTranslations mt ON m.id = mt.menuId AND mt.locale = @locale
         LEFT JOIN Users u ON m.userId = u.id
         LEFT JOIN Subscriptions s ON u.id = s.userId 
           AND s.status = 'active' 
           AND (s.endDate IS NULL OR s.endDate > GETDATE())
+        LEFT JOIN Plans p ON s.planId = p.id
         WHERE m.slug = @slug
       `);
 
@@ -406,7 +410,6 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         ? customizationsResult.recordset[0]
         : null;
 
-    // Get menu ads based on owner's plan type
     const planType =
       menu.ownerPlanType && menu.ownerPlanType !== "free" ? "paid" : "free";
     let ads: any[] = [];
@@ -449,12 +452,6 @@ export const getPublicMenu = async (req: Request, res: Response) => {
 
     const tables = await fetchPublicMenuTablesForMenu(pool, menu.id);
     const table = resolvePublicMenuTable(tables, { tableNumber, tableId });
-
-    const entrySource = parseMenuEntrySource(
-      req.query.src,
-      req.get("x-menu-entry-src"),
-    );
-    void recordMenuView(menu.id, { entrySource });
 
     res.json({
       success: true,
@@ -510,6 +507,42 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       message: "Failed to fetch menu",
       error: error.message,
     });
+  }
+};
+
+/** GET /api/public/menu/:slug/view — page view (+1 qr scan when ?qr or ?src=qr). */
+export const getMenuView = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const slug = decodeURIComponent(String(req.params.slug ?? "")).trim();
+  if (!slug) {
+    res.status(400).json({ ok: false });
+    return;
+  }
+
+  try {
+    const pool = await getPool();
+    const menuResult = await pool
+      .request()
+      .input("slug", sql.NVarChar, slug)
+      .query(`SELECT id FROM Menus WHERE slug = @slug AND isActive = 1`);
+
+    const menuId = Number(menuResult.recordset[0]?.id);
+    if (!Number.isFinite(menuId) || menuId <= 0) {
+      res.status(404).send();
+      return;
+    }
+
+    const entrySource = parseMenuEntrySource(
+      req.query.src,
+      req.get("x-menu-entry-src"),
+      req.query.qr,
+    );
+    void recordMenuView(menuId, { entrySource });
+    res.status(204).send();
+  } catch {
+    res.status(204).send();
   }
 };
 

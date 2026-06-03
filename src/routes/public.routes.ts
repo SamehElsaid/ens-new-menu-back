@@ -8,6 +8,7 @@ import {
   getActiveAds,
   getMenuCustomAds,
   getPublicPlans,
+  getMenuView,
   postMenuItemView,
   postAdClick,
 } from "../controllers/public.controller";
@@ -88,6 +89,19 @@ router.get(
       .withMessage("src must be qr when provided"),
   ],
   getPublicMenu
+);
+
+// GET /api/public/menu/:slug/view — page view (+1 qr scan when ?qr or ?src=qr)
+router.get(
+  "/menu/:slug/view",
+  [
+    query("src")
+      .optional()
+      .isIn(["qr"])
+      .withMessage("src must be qr when provided"),
+    query("qr").optional(),
+  ],
+  getMenuView,
 );
 
 // POST /api/public/menu/:slug/items/:itemId/view — product card click

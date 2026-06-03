@@ -30,6 +30,13 @@ router.put(
   optionalMultipartProfile,
   validate([
     body("name").optional().notEmpty().trim().isLength({ max: 255 }),
+    body("restaurantName")
+      .optional({ values: "null" })
+      .custom((value) => {
+        if (value === null || value === undefined) return true;
+        if (typeof value !== "string") return false;
+        return value.trim().length <= 255;
+      }),
     body("phone").optional().isString().trim().isLength({ max: 50 }),
     body("phoneNumber").optional().isString().trim().isLength({ max: 50 }),
     body("country").optional().isString().trim().isLength({ max: 100 }),

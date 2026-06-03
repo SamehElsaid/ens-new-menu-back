@@ -39,6 +39,13 @@ export const signupSchema = z.object({
     .regex(phoneRegex, 'Invalid phone number format')
     .min(8, 'Phone number is too short')
     .max(50, 'Phone number is too long'),
+
+  restaurantName: z
+    .string()
+    .trim()
+    .max(255, 'Restaurant name is too long')
+    .optional()
+    .transform((val) => (val && val.length > 0 ? val : undefined)),
   
   locale: z
     .enum(['ar', 'en'])

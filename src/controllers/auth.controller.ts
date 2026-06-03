@@ -21,6 +21,7 @@ import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { getAuthUserProfile } from "../services/userProfile.service";
+import { ensureRestaurantNameSchema } from "../services/userSchema.service";
 import {
   getUserFcmTokens,
   MAX_FCM_TOKEN_LEN,
@@ -78,7 +79,8 @@ export async function checkAvailability(
 // Sign Up
 export async function signup(req: Request, res: Response): Promise<void> {
   try {
-    const { email, password, name, phoneNumber, locale = "ar" } = req.body;
+    const { email, password, name, phoneNumber, restaurantName, locale = "ar" } =
+      req.body;
 
     // Validate required fields
     if (!phoneNumber) {
@@ -86,6 +88,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    await ensureRestaurantNameSchema();
     const pool = await getPool();
 
     // Check if email exists
@@ -133,10 +136,11 @@ export async function signup(req: Request, res: Response): Promise<void> {
         .input("password", sql.NVarChar, hashedPassword)
         .input("name", sql.NVarChar, name)
         .input("phoneNumber", sql.NVarChar, phoneNumber)
+        .input("restaurantName", sql.NVarChar, restaurantName ?? null)
         .input("role", sql.NVarChar, ROLES.USER).query(`
-          INSERT INTO Users (email, password, name, phoneNumber, role, isEmailVerified)
+          INSERT INTO Users (email, password, name, phoneNumber, restaurantName, role, isEmailVerified)
           OUTPUT INSERTED.id
-          VALUES (@email, @password, @name, @phoneNumber, @role, 1)
+          VALUES (@email, @password, @name, @phoneNumber, @restaurantName, @role, 1)
         `);
 
       const userId = userResult.recordset[0].id;
@@ -298,7 +302,7 @@ export async function login(req: Request, res: Response): Promise<void> {
     const profileResult = await pool.request().input("userId", sql.Int, user.id)
       .query(`
         SELECT 
-          u.id, u.email, u.name, u.role, u.phoneNumber, u.country,
+          u.id, u.email, u.name, u.restaurantName, u.role, u.phoneNumber, u.country,
           u.dateOfBirth, u.gender, u.address, u.profileImage,
           u.isEmailVerified, u.isPhoneVerified, u.phoneVerifiedAt, u.createdAt,
           s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
@@ -346,6 +350,7 @@ export async function login(req: Request, res: Response): Promise<void> {
         id: profile.id,
         email: profile.email,
         name: profile.name,
+        restaurantName: profile.restaurantName ?? null,
         role: profile.role,
         phoneNumber: profile.phoneNumber,
         country: profile.country,

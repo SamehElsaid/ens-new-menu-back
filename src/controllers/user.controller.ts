@@ -13,17 +13,19 @@ import { MAX_FCM_TOKEN_LEN, addUserFcmToken, clearUserFcmTokens } from "../servi
 import { SubscriptionDowngradeService } from "../services/subscriptionDowngrade.service";
 import { PaymentService } from "../services/paymentService";
 import { getActivePlansForDisplay } from "../services/plans.service";
+import { ensureRestaurantNameSchema } from "../services/userSchema.service";
 
 // Get user profile
 export async function getProfile(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
 
+    await ensureRestaurantNameSchema();
     const pool = await getPool();
 
     const result = await pool.request().input("userId", sql.Int, userId).query(`
         SELECT 
-          id, email, name, phoneNumber, country, dateOfBirth, gender, address,
+          id, email, name, restaurantName, phoneNumber, country, dateOfBirth, gender, address,
           role, isEmailVerified, isPhoneVerified, phoneVerifiedAt, createdAt, profileImage,
           CAST(
             CASE
@@ -69,6 +71,7 @@ export async function updateProfile(
     const userId = req.user!.userId;
     const {
       name,
+      restaurantName,
       phone,
       phoneNumber,
       country,
@@ -78,6 +81,8 @@ export async function updateProfile(
       profileImage: profileImageBody,
       fcmToken: fcmTokenBody,
     } = req.body;
+
+    await ensureRestaurantNameSchema();
 
     // If client sent multipart with a file, save it and get URL (same as /api/upload type=profile-images)
     let profileImageUrl: string | null = null;
@@ -107,6 +112,17 @@ export async function updateProfile(
     if (name !== undefined) {
       updates.push("name = @name");
       request.input("name", sql.NVarChar, name);
+    }
+
+    if (restaurantName !== undefined) {
+      updates.push("restaurantName = @restaurantName");
+      const trimmed =
+        typeof restaurantName === "string" ? restaurantName.trim() : "";
+      request.input(
+        "restaurantName",
+        sql.NVarChar,
+        trimmed.length > 0 ? trimmed : null,
+      );
     }
 
     // Accept both 'phone' and 'phoneNumber' for compatibility
@@ -186,7 +202,7 @@ export async function updateProfile(
     const userResult = await pool.request().input("userId", sql.Int, userId)
       .query(`
         SELECT 
-          id, email, name, phoneNumber, country, dateOfBirth, gender, address,
+          id, email, name, restaurantName, phoneNumber, country, dateOfBirth, gender, address,
           role, isEmailVerified, isPhoneVerified, phoneVerifiedAt, createdAt, profileImage,
           CAST(
             CASE

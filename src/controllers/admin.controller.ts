@@ -222,10 +222,26 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
     };
 
     if (search) {
+      const searchTerm = String(search).trim();
+      const searchDigits = searchTerm.replace(/\D/g, "");
+      const phoneMatchParts = [
+        "ISNULL(u.phoneNumber, '') LIKE '%' + @search + '%'",
+      ];
+      if (searchDigits.length > 0) {
+        phoneMatchParts.push(
+          `REPLACE(REPLACE(REPLACE(REPLACE(ISNULL(u.phoneNumber, ''), '+', ''), ' ', ''), '-', ''), '.', '')
+            LIKE '%' + @searchDigits + '%'`,
+        );
+        inputs.searchDigits = searchDigits;
+      }
       whereConditions.push(
-        "(u.name LIKE '%' + @search + '%' OR u.email LIKE '%' + @search + '%')",
+        `(
+          u.name LIKE '%' + @search + '%'
+          OR u.email LIKE '%' + @search + '%'
+          OR ${phoneMatchParts.join(" OR ")}
+        )`,
       );
-      inputs.search = String(search);
+      inputs.search = searchTerm;
     }
 
     if (filter !== "all") {
@@ -246,7 +262,7 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
 
     const query = `
       SELECT 
-        u.id, u.name, u.email, u.phoneNumber, u.country, 
+        u.id, u.name, u.restaurantName, u.email, u.phoneNumber, u.country, 
         u.profileImage, u.createdAt, u.lastLoginAt,
         u.isSuspended, u.suspendedAt, u.suspendedReason,
         p.name as planName, s.status as subscriptionStatus,
@@ -344,7 +360,7 @@ export async function getUserDetails(
 
     const userResult = await pool.request().input("userId", sql.Int, id).query(`
         SELECT 
-          u.id, u.name, u.email, u.phoneNumber, u.country, u.dateOfBirth,
+          u.id, u.name, u.restaurantName, u.email, u.phoneNumber, u.country, u.dateOfBirth,
           u.gender, u.address, u.profileImage, u.createdAt, u.lastLoginAt,
           u.isSuspended, u.suspendedAt, u.suspendedReason,
           p.name as planName, s.status as subscriptionStatus,

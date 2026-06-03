@@ -22,6 +22,7 @@ import { ensureUploadDirectories } from "./controllers/upload.controller";
 import { ensureAppVersionSchema } from "./services/appVersionSchema.service";
 import { ensurePromoSchema } from "./services/promoSchema.service";
 import { ensurePhoneVerifiedSchema } from "./services/verifykitUser.service";
+import { ensureRestaurantNameSchema } from "./services/userSchema.service";
 import { ensureSearchInformationSchema } from "./services/searchInformationSchema.service";
 import { ensureAnalyticsSchema } from "./services/analyticsSchema.service";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
@@ -204,6 +205,7 @@ async function startServer() {
       await ensureAppVersionSchema();
       await ensurePromoSchema();
       await ensurePhoneVerifiedSchema();
+      await ensureRestaurantNameSchema();
       await ensureSearchInformationSchema();
       await ensureAnalyticsSchema();
     } catch (dbError) {

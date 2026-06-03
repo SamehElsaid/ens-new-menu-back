@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 
 export type MenuViewEntrySource = "qr" | "direct";
 
-/** Record a public menu page view (fire-and-forget safe). */
+/** Record a public menu page view (+1 qr scan when entrySource is qr). */
 export async function recordMenuView(
   menuId: number,
   options?: { entrySource?: MenuViewEntrySource },
@@ -33,11 +33,17 @@ export async function recordMenuView(
 export function parseMenuEntrySource(
   querySrc: unknown,
   headerSrc: string | undefined,
+  queryQr?: unknown,
 ): MenuViewEntrySource {
-  const fromQuery =
+  const fromSrc =
     typeof querySrc === "string" && querySrc.toLowerCase() === "qr";
+  const fromQr =
+    queryQr !== undefined &&
+    queryQr !== null &&
+    String(queryQr).toLowerCase() !== "false" &&
+    String(queryQr).toLowerCase() !== "0";
   const fromHeader = headerSrc?.toLowerCase() === "qr";
-  return fromQuery || fromHeader ? "qr" : "direct";
+  return fromSrc || fromQr || fromHeader ? "qr" : "direct";
 }
 
 /** Record when a guest opens/clicks a product card on the public menu. */
