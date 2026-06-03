@@ -9,11 +9,6 @@ import {
   loginSchema,
   resetPasswordSchema,
 } from "../validators/auth.validator";
-import {
-  authLimiter,
-  passwordResetLimiter,
-  emailVerificationLimiter,
-} from "../middleware/rateLimiter";
 import { requireAuth } from "../middleware/auth.middleware";
 import { MAX_FCM_TOKEN_LEN } from "../services/fcmPush.service";
 
@@ -29,7 +24,6 @@ router.get(
 // POST /api/auth/signup
 router.post(
   "/signup",
-  authLimiter,
   validateRequest(signupSchema, "body"),
   authController.signup,
 );
@@ -37,7 +31,6 @@ router.post(
 // POST /api/auth/login
 router.post(
   "/login",
-  authLimiter,
   validateRequest(loginSchema, "body"),
   authController.login,
 );
@@ -48,7 +41,6 @@ router.get("/verify-email", authController.verifyEmail);
 // POST /api/auth/resend-verification
 router.post(
   "/resend-verification",
-  emailVerificationLimiter,
   validate([
     body("email").isEmail().normalizeEmail(),
     body("locale").optional().isIn(["ar", "en"]),
@@ -59,7 +51,6 @@ router.post(
 // POST /api/auth/forgot-password
 router.post(
   "/forgot-password",
-  passwordResetLimiter,
   validate([
     body("email").isEmail().normalizeEmail(),
     body("locale").optional().isIn(["ar", "en"]),

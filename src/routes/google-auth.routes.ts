@@ -2,14 +2,12 @@ import { Router } from 'express';
 import { body } from 'express-validator';
 import * as googleAuthController from '../controllers/google-auth.controller';
 import { validate } from '../middleware/validation';
-import { authLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
 // POST /api/auth/google - Authenticate with Google (token | access_token | code + redirect_uri)
 router.post(
   '/google',
-  authLimiter,
   validate([
     body('token').optional().notEmpty(),
     body('access_token').optional().notEmpty(),
