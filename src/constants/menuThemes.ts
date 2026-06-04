@@ -9,6 +9,7 @@ export const ALLOWED_MENU_THEMES = [
   "emerald",
   "noir",
   "oceanic",
+  "pharaonic",
 ] as const;
 
 export type MenuThemeId = (typeof ALLOWED_MENU_THEMES)[number];

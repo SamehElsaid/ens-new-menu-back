@@ -19,7 +19,7 @@ export function getBaseUrl(): string {
  * @returns Full URL like 'http://localhost:5000/uploads/menu-items/image.webp'
  */
 export function getImageUrl(
-  relativePath: string | null | undefined
+  relativePath: string | null | undefined,
 ): string | null {
   if (!relativePath) return null;
 
@@ -42,7 +42,7 @@ export function getImageUrl(
  * @returns Relative path like '/uploads/image.webp'
  */
 export function getRelativePath(
-  absoluteUrl: string | null | undefined
+  absoluteUrl: string | null | undefined,
 ): string | null {
   if (!absoluteUrl) return null;
 
@@ -69,7 +69,7 @@ export function getRelativePath(
  * @returns Items with absolute image URLs
  */
 export function normalizeImageUrls<T extends { image?: string | null }>(
-  items: T[]
+  items: T[],
 ): T[] {
   return items.map((item) => ({
     ...item,
@@ -81,7 +81,7 @@ export function normalizeImageUrls<T extends { image?: string | null }>(
  * Normalize a single item's image URL
  */
 export function normalizeImageUrl<T extends { image?: string | null }>(
-  item: T
+  item: T,
 ): T {
   return {
     ...item,
