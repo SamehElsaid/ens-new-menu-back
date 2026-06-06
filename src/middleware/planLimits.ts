@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { getPool, sql } from "../config/database";
 import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
+import { canUserBulkImport } from "../services/bulkImportUsage.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 
@@ -137,6 +138,32 @@ export async function requireProPlan(
       }, { code: "PRO_REQUIRED" });
       return;
     }
+    next();
+  } catch {
+    sendApiError(res, req, 500, ApiErrors.failedVerifySubscription);
+  }
+}
+
+/** Bulk import — Free: 3 uses per user; Pro: unlimited. */
+export async function checkBulkImportLimit(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const userId = req.user!.userId;
+    const { allowed, used, limit } = await canUserBulkImport(userId);
+
+    if (!allowed) {
+      sendApiError(res, req, 403, ApiErrors.bulkImportUsageLimitExceeded, {
+        code: "BULK_IMPORT_LIMIT",
+        used,
+        limit,
+        remaining: 0,
+      });
+      return;
+    }
+
     next();
   } catch {
     sendApiError(res, req, 500, ApiErrors.failedVerifySubscription);

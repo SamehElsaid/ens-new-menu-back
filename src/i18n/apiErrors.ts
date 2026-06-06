@@ -306,6 +306,22 @@ export const ApiErrors = {
     en: 'Failed to delete category',
     ar: 'فشل حذف التصنيف',
   },
+  bulkImportInvalidPayload: {
+    en: 'Request body must be a non-empty categories array',
+    ar: 'يجب إرسال مصفوفة تصنيفات غير فارغة',
+  },
+  bulkImportProductLimitExceeded: {
+    en: 'Import would exceed your plan product limit',
+    ar: 'الاستيراد يتجاوز الحد الأقصى للمنتجات في خطتك',
+  },
+  bulkImportUsageLimitExceeded: {
+    en: 'Bulk import is limited to 3 uses on the Free plan. Upgrade to Pro for unlimited imports.',
+    ar: 'استيراد القائمة محدود بـ 3 مرات في الخطة المجانية. ترقّ إلى Pro للاستيراد بدون حد.',
+  },
+  failedBulkImportCategories: {
+    en: 'Failed to bulk import categories and items',
+    ar: 'فشل استيراد التصنيفات والمنتجات',
+  },
   failedGetBranches: {
     en: 'Failed to get branches',
     ar: 'فشل جلب الفروع',

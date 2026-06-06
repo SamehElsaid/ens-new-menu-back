@@ -1,11 +1,135 @@
 import { Request, Response } from "express";
-import { getPool, sql } from "../config/database";
+import { getPool, sql, executeTransaction } from "../config/database";
 import { logger } from "../utils/logger";
 import { normalizeImageUrls } from "../utils/urlHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { getMenuAccessForRequest } from "../utils/menuAccess";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+import {
+  assertAndRecordBulkImportUsage,
+  BulkImportLimitError,
+  canUserBulkImport,
+} from "../services/bulkImportUsage.service";
+
+type BulkImportVariantInput = {
+  id?: string;
+  label?: string;
+  labelEn?: string;
+  price?: number | null;
+  flags?: unknown[];
+};
+
+type BulkImportItemInput = {
+  id?: string;
+  nameAr: string;
+  nameEn: string;
+  descriptionAr?: string | null;
+  descriptionEn?: string | null;
+  price?: number | null;
+  isAvailable?: boolean;
+  available?: boolean;
+  image?: string;
+  imageUrl?: string;
+  sortOrder?: number;
+  variants?: BulkImportVariantInput[];
+  flags?: unknown[];
+};
+
+type BulkImportCategoryInput = {
+  id?: string;
+  nameAr: string;
+  nameEn: string;
+  items?: BulkImportItemInput[];
+  image?: string;
+  imageUrl?: string;
+  sortOrder?: number;
+  flags?: unknown[];
+  isCollapsed?: boolean;
+};
+
+type BulkImportResultCategory = {
+  id: number;
+  clientId?: string;
+  nameAr: string;
+  nameEn: string;
+  sortOrder: number;
+  items: Array<{
+    id: number;
+    clientId?: string;
+    nameAr: string;
+    nameEn: string;
+    descriptionAr?: string | null;
+    descriptionEn?: string | null;
+    price: number;
+    isAvailable: boolean;
+    sortOrder: number;
+  }>;
+};
+
+function resolveItemPrice(item: BulkImportItemInput): number | null {
+  if (item.price !== null && item.price !== undefined) {
+    const price = Number(item.price);
+    if (!Number.isNaN(price) && price >= 0) return price;
+  }
+
+  const variants = item.variants;
+  if (!Array.isArray(variants) || variants.length === 0) {
+    return null;
+  }
+
+  const variantPrices = variants
+    .map((variant) => Number(variant.price))
+    .filter((price) => !Number.isNaN(price) && price >= 0);
+
+  if (variantPrices.length === 0) {
+    return null;
+  }
+
+  return Math.min(...variantPrices);
+}
+
+function normalizeBulkCategoriesPayload(
+  body: unknown,
+): BulkImportCategoryInput[] | null {
+  if (Array.isArray(body)) {
+    return body as BulkImportCategoryInput[];
+  }
+  if (
+    body &&
+    typeof body === "object" &&
+    Array.isArray((body as { categories?: unknown }).categories)
+  ) {
+    return (body as { categories: BulkImportCategoryInput[] }).categories;
+  }
+  return null;
+}
+
+function validateBulkCategoriesPayload(
+  categories: BulkImportCategoryInput[],
+): string | null {
+  for (let i = 0; i < categories.length; i++) {
+    const category = categories[i];
+    if (!category?.nameAr?.trim() || !category?.nameEn?.trim()) {
+      return `Category at index ${i} must have nameAr and nameEn`;
+    }
+    if (category.items !== undefined && !Array.isArray(category.items)) {
+      return `Category at index ${i}: items must be an array`;
+    }
+    const items = category.items ?? [];
+    for (let j = 0; j < items.length; j++) {
+      const item = items[j];
+      if (!item?.nameAr?.trim() || !item?.nameEn?.trim()) {
+        return `Item at category index ${i}, item index ${j} must have nameAr and nameEn`;
+      }
+      const resolvedPrice = resolveItemPrice(item);
+      if (resolvedPrice === null) {
+        return `Item at category index ${i}, item index ${j} must have a valid price or variants with prices`;
+      }
+    }
+  }
+  return null;
+}
 
 async function requireMenuAccess(
   req: Request,
@@ -414,5 +538,297 @@ export async function deleteCategory(
   } catch (error) {
     logger.error("Delete category error:", error);
     sendApiError(res, req, 500, ApiErrors.failedDeleteCategory);
+  }
+}
+
+// Bulk import categories with nested menu items (products)
+export async function bulkImportCategories(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const { menuId } = req.params;
+    const menuIdNum = parseInt(menuId, 10);
+    const categoriesInput = normalizeBulkCategoriesPayload(req.body);
+
+    if (!categoriesInput || categoriesInput.length === 0) {
+      sendApiError(res, req, 400, ApiErrors.bulkImportInvalidPayload);
+      return;
+    }
+
+    const validationError = validateBulkCategoriesPayload(categoriesInput);
+    if (validationError) {
+      sendApiError(res, req, 400, {
+        en: validationError,
+        ar: validationError,
+      });
+      return;
+    }
+
+    if (!(await requireMenuAccess(req, res, menuId))) return;
+
+    const totalItemsToImport = categoriesInput.reduce(
+      (sum, category) => sum + (category.items?.length ?? 0),
+      0,
+    );
+
+    const pool = await getPool();
+    const userId = req.user!.userId;
+
+    const planResult = await pool
+      .request()
+      .input("userId", sql.Int, userId)
+      .input("menuId", sql.Int, menuIdNum).query(`
+        SELECT TOP 1 p.maxProductsPerMenu, p.name as planName
+        FROM Menus m
+        JOIN Subscriptions s ON m.userId = s.userId
+          AND s.status = 'active'
+          AND (s.endDate IS NULL OR s.endDate > GETDATE())
+        JOIN Plans p ON s.planId = p.id
+        WHERE m.id = @menuId AND m.userId = @userId
+        ORDER BY s.id DESC
+      `);
+
+    if (planResult.recordset.length > 0) {
+      const { maxProductsPerMenu, planName } = planResult.recordset[0];
+      if (maxProductsPerMenu !== -1) {
+        const countResult = await pool
+          .request()
+          .input("menuId", sql.Int, menuIdNum)
+          .query(
+            "SELECT COUNT(*) as count FROM MenuItems WHERE menuId = @menuId",
+          );
+        const currentCount = countResult.recordset[0].count;
+        if (currentCount + totalItemsToImport > maxProductsPerMenu) {
+          const en = `Import would exceed the maximum number of products (${maxProductsPerMenu}) for your ${planName} plan. Current: ${currentCount}, importing: ${totalItemsToImport}.`;
+          const ar = `الاستيراد يتجاوز الحد الأقصى للمنتجات (${maxProductsPerMenu}) لخطة ${planName}. الحالي: ${currentCount}، المطلوب استيراده: ${totalItemsToImport}.`;
+          sendApiError(res, req, 403, { en, ar }, {
+            currentCount,
+            importing: totalItemsToImport,
+            maxProductsPerMenu,
+            planName,
+          });
+          return;
+        }
+      }
+    }
+
+    const result = await executeTransaction(async (transaction) => {
+      await assertAndRecordBulkImportUsage(
+        transaction,
+        userId,
+        menuIdNum,
+      );
+
+      const columnCheck = await transaction.request().query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = 'MenuItems'
+        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent')
+      `);
+
+      const existingColumns = columnCheck.recordset.map(
+        (r: { COLUMN_NAME: string }) => r.COLUMN_NAME,
+      );
+      const hasCategoryId = existingColumns.includes("categoryId");
+      const hasOriginalPrice = existingColumns.includes("originalPrice");
+      const hasDiscountPercent = existingColumns.includes("discountPercent");
+
+      const importedCategories: BulkImportResultCategory[] = [];
+
+      for (let catIndex = 0; catIndex < categoriesInput.length; catIndex++) {
+        const categoryInput = categoriesInput[catIndex];
+        const categoryImage =
+          categoryInput.imageUrl ?? categoryInput.image ?? null;
+        const categorySortOrder =
+          categoryInput.sortOrder !== undefined
+            ? categoryInput.sortOrder
+            : catIndex;
+
+        const categoryResult = await transaction
+          .request()
+          .input("menuId", sql.Int, menuIdNum)
+          .input("image", sql.NVarChar, categoryImage)
+          .input("sortOrder", sql.Int, categorySortOrder).query(`
+            INSERT INTO Categories (menuId, image, sortOrder)
+            OUTPUT INSERTED.id
+            VALUES (@menuId, @image, @sortOrder)
+          `);
+
+        const categoryId = categoryResult.recordset[0].id as number;
+
+        await transaction
+          .request()
+          .input("categoryId", sql.Int, categoryId)
+          .input("name", sql.NVarChar, categoryInput.nameAr.trim()).query(`
+            INSERT INTO CategoryTranslations (categoryId, locale, name)
+            VALUES (@categoryId, 'ar', @name)
+          `);
+
+        await transaction
+          .request()
+          .input("categoryId", sql.Int, categoryId)
+          .input("name", sql.NVarChar, categoryInput.nameEn.trim()).query(`
+            INSERT INTO CategoryTranslations (categoryId, locale, name)
+            VALUES (@categoryId, 'en', @name)
+          `);
+
+        const importedItems: BulkImportResultCategory["items"] = [];
+        const items = categoryInput.items ?? [];
+
+        for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+          const itemInput = items[itemIndex];
+          const itemIsAvailable =
+            itemInput.isAvailable !== undefined
+              ? itemInput.isAvailable
+              : itemInput.available !== undefined
+                ? itemInput.available
+                : true;
+          const itemImage = itemInput.imageUrl ?? itemInput.image ?? null;
+          const itemSortOrder =
+            itemInput.sortOrder !== undefined
+              ? itemInput.sortOrder
+              : itemIndex;
+          const categoryLabel = categoryInput.nameEn.trim() || "main";
+          const itemPrice = resolveItemPrice(itemInput)!;
+          const descriptionAr = itemInput.descriptionAr?.trim() || null;
+          const descriptionEn = itemInput.descriptionEn?.trim() || null;
+
+          const itemRequest = transaction
+            .request()
+            .input("menuId", sql.Int, menuIdNum)
+            .input("category", sql.NVarChar, categoryLabel)
+            .input("price", sql.Decimal(10, 2), itemPrice)
+            .input("image", sql.NVarChar, itemImage)
+            .input("available", sql.Bit, itemIsAvailable ? 1 : 0)
+            .input("sortOrder", sql.Int, itemSortOrder);
+
+          const itemColumns = [
+            "menuId",
+            "category",
+            "price",
+            "image",
+            "available",
+            "sortOrder",
+          ];
+          const itemValues = [
+            "@menuId",
+            "@category",
+            "@price",
+            "@image",
+            "@available",
+            "@sortOrder",
+          ];
+
+          if (hasCategoryId) {
+            itemColumns.push("categoryId");
+            itemValues.push("@categoryId");
+            itemRequest.input("categoryId", sql.Int, categoryId);
+          }
+
+          if (hasOriginalPrice) {
+            itemColumns.push("originalPrice");
+            itemValues.push("@originalPrice");
+            itemRequest.input("originalPrice", sql.Decimal(10, 2), null);
+          }
+
+          if (hasDiscountPercent) {
+            itemColumns.push("discountPercent");
+            itemValues.push("@discountPercent");
+            itemRequest.input("discountPercent", sql.Int, null);
+          }
+
+          const itemResult = await itemRequest.query(`
+            INSERT INTO MenuItems (${itemColumns.join(", ")})
+            OUTPUT INSERTED.id
+            VALUES (${itemValues.join(", ")})
+          `);
+
+          const itemId = itemResult.recordset[0].id as number;
+
+          await transaction
+            .request()
+            .input("menuItemId", sql.Int, itemId)
+            .input("name", sql.NVarChar, itemInput.nameAr.trim())
+            .input("description", sql.NVarChar, descriptionAr).query(`
+              INSERT INTO MenuItemTranslations (menuItemId, locale, name, description)
+              VALUES (@menuItemId, 'ar', @name, @description)
+            `);
+
+          await transaction
+            .request()
+            .input("menuItemId", sql.Int, itemId)
+            .input("name", sql.NVarChar, itemInput.nameEn.trim())
+            .input("description", sql.NVarChar, descriptionEn).query(`
+              INSERT INTO MenuItemTranslations (menuItemId, locale, name, description)
+              VALUES (@menuItemId, 'en', @name, @description)
+            `);
+
+          importedItems.push({
+            id: itemId,
+            clientId: itemInput.id,
+            nameAr: itemInput.nameAr.trim(),
+            nameEn: itemInput.nameEn.trim(),
+            descriptionAr,
+            descriptionEn,
+            price: itemPrice,
+            isAvailable: itemIsAvailable,
+            sortOrder: itemSortOrder,
+          });
+        }
+
+        importedCategories.push({
+          id: categoryId,
+          clientId: categoryInput.id,
+          nameAr: categoryInput.nameAr.trim(),
+          nameEn: categoryInput.nameEn.trim(),
+          sortOrder: categorySortOrder,
+          items: importedItems,
+        });
+      }
+
+      return importedCategories;
+    });
+
+    const itemsCreated = result.reduce(
+      (sum, category) => sum + category.items.length,
+      0,
+    );
+
+    const bulkImportUsage = await canUserBulkImport(userId);
+
+    res.status(201).json({
+      message: "Bulk import completed successfully",
+      categoriesCreated: result.length,
+      itemsCreated,
+      categories: result,
+      ...(bulkImportUsage.limit !== -1 && {
+        bulkImportUsage: {
+          used: bulkImportUsage.used,
+          limit: bulkImportUsage.limit,
+          remaining: Math.max(0, bulkImportUsage.limit - bulkImportUsage.used),
+        },
+      }),
+    });
+
+    void logMenuActivitySafe(req, menuIdNum, {
+      action: "MENU_BULK_IMPORT",
+      targetType: "menu",
+      targetId: menuIdNum,
+      summaryAr: `استيراد ${result.length} تصنيف و ${itemsCreated} منتج`,
+      summaryEn: `Imported ${result.length} categories and ${itemsCreated} items`,
+    });
+  } catch (error) {
+    if (error instanceof BulkImportLimitError) {
+      sendApiError(res, req, 403, ApiErrors.bulkImportUsageLimitExceeded, {
+        code: "BULK_IMPORT_LIMIT",
+        used: error.used,
+        limit: error.limit,
+        remaining: 0,
+      });
+      return;
+    }
+    logger.error("Bulk import categories error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedBulkImportCategories);
   }
 }
