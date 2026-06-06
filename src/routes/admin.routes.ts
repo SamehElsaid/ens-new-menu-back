@@ -31,6 +31,8 @@ import {
   getFollowUpQueue,
   getFollowUpCalls,
   postFollowUpCall,
+  patchFollowUpCall,
+  removeFollowUpCall,
   getFollowUpReport,
 } from '../controllers/adminFollowUp.controller';
 import {
@@ -56,6 +58,8 @@ router.get('/payments', getAdminPayments);
 router.get('/follow-ups/queue', getFollowUpQueue);
 router.get('/follow-ups/calls', getFollowUpCalls);
 router.post('/follow-ups/calls', postFollowUpCall);
+router.patch('/follow-ups/calls/:id', patchFollowUpCall);
+router.delete('/follow-ups/calls/:id', removeFollowUpCall);
 router.get('/follow-ups/report', getFollowUpReport);
 
 // Users Management

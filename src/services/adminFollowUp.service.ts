@@ -20,6 +20,7 @@ export type FollowUpOutcome =
 
 export type FollowUpPurpose =
   | "onboarding"
+  | "free_plan"
   | "upgrade_pro"
   | "renewal"
   | "support"
@@ -35,11 +36,71 @@ const VALID_OUTCOMES = new Set<string>([
 
 const VALID_PURPOSES = new Set<string>([
   "onboarding",
+  "free_plan",
   "upgrade_pro",
   "renewal",
   "support",
   "other",
 ]);
+
+type FollowUpCallContactFields = {
+  customerName?: string;
+  governorate?: string;
+  cafeName?: string;
+  otherContactNumbers?: string;
+};
+
+function optionalText(value: unknown, maxLen: number): string | undefined {
+  if (value == null) return undefined;
+  const trimmed = String(value).trim();
+  if (!trimmed) return undefined;
+  return trimmed.slice(0, maxLen);
+}
+
+function mapFollowUpCallRow(row: {
+  id: string;
+  userId: number;
+  userName?: string | null;
+  adminName?: string | null;
+  outcome: string;
+  purpose?: string | null;
+  notes?: string | null;
+  calledAt: Date | string;
+  nextFollowUpAt?: Date | string | null;
+  customerName?: string | null;
+  governorate?: string | null;
+  cafeName?: string | null;
+  otherContactNumbers?: string | null;
+}) {
+  return {
+    id: String(row.id),
+    userId: Number(row.userId),
+    userName: row.userName ?? undefined,
+    adminName: row.adminName ?? undefined,
+    outcome: row.outcome,
+    purpose: row.purpose ?? undefined,
+    notes: row.notes ?? undefined,
+    calledAt: new Date(row.calledAt).toISOString(),
+    nextFollowUpAt: row.nextFollowUpAt
+      ? String(row.nextFollowUpAt).slice(0, 10)
+      : null,
+    customerName: row.customerName ?? undefined,
+    governorate: row.governorate ?? undefined,
+    cafeName: row.cafeName ?? undefined,
+    otherContactNumbers: row.otherContactNumbers ?? undefined,
+  };
+}
+
+function normalizeContactFields(
+  payload: FollowUpCallContactFields,
+): FollowUpCallContactFields {
+  return {
+    customerName: optionalText(payload.customerName, 255),
+    governorate: optionalText(payload.governorate, 255),
+    cafeName: optionalText(payload.cafeName, 255),
+    otherContactNumbers: optionalText(payload.otherContactNumbers, 4000),
+  };
+}
 
 function computeSegments(row: {
   planName: string | null;
@@ -111,7 +172,8 @@ export async function buildFollowUpQueue(segment: FollowUpSegment) {
       (
         SELECT TOP 1
           c.id, c.userId, c.adminName, c.outcome, c.purpose, c.notes,
-          c.calledAt, c.nextFollowUpAt
+          c.calledAt, c.nextFollowUpAt,
+          c.customerName, c.governorate, c.cafeName, c.otherContactNumbers
         FROM AdminFollowUpCalls c
         WHERE c.userId = u.id
         ORDER BY c.calledAt DESC
@@ -142,6 +204,10 @@ export async function buildFollowUpQueue(segment: FollowUpSegment) {
             nextFollowUpAt: parsed.nextFollowUpAt
               ? String(parsed.nextFollowUpAt).slice(0, 10)
               : null,
+            customerName: parsed.customerName ?? undefined,
+            governorate: parsed.governorate ?? undefined,
+            cafeName: parsed.cafeName ?? undefined,
+            otherContactNumbers: parsed.otherContactNumbers ?? undefined,
           };
         } catch {
           lastCall = null;
@@ -183,6 +249,7 @@ export async function buildFollowUpQueue(segment: FollowUpSegment) {
 
 export async function listFollowUpCalls(filters: {
   userId?: number;
+  adminName?: string;
   from?: string;
   to?: string;
 }) {
@@ -193,6 +260,10 @@ export async function listFollowUpCalls(filters: {
   if (filters.userId) {
     conditions.push("c.userId = @userId");
     request.input("userId", sql.Int, filters.userId);
+  }
+  if (filters.adminName?.trim()) {
+    conditions.push("c.adminName = @adminName");
+    request.input("adminName", sql.NVarChar, filters.adminName.trim());
   }
   if (filters.from) {
     conditions.push("c.calledAt >= @from");
@@ -210,6 +281,7 @@ export async function listFollowUpCalls(filters: {
     SELECT
       c.id, c.userId, c.adminName, c.outcome, c.purpose, c.notes,
       c.calledAt, c.nextFollowUpAt,
+      c.customerName, c.governorate, c.cafeName, c.otherContactNumbers,
       u.name AS userName
     FROM AdminFollowUpCalls c
     LEFT JOIN Users u ON u.id = c.userId
@@ -218,20 +290,28 @@ export async function listFollowUpCalls(filters: {
   `);
 
   return {
-    calls: result.recordset.map((row) => ({
-      id: String(row.id),
-      userId: Number(row.userId),
-      userName: row.userName ?? undefined,
-      adminName: row.adminName,
-      outcome: row.outcome,
-      purpose: row.purpose ?? undefined,
-      notes: row.notes ?? undefined,
-      calledAt: new Date(row.calledAt).toISOString(),
-      nextFollowUpAt: row.nextFollowUpAt
-        ? String(row.nextFollowUpAt).slice(0, 10)
-        : null,
-    })),
+    calls: result.recordset.map((row) => mapFollowUpCallRow(row)),
   };
+}
+
+export async function deleteFollowUpCall(callId: string): Promise<void> {
+  const id = callId.trim();
+  if (!id) {
+    throw new Error("Call not found");
+  }
+
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input("id", sql.NVarChar, id)
+    .query(`
+      DELETE FROM AdminFollowUpCalls
+      WHERE id = @id
+    `);
+
+  if (!result.rowsAffected[0]) {
+    throw new Error("Call not found");
+  }
 }
 
 export async function createFollowUpCall(
@@ -242,7 +322,7 @@ export async function createFollowUpCall(
     notes?: string;
     nextFollowUpAt?: string | null;
     agentName?: string;
-  },
+  } & FollowUpCallContactFields,
   adminId?: number,
 ) {
   if (!VALID_OUTCOMES.has(payload.outcome)) {
@@ -251,6 +331,9 @@ export async function createFollowUpCall(
   if (payload.purpose && !VALID_PURPOSES.has(payload.purpose)) {
     throw new Error("Invalid purpose");
   }
+
+  const purpose = payload.purpose || undefined;
+  const contact = normalizeContactFields(payload);
 
   const pool = await getPool();
   const userCheck = await pool
@@ -275,15 +358,27 @@ export async function createFollowUpCall(
     .input("adminId", sql.Int, adminId ?? null)
     .input("adminName", sql.NVarChar, adminName)
     .input("outcome", sql.NVarChar, payload.outcome)
-    .input("purpose", sql.NVarChar, payload.purpose ?? null)
+    .input("purpose", sql.NVarChar, purpose ?? null)
     .input("notes", sql.NVarChar(sql.MAX), payload.notes ?? null)
+    .input("customerName", sql.NVarChar, contact.customerName ?? null)
+    .input("governorate", sql.NVarChar, contact.governorate ?? null)
+    .input("cafeName", sql.NVarChar, contact.cafeName ?? null)
+    .input(
+      "otherContactNumbers",
+      sql.NVarChar(sql.MAX),
+      contact.otherContactNumbers ?? null,
+    )
     .input("nextFollowUpAt", sql.Date, nextDate)
     .query(`
       INSERT INTO AdminFollowUpCalls (
-        id, userId, adminId, adminName, outcome, purpose, notes, nextFollowUpAt
+        id, userId, adminId, adminName, outcome, purpose, notes,
+        customerName, governorate, cafeName, otherContactNumbers,
+        nextFollowUpAt
       )
       VALUES (
-        @id, @userId, @adminId, @adminName, @outcome, @purpose, @notes, @nextFollowUpAt
+        @id, @userId, @adminId, @adminName, @outcome, @purpose, @notes,
+        @customerName, @governorate, @cafeName, @otherContactNumbers,
+        @nextFollowUpAt
       )
     `);
 
@@ -294,10 +389,102 @@ export async function createFollowUpCall(
       userName: userCheck.recordset[0].name,
       adminName,
       outcome: payload.outcome,
-      purpose: payload.purpose,
+      purpose,
       notes: payload.notes,
       calledAt: new Date().toISOString(),
       nextFollowUpAt: nextDate,
+      ...contact,
+    },
+  };
+}
+
+export async function updateFollowUpCall(
+  callId: string,
+  payload: {
+    outcome: string;
+    purpose?: string;
+    notes?: string;
+    nextFollowUpAt?: string | null;
+    agentName?: string;
+  } & FollowUpCallContactFields,
+) {
+  const id = callId.trim();
+  if (!id) {
+    throw new Error("Call not found");
+  }
+  if (!VALID_OUTCOMES.has(payload.outcome)) {
+    throw new Error("Invalid outcome");
+  }
+  if (payload.purpose && !VALID_PURPOSES.has(payload.purpose)) {
+    throw new Error("Invalid purpose");
+  }
+
+  const pool = await getPool();
+  const existing = await pool
+    .request()
+    .input("id", sql.NVarChar, id)
+    .query(`
+      SELECT c.id, c.userId, c.calledAt, u.name AS userName
+      FROM AdminFollowUpCalls c
+      LEFT JOIN Users u ON u.id = c.userId
+      WHERE c.id = @id
+    `);
+
+  if (!existing.recordset.length) {
+    throw new Error("Call not found");
+  }
+
+  const row = existing.recordset[0];
+  const adminName = (payload.agentName ?? "Admin").trim().slice(0, 255);
+  const purpose = payload.purpose || null;
+  const contact = normalizeContactFields(payload);
+  const nextDate = payload.nextFollowUpAt
+    ? payload.nextFollowUpAt.slice(0, 10)
+    : null;
+
+  await pool
+    .request()
+    .input("id", sql.NVarChar, id)
+    .input("adminName", sql.NVarChar, adminName)
+    .input("outcome", sql.NVarChar, payload.outcome)
+    .input("purpose", sql.NVarChar, purpose)
+    .input("notes", sql.NVarChar(sql.MAX), payload.notes ?? null)
+    .input("customerName", sql.NVarChar, contact.customerName ?? null)
+    .input("governorate", sql.NVarChar, contact.governorate ?? null)
+    .input("cafeName", sql.NVarChar, contact.cafeName ?? null)
+    .input(
+      "otherContactNumbers",
+      sql.NVarChar(sql.MAX),
+      contact.otherContactNumbers ?? null,
+    )
+    .input("nextFollowUpAt", sql.Date, nextDate)
+    .query(`
+      UPDATE AdminFollowUpCalls
+      SET
+        adminName = @adminName,
+        outcome = @outcome,
+        purpose = @purpose,
+        notes = @notes,
+        customerName = @customerName,
+        governorate = @governorate,
+        cafeName = @cafeName,
+        otherContactNumbers = @otherContactNumbers,
+        nextFollowUpAt = @nextFollowUpAt
+      WHERE id = @id
+    `);
+
+  return {
+    call: {
+      id,
+      userId: Number(row.userId),
+      userName: row.userName ?? undefined,
+      adminName,
+      outcome: payload.outcome,
+      purpose: purpose ?? undefined,
+      notes: payload.notes,
+      calledAt: new Date(row.calledAt).toISOString(),
+      nextFollowUpAt: nextDate,
+      ...contact,
     },
   };
 }

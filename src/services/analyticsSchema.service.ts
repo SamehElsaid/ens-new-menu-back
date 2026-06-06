@@ -56,13 +56,48 @@ export async function ensureAnalyticsSchema(): Promise<void> {
         adminId INT NULL,
         adminName NVARCHAR(255) NOT NULL,
         outcome NVARCHAR(50) NOT NULL,
-        purpose NVARCHAR(50) NULL,
+        purpose NVARCHAR(255) NULL,
         notes NVARCHAR(MAX) NULL,
+        customerName NVARCHAR(255) NULL,
+        governorate NVARCHAR(255) NULL,
+        cafeName NVARCHAR(255) NULL,
+        otherContactNumbers NVARCHAR(MAX) NULL,
         calledAt DATETIME2 NOT NULL CONSTRAINT DF_AdminFollowUpCalls_calledAt DEFAULT SYSUTCDATETIME(),
         nextFollowUpAt DATE NULL
       );
       CREATE INDEX IX_AdminFollowUpCalls_userId ON dbo.AdminFollowUpCalls (userId, calledAt DESC);
       CREATE INDEX IX_AdminFollowUpCalls_calledAt ON dbo.AdminFollowUpCalls (calledAt DESC);
+    END
+  `);
+
+  await pool.request().query(`
+    IF OBJECT_ID(N'dbo.AdminFollowUpCalls', N'U') IS NOT NULL
+      AND COL_LENGTH(N'dbo.AdminFollowUpCalls', N'purpose') = 100
+    BEGIN
+      ALTER TABLE dbo.AdminFollowUpCalls ALTER COLUMN purpose NVARCHAR(255) NULL;
+    END
+  `);
+
+  await pool.request().query(`
+    IF OBJECT_ID(N'dbo.AdminFollowUpCalls', N'U') IS NOT NULL
+      AND COL_LENGTH(N'dbo.AdminFollowUpCalls', N'customerName') IS NULL
+    BEGIN
+      ALTER TABLE dbo.AdminFollowUpCalls ADD customerName NVARCHAR(255) NULL;
+    END
+    IF OBJECT_ID(N'dbo.AdminFollowUpCalls', N'U') IS NOT NULL
+      AND COL_LENGTH(N'dbo.AdminFollowUpCalls', N'governorate') IS NULL
+    BEGIN
+      ALTER TABLE dbo.AdminFollowUpCalls ADD governorate NVARCHAR(255) NULL;
+    END
+    IF OBJECT_ID(N'dbo.AdminFollowUpCalls', N'U') IS NOT NULL
+      AND COL_LENGTH(N'dbo.AdminFollowUpCalls', N'cafeName') IS NULL
+    BEGIN
+      ALTER TABLE dbo.AdminFollowUpCalls ADD cafeName NVARCHAR(255) NULL;
+    END
+    IF OBJECT_ID(N'dbo.AdminFollowUpCalls', N'U') IS NOT NULL
+      AND COL_LENGTH(N'dbo.AdminFollowUpCalls', N'otherContactNumbers') IS NULL
+    BEGIN
+      ALTER TABLE dbo.AdminFollowUpCalls ADD otherContactNumbers NVARCHAR(MAX) NULL;
     END
   `);
 

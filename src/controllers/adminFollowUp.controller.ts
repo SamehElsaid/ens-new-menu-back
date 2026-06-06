@@ -3,7 +3,9 @@ import {
   buildFollowUpQueue,
   buildFollowUpReport,
   createFollowUpCall,
+  deleteFollowUpCall,
   listFollowUpCalls,
+  updateFollowUpCall,
   type FollowUpSegment,
 } from "../services/adminFollowUp.service";
 import { sendApiError } from "../utils/apiErrorResponse";
@@ -48,9 +50,12 @@ export async function getFollowUpCalls(
     const userId = req.query.userId
       ? Number(req.query.userId)
       : undefined;
+    const adminName = req.query.adminName
+      ? String(req.query.adminName)
+      : undefined;
     const from = req.query.from ? String(req.query.from) : undefined;
     const to = req.query.to ? String(req.query.to) : undefined;
-    const data = await listFollowUpCalls({ userId, from, to });
+    const data = await listFollowUpCalls({ userId, adminName, from, to });
     res.json(data);
   } catch (error) {
     logger.error("Get follow-up calls error:", error);
@@ -66,8 +71,18 @@ export async function postFollowUpCall(
   res: Response,
 ): Promise<void> {
   try {
-    const { userId, outcome, purpose, notes, nextFollowUpAt, agentName } =
-      req.body ?? {};
+    const {
+      userId,
+      outcome,
+      purpose,
+      notes,
+      nextFollowUpAt,
+      agentName,
+      customerName,
+      governorate,
+      cafeName,
+      otherContactNumbers,
+    } = req.body ?? {};
 
     if (!userId || !outcome) {
       sendApiError(res, req, 400, {
@@ -85,6 +100,12 @@ export async function postFollowUpCall(
         notes: notes ? String(notes) : undefined,
         nextFollowUpAt: nextFollowUpAt ?? null,
         agentName: agentName ? String(agentName) : undefined,
+        customerName: customerName ? String(customerName) : undefined,
+        governorate: governorate ? String(governorate) : undefined,
+        cafeName: cafeName ? String(cafeName) : undefined,
+        otherContactNumbers: otherContactNumbers
+          ? String(otherContactNumbers)
+          : undefined,
       },
       req.user?.userId,
     );
@@ -110,6 +131,104 @@ export async function postFollowUpCall(
     sendApiError(res, req, 500, {
       en: "Failed to save call",
       ar: "فشل حفظ المكالمة",
+    });
+  }
+}
+
+export async function removeFollowUpCall(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const callId = String(req.params.id ?? "").trim();
+    if (!callId) {
+      sendApiError(res, req, 400, {
+        en: "Call id is required",
+        ar: "معرّف المكالمة مطلوب",
+      });
+      return;
+    }
+
+    await deleteFollowUpCall(callId);
+    res.status(204).send();
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "";
+    if (msg === "Call not found") {
+      sendApiError(res, req, 404, {
+        en: "Call not found",
+        ar: "المكالمة غير موجودة",
+      });
+      return;
+    }
+    logger.error("Delete follow-up call error:", error);
+    sendApiError(res, req, 500, {
+      en: "Failed to delete call",
+      ar: "فشل حذف المكالمة",
+    });
+  }
+}
+
+export async function patchFollowUpCall(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const callId = String(req.params.id ?? "").trim();
+    const {
+      outcome,
+      purpose,
+      notes,
+      nextFollowUpAt,
+      agentName,
+      customerName,
+      governorate,
+      cafeName,
+      otherContactNumbers,
+    } = req.body ?? {};
+
+    if (!callId || !outcome) {
+      sendApiError(res, req, 400, {
+        en: "Call id and outcome are required",
+        ar: "معرّف المكالمة ونتيجتها مطلوبان",
+      });
+      return;
+    }
+
+    const data = await updateFollowUpCall(callId, {
+      outcome: String(outcome),
+      purpose: purpose ? String(purpose) : undefined,
+      notes: notes ? String(notes) : undefined,
+      nextFollowUpAt: nextFollowUpAt ?? null,
+      agentName: agentName ? String(agentName) : undefined,
+      customerName: customerName ? String(customerName) : undefined,
+      governorate: governorate ? String(governorate) : undefined,
+      cafeName: cafeName ? String(cafeName) : undefined,
+      otherContactNumbers: otherContactNumbers
+        ? String(otherContactNumbers)
+        : undefined,
+    });
+
+    res.json(data);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "";
+    if (msg === "Call not found") {
+      sendApiError(res, req, 404, {
+        en: "Call not found",
+        ar: "المكالمة غير موجودة",
+      });
+      return;
+    }
+    if (msg === "Invalid outcome" || msg === "Invalid purpose") {
+      sendApiError(res, req, 400, {
+        en: msg,
+        ar: "بيانات المكالمة غير صالحة",
+      });
+      return;
+    }
+    logger.error("Patch follow-up call error:", error);
+    sendApiError(res, req, 500, {
+      en: "Failed to update call",
+      ar: "فشل تحديث المكالمة",
     });
   }
 }
