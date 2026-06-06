@@ -61,6 +61,7 @@ function mapFollowUpCallRow(row: {
   id: string;
   userId: number;
   userName?: string | null;
+  phoneNumber?: string | null;
   adminName?: string | null;
   outcome: string;
   purpose?: string | null;
@@ -76,6 +77,7 @@ function mapFollowUpCallRow(row: {
     id: String(row.id),
     userId: Number(row.userId),
     userName: row.userName ?? undefined,
+    phoneNumber: row.phoneNumber ?? null,
     adminName: row.adminName ?? undefined,
     outcome: row.outcome,
     purpose: row.purpose ?? undefined,
@@ -282,7 +284,7 @@ export async function listFollowUpCalls(filters: {
       c.id, c.userId, c.adminName, c.outcome, c.purpose, c.notes,
       c.calledAt, c.nextFollowUpAt,
       c.customerName, c.governorate, c.cafeName, c.otherContactNumbers,
-      u.name AS userName
+      u.name AS userName, u.phoneNumber
     FROM AdminFollowUpCalls c
     LEFT JOIN Users u ON u.id = c.userId
     ${where}
