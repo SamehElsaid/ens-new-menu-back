@@ -59,6 +59,7 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
       .input("slug", sql.NVarChar, menuSlug.toLowerCase().trim()).query(`
         SELECT
           m.id,
+          m.uuid,
           m.userId,
           m.slug,
           m.logo,
@@ -264,6 +265,7 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
       },
       menu: {
         id: menu.id,
+        uuid: menu.uuid,
         userId: menu.userId,
         slug: menu.slug,
         logo: menu.logo,
@@ -312,6 +314,7 @@ export async function getStaffMe(req: Request, res: Response): Promise<void> {
         SELECT
           s.*,
           m.userId as menuOwnerUserId,
+          m.uuid as menuUuid,
           m.slug as menuSlug,
           m.logo as menuLogo,
           m.theme as menuTheme,
@@ -380,6 +383,7 @@ export async function getStaffMe(req: Request, res: Response): Promise<void> {
       },
       menu: {
         id: staff.menuId,
+        uuid: row.menuUuid,
         userId: row.menuOwnerUserId,
         slug: row.menuSlug,
         logo: row.menuLogo,

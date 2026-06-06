@@ -12,8 +12,11 @@ import branchRoutes from "./branch.routes";
 import menuCustomizationRoutes from "./menuCustomization.routes";
 import menuStaffRoutes from "./menuStaff.routes";
 import menuTablesRoutes from "./menuTables.routes";
+import { resolveMenuParam, resolveMenuIdRouteParam } from "../middleware/resolveMenuIdentifier.middleware";
 
 const router = Router();
+
+router.param("menuId", resolveMenuParam);
 
 // All routes require authentication
 router.use(requireAuth);
@@ -84,12 +87,18 @@ router.get(
   menuActivityLogController.listMenuActivityLogsHandler,
 );
 
-// GET /api/menus/:id - Get menu by ID
-router.get("/:id", [param("id").isInt()], menuController.getMenuById);
+// GET /api/menus/:id - Get menu by ID or UUID
+router.get(
+  "/:id",
+  resolveMenuIdRouteParam,
+  [param("id").isInt()],
+  menuController.getMenuById,
+);
 
 // PUT /api/menus/:id - Update menu
 router.put(
   "/:id",
+  resolveMenuIdRouteParam,
   validate([
     param("id").isInt(),
     body("nameAr")
@@ -143,12 +152,18 @@ router.put(
 // PUT /api/menus/:id/status - Toggle menu status
 router.put(
   "/:id/status",
+  resolveMenuIdRouteParam,
   [param("id").isInt()],
   menuController.toggleMenuStatus,
 );
 
 // DELETE /api/menus/:id - Delete menu
-router.delete("/:id", [param("id").isInt()], menuController.deleteMenu);
+router.delete(
+  "/:id",
+  resolveMenuIdRouteParam,
+  [param("id").isInt()],
+  menuController.deleteMenu,
+);
 
 // Nested routes
 router.use("/:menuId/items", menuItemRoutes);

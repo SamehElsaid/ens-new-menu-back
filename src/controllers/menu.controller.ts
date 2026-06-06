@@ -16,6 +16,7 @@ import {
   normalizeStaffRow,
 } from "../config/menuStaffColumns";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+import { generateMenuUuid } from "../utils/menuIdentifier";
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
@@ -29,7 +30,7 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
       .request()
       .input("userId", sql.Int, userId).query(`
         SELECT 
-          m.id, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt, m.updatedAt,
+          m.id, m.uuid, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt, m.updatedAt,
           mtAr.name as nameAr, 
           mtAr.description as descriptionAr,
           mtEn.name as nameEn,
@@ -91,6 +92,8 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
       columnCheck.recordset.length > 0 &&
       columnCheck.recordset[0].DATA_TYPE === "nvarchar";
 
+    const newMenuUuid = generateMenuUuid();
+
     const menuId = await executeTransaction(async (transaction) => {
       let newMenuId: string | number;
 
@@ -102,26 +105,28 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
         await transaction
           .request()
           .input("id", sql.NVarChar, newMenuId)
+          .input("uuid", sql.UniqueIdentifier, newMenuUuid)
           .input("userId", sql.Int, userId)
           .input("slug", sql.NVarChar, slug)
           .input("logo", sql.NVarChar, logo || null)
           .input("theme", sql.NVarChar, theme)
           .input("currency", sql.NVarChar(3), currency).query(`
-            INSERT INTO Menus (id, userId, slug, logo, theme, currency)
-            VALUES (@id, @userId, @slug, @logo, @theme, @currency)
+            INSERT INTO Menus (id, uuid, userId, slug, logo, theme, currency)
+            VALUES (@id, @uuid, @userId, @slug, @logo, @theme, @currency)
           `);
       } else {
         // Use IDENTITY (INT)
         const menuResult = await transaction
           .request()
+          .input("uuid", sql.UniqueIdentifier, newMenuUuid)
           .input("userId", sql.Int, userId)
           .input("slug", sql.NVarChar, slug)
           .input("logo", sql.NVarChar, logo || null)
           .input("theme", sql.NVarChar, theme)
           .input("currency", sql.NVarChar(3), currency).query(`
-            INSERT INTO Menus (userId, slug, logo, theme, currency)
+            INSERT INTO Menus (uuid, userId, slug, logo, theme, currency)
             OUTPUT INSERTED.id
-            VALUES (@userId, @slug, @logo, @theme, @currency)
+            VALUES (@uuid, @userId, @slug, @logo, @theme, @currency)
           `);
 
         newMenuId = menuResult.recordset[0].id;
@@ -165,6 +170,7 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
     res.status(201).json({
       message: "Menu created successfully",
       menuId,
+      uuid: newMenuUuid,
       slug,
     });
   } catch (error) {
@@ -193,7 +199,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
         .input("staffId", sql.Int, userId)
         .query(`
         SELECT 
-          m.id, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
+          m.id, m.uuid, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
           ISNULL(m.currency, 'SAR') as currency,
           m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
           m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
@@ -214,7 +220,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
         .input("userId", sql.Int, userId)
         .query(`
         SELECT 
-          m.id, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
+          m.id, m.uuid, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
           ISNULL(m.currency, 'SAR') as currency,
           m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
           m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,

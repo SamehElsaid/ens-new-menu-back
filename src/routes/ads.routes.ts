@@ -7,8 +7,11 @@ import {
   deleteAd,
   toggleAdStatus,
 } from "../controllers/ads.controller";
+import { resolveMenuParam } from "../middleware/resolveMenuIdentifier.middleware";
 
 const router = Router();
+
+router.param("menuId", resolveMenuParam);
 
 // All routes require authentication
 router.use(requireAuth);

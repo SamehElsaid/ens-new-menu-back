@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { validate, adminVoucherSchema } from '../middleware/validation';
 import {
   getAdminStats,
   getAllUsers,
@@ -32,6 +33,14 @@ import {
   postFollowUpCall,
   getFollowUpReport,
 } from '../controllers/adminFollowUp.controller';
+import {
+  getAdminVouchers,
+  getAdminVoucherById,
+  postAdminVoucher,
+  putAdminVoucher,
+  deleteAdminVoucher,
+  getAdminVoucherRedemptions,
+} from '../controllers/adminVoucher.controller';
 
 const router = Router();
 
@@ -79,5 +88,13 @@ router.delete('/admins/:id', deleteAdmin);
 
 // App version — POST only (GET is public: /api/public/app-version)
 router.post('/app-version', createAdminAppVersion);
+
+// Vouchers
+router.get('/vouchers', getAdminVouchers);
+router.get('/vouchers/:id/redemptions', getAdminVoucherRedemptions);
+router.get('/vouchers/:id', getAdminVoucherById);
+router.post('/vouchers', validate(adminVoucherSchema), postAdminVoucher);
+router.patch('/vouchers/:id', putAdminVoucher);
+router.delete('/vouchers/:id', deleteAdminVoucher);
 
 export default router;

@@ -231,7 +231,7 @@ async function initiateProSubscriptionPayment(
   if (uid == null) {
     throw new ApiError(401, "Authentication required");
   }
-  const { name, email, mobile, currency, redirectUrl } = req.body;
+  const { name, email, mobile, currency, redirectUrl, voucherCode } = req.body;
   const nameT = String(name ?? "").trim();
   const mobileT = String(mobile ?? "").trim();
   if (!nameT || !mobileT) {
@@ -243,33 +243,33 @@ async function initiateProSubscriptionPayment(
     );
   }
 
+  const voucherT = voucherCode ? String(voucherCode).trim() : undefined;
+
+  const payload = {
+    customer_name: nameT,
+    customer_email: email ? String(email).trim() : undefined,
+    customer_phone: mobileT,
+    currency,
+    redirectUrl: redirectUrl ? String(redirectUrl).trim() : undefined,
+    voucherCode: voucherT,
+  };
+
   const result =
     billing === "monthly"
-      ? await PaymentService.initiateProMonthlySubscription(uid, {
-          customer_name: nameT,
-          customer_email: email ? String(email).trim() : undefined,
-          customer_phone: mobileT,
-          currency,
-          redirectUrl: redirectUrl ? String(redirectUrl).trim() : undefined,
-        })
-      : await PaymentService.initiateProYearlySubscription(uid, {
-          customer_name: nameT,
-          customer_email: email ? String(email).trim() : undefined,
-          customer_phone: mobileT,
-          currency,
-          redirectUrl: redirectUrl ? String(redirectUrl).trim() : undefined,
-        });
+      ? await PaymentService.initiateProMonthlySubscription(uid, payload)
+      : await PaymentService.initiateProYearlySubscription(uid, payload);
 
   res.json({
     success: true,
     data: {
-      redirectUrl: result.paymentUrl,
+      redirectUrl: result.paymentUrl || null,
       order_id: result.orderId,
       paymentId: result.paymentId,
       amount: result.amount,
       currency: PRO_YEARLY_CURRENCY,
       billingCycle: result.billingCycle,
       planName: result.planName,
+      subscriptionActivated: result.subscriptionActivated === true,
     },
     message:
       billing === "monthly"

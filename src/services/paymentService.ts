@@ -6,6 +6,11 @@ import {
 } from "../config/proYearlyPricing";
 import { ApiError } from "../middleware/errorHandler";
 import * as notificationService from "./notificationService";
+import {
+  validateVoucherForUser,
+  recordDiscountVoucherRedemption,
+  normalizeCode,
+} from "./voucher.service";
 import crypto from "crypto";
 
 export interface InitiatePaymentData {
@@ -547,7 +552,9 @@ export class PaymentService {
     ownerUserId: number,
     price: number,
     customerPhone: string,
+    voucherCode?: string,
   ): Promise<void> {
+    const normalizedVoucher = voucherCode ? normalizeCode(voucherCode) : null;
     const attempts: Array<() => ReturnType<sql.Request["query"]>> = [
       () =>
         pool
@@ -555,9 +562,10 @@ export class PaymentService {
           .input("id", sql.UniqueIdentifier, orderId)
           .input("userId", sql.Int, ownerUserId)
           .input("total", sql.Decimal(10, 2), price)
-          .input("phone", sql.NVarChar(50), customerPhone).query(`
-            INSERT INTO [subscriptionCheckout] (id, user_id, total_price, status, customer_first_name, customer_last_name, customer_phone, created_at, updated_at)
-            VALUES (@id, @userId, @total, N'pending', N'Subscription', N'Pro', @phone, GETDATE(), GETDATE())
+          .input("phone", sql.NVarChar(50), customerPhone)
+          .input("voucherCode", sql.NVarChar(100), normalizedVoucher).query(`
+            INSERT INTO [subscriptionCheckout] (id, user_id, total_price, status, customer_first_name, customer_last_name, customer_phone, voucher_code, created_at, updated_at)
+            VALUES (@id, @userId, @total, N'pending', N'Subscription', N'Pro', @phone, @voucherCode, GETDATE(), GETDATE())
           `),
       () =>
         pool
@@ -612,6 +620,56 @@ export class PaymentService {
     };
   }
 
+  private static async activateProSubscriptionForUser(
+    pool: Awaited<ReturnType<typeof getPool>>,
+    userId: number,
+    planId: number,
+    billingCycle: "monthly" | "yearly",
+    paidAmount: number,
+    paidAt: Date,
+  ): Promise<{ subscriptionId: number; endDate: Date }> {
+    await pool.request().input("userId", sql.Int, userId).query(`
+      UPDATE Subscriptions
+      SET status = 'expired', endDate = GETDATE()
+      WHERE userId = @userId AND status = 'active'
+    `);
+
+    const start = new Date();
+    const end = new Date(start);
+    if (billingCycle === "monthly") {
+      end.setMonth(end.getMonth() + 1);
+    } else {
+      end.setFullYear(end.getFullYear() + 1);
+    }
+
+    const insertResult = await pool
+      .request()
+      .input("userId", sql.Int, userId)
+      .input("planId", sql.Int, planId)
+      .input("billingCycle", sql.NVarChar(20), billingCycle)
+      .input("startDate", sql.DateTime2, start)
+      .input("endDate", sql.DateTime2, end)
+      .input("status", sql.NVarChar(20), "active")
+      .input("paymentStatus", sql.NVarChar(50), "completed")
+      .input("paidAt", sql.DateTime2, paidAt)
+      .input("amount", sql.Decimal(12, 2), paidAmount).query(`
+        INSERT INTO Subscriptions (
+          userId, planId, billingCycle, startDate, endDate, status,
+          notificationSent, paymentStatus, paidAt, amount
+        )
+        OUTPUT INSERTED.id
+        VALUES (
+          @userId, @planId, @billingCycle, @startDate, @endDate, @status,
+          1, @paymentStatus, @paidAt, @amount
+        )
+      `);
+
+    return {
+      subscriptionId: Number(insertResult.recordset[0].id),
+      endDate: end,
+    };
+  }
+
   private static async initiateProSubscriptionCheckout(
     ownerUserId: number,
     billing: "monthly" | "yearly",
@@ -621,6 +679,7 @@ export class PaymentService {
       customer_phone: string;
       currency?: string;
       redirectUrl?: string;
+      voucherCode?: string;
     },
   ): Promise<{
     paymentId: string;
@@ -629,6 +688,7 @@ export class PaymentService {
     amount: number;
     planName: string;
     billingCycle: "monthly" | "yearly";
+    subscriptionActivated?: boolean;
   }> {
     const pool = await getPool();
     const plan = await this.fetchActiveProPlan(pool);
@@ -667,6 +727,28 @@ export class PaymentService {
       }
     }
 
+    let voucherId: number | undefined;
+    let appliedVoucherCode: string | undefined;
+    if (data.voucherCode?.trim()) {
+      const validation = await validateVoucherForUser(
+        data.voucherCode.trim(),
+        ownerUserId,
+        price,
+        billing,
+      );
+      if (validation.voucher.type !== "discount") {
+        throw new ApiError(
+          400,
+          "This voucher is not a discount voucher",
+          true,
+          "هذا الكود ليس كود خصم — استخدمه من زر تفعيل المدة المجانية",
+        );
+      }
+      price = validation.discountedPrice ?? price;
+      voucherId = validation.voucher.id;
+      appliedVoucherCode = normalizeCode(data.voucherCode);
+    }
+
     const orderId = crypto.randomUUID();
     try {
       await this.insertProSubscriptionOrder(
@@ -675,6 +757,7 @@ export class PaymentService {
         ownerUserId,
         price,
         data.customer_phone,
+        appliedVoucherCode,
       );
     } catch (e: any) {
       console.error("Subscription order insert failed (all attempts):", e);
@@ -692,7 +775,68 @@ export class PaymentService {
       kind,
       userId: ownerUserId,
       planId: plan.id,
+      ...(voucherId != null ? { voucherId } : {}),
     });
+
+    if (price <= 0) {
+      const paymentId = crypto.randomUUID();
+      const paidAt = new Date();
+      await pool
+        .request()
+        .input("id", sql.UniqueIdentifier, paymentId)
+        .input("orderId", sql.UniqueIdentifier, orderId)
+        .input("amount", sql.Decimal(10, 2), 0)
+        .input("voucher", sql.NVarChar(255), appliedVoucherCode ?? null)
+        .input("customerReference", sql.NVarChar(255), ref).query(`
+          INSERT INTO payments (id, order_id, amount, payment_method, payment_status, customer_reference, voucher, created_at, updated_at)
+          VALUES (@id, @orderId, @amount, N'voucher', N'completed', @customerReference, @voucher, GETDATE(), GETDATE())
+        `);
+
+      await pool.request().input("orderId", sql.UniqueIdentifier, orderId).query(`
+        UPDATE [subscriptionCheckout]
+        SET status = N'confirmed', updated_at = GETDATE()
+        WHERE id = @orderId
+      `);
+
+      const { subscriptionId, endDate } =
+        await this.activateProSubscriptionForUser(
+        pool,
+        ownerUserId,
+        plan.id,
+        billing,
+        0,
+        paidAt,
+      );
+
+      if (voucherId != null) {
+        await recordDiscountVoucherRedemption(
+          voucherId,
+          ownerUserId,
+          orderId,
+          subscriptionId,
+        );
+      }
+
+      try {
+        await notificationService.notifySubscriptionCreated(
+          ownerUserId,
+          String(plan.name),
+          endDate,
+        );
+      } catch {
+        // non-blocking
+      }
+
+      return {
+        paymentId,
+        paymentUrl: "",
+        orderId,
+        amount: 0,
+        planName: String(plan.name),
+        billingCycle: billing,
+        subscriptionActivated: true,
+      };
+    }
 
     const out = await this.initiatePayment(String(ownerUserId), {
       order_id: orderId,
@@ -724,6 +868,7 @@ export class PaymentService {
       customer_phone: string;
       currency?: string;
       redirectUrl?: string;
+      voucherCode?: string;
     },
   ) {
     return this.initiateProSubscriptionCheckout(ownerUserId, "yearly", data);
@@ -738,6 +883,7 @@ export class PaymentService {
       customer_phone: string;
       currency?: string;
       redirectUrl?: string;
+      voucherCode?: string;
     },
   ) {
     return this.initiateProSubscriptionCheckout(ownerUserId, "monthly", data);
@@ -774,6 +920,8 @@ export class PaymentService {
         kind?: string;
         userId?: number;
         planId?: number;
+        voucherId?: number;
+        orderId?: string;
       } = {};
       try {
         meta = JSON.parse(String(cr));
@@ -828,47 +976,35 @@ export class PaymentService {
         return;
       }
 
-      await pool.request().input("userId", sql.Int, meta.userId).query(`
-        UPDATE Subscriptions
-        SET status = 'expired', endDate = GETDATE()
-        WHERE userId = @userId AND status = 'active'
-      `);
+      const { subscriptionId, endDate } =
+        await this.activateProSubscriptionForUser(
+          pool,
+          meta.userId,
+          meta.planId,
+          billingCycle,
+          paidAmount,
+          paidAt instanceof Date ? paidAt : new Date(paidAt),
+        );
 
-      const start = new Date();
-      const end = new Date(start);
-      if (isMonthly) {
-        end.setMonth(end.getMonth() + 1);
-      } else {
-        end.setFullYear(end.getFullYear() + 1);
+      if (meta.voucherId != null && meta.orderId) {
+        try {
+          await recordDiscountVoucherRedemption(
+            meta.voucherId,
+            meta.userId,
+            meta.orderId,
+            subscriptionId,
+          );
+        } catch (voucherErr) {
+          console.error("Voucher redemption failed:", voucherErr);
+        }
       }
-
-      await pool
-        .request()
-        .input("userId", sql.Int, meta.userId)
-        .input("planId", sql.Int, meta.planId)
-        .input("billingCycle", sql.NVarChar(20), billingCycle)
-        .input("startDate", sql.DateTime2, start)
-        .input("endDate", sql.DateTime2, end)
-        .input("status", sql.NVarChar(20), "active")
-        .input("paymentStatus", sql.NVarChar(50), "completed")
-        .input("paidAt", sql.DateTime2, paidAt)
-        .input("amount", sql.Decimal(12, 2), paidAmount).query(`
-          INSERT INTO Subscriptions (
-            userId, planId, billingCycle, startDate, endDate, status,
-            notificationSent, paymentStatus, paidAt, amount
-          )
-          VALUES (
-            @userId, @planId, @billingCycle, @startDate, @endDate, @status,
-            1, @paymentStatus, @paidAt, @amount
-          )
-        `);
 
       if (!/^free$/i.test(planName)) {
         try {
           await notificationService.notifySubscriptionCreated(
             meta.userId,
             planName,
-            end,
+            endDate,
           );
         } catch (notifyErr) {
           console.error("notifySubscriptionCreated failed:", notifyErr);

@@ -20,11 +20,13 @@ import { validateJWTSecrets } from "./utils/tokenHelper";
 import { CleanupService } from "./services/cleanup.service";
 import { ensureUploadDirectories } from "./controllers/upload.controller";
 import { ensureAppVersionSchema } from "./services/appVersionSchema.service";
+import { ensureVoucherSchema } from "./services/voucherSchema.service";
 import { ensurePromoSchema } from "./services/promoSchema.service";
 import { ensurePhoneVerifiedSchema } from "./services/verifykitUser.service";
 import { ensureRestaurantNameSchema } from "./services/userSchema.service";
 import { ensureSearchInformationSchema } from "./services/searchInformationSchema.service";
 import { ensureAnalyticsSchema } from "./services/analyticsSchema.service";
+import { ensureMenuUuidSchema } from "./services/menuUuidSchema.service";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
 // Routes
 import authRoutes from "./routes/auth.routes";
@@ -41,6 +43,7 @@ import structureRoutes from "./routes/structure.routes";
 import adsRoutes from "./routes/ads.routes";
 import staffAuthRoutes from "./routes/staffAuth.routes";
 import paymentRoutes from "./routes/paymentRoutes";
+import voucherRoutes from "./routes/voucher.routes";
 import { getPublicAppVersion } from "./controllers/version.controller";
 import {
   getPromoHandler,
@@ -177,6 +180,7 @@ app.use("/api/menus", menuRoutes);
 app.use("/api/menus", menuItemsRoutes);
 // Must be before app.use("/api", categoryRoutes): that router runs requireAuth on all /api/* paths
 app.use("/api/payment", paymentRoutes);
+app.use("/api/vouchers", voucherRoutes);
 app.use("/api", categoryRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
@@ -204,10 +208,12 @@ async function startServer() {
       logger.info("✅ Database connected successfully");
       await ensureAppVersionSchema();
       await ensurePromoSchema();
+      await ensureVoucherSchema();
       await ensurePhoneVerifiedSchema();
       await ensureRestaurantNameSchema();
       await ensureSearchInformationSchema();
       await ensureAnalyticsSchema();
+      await ensureMenuUuidSchema();
     } catch (dbError) {
       logger.error("❌ Database connection failed:", dbError);
     }

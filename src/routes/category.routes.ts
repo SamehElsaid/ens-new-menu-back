@@ -7,8 +7,11 @@ import {
   deleteCategory,
 } from '../controllers/category.controller';
 import { requireAuth } from '../middleware/auth.middleware';
+import { resolveMenuParam } from '../middleware/resolveMenuIdentifier.middleware';
 
 const router = express.Router();
+
+router.param('menuId', resolveMenuParam);
 
 // All routes require authentication
 router.use(requireAuth);
