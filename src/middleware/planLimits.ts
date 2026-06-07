@@ -144,7 +144,7 @@ export async function requireProPlan(
   }
 }
 
-/** Bulk import — Free: 3 uses per user; Pro: unlimited. */
+/** Bulk import — Free: 1 use per user; Pro: unlimited. */
 export async function checkBulkImportLimit(
   req: Request,
   res: Response,
