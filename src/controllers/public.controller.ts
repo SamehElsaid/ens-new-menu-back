@@ -11,6 +11,7 @@ import {
   recordMenuView,
 } from "../services/menuViewTracker.service";
 import { recordAdClick } from "../services/adTracking.service";
+import { listHomepageFeaturedLogos } from "../services/homepageFeaturedLogos.service";
 
 /** Optional table from QR: `?tableNumber=` or `?table=` (max 50 chars). */
 function parsePublicMenuTableNumber(req: Request): string | null {
@@ -929,3 +930,22 @@ export async function postAdClick(
     res.status(204).send();
   }
 }
+
+export const getHomepageFeaturedLogos = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const logos = await listHomepageFeaturedLogos();
+    res.json({
+      success: true,
+      logos,
+    });
+  } catch (error: unknown) {
+    console.error("Error fetching homepage featured logos:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch homepage featured logos",
+    });
+  }
+};

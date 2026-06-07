@@ -28,6 +28,7 @@ import { ensureSearchInformationSchema } from "./services/searchInformationSchem
 import { ensureAnalyticsSchema } from "./services/analyticsSchema.service";
 import { ensureMenuUuidSchema } from "./services/menuUuidSchema.service";
 import { ensureBulkImportUsageSchema } from "./services/bulkImportUsage.service";
+import { ensureHomepageFeaturedLogosSchema } from "./services/homepageFeaturedLogosSchema.service";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
 // Routes
 import authRoutes from "./routes/auth.routes";
@@ -216,6 +217,7 @@ async function startServer() {
       await ensureAnalyticsSchema();
       await ensureMenuUuidSchema();
       await ensureBulkImportUsageSchema();
+      await ensureHomepageFeaturedLogosSchema();
     } catch (dbError) {
       logger.error("❌ Database connection failed:", dbError);
     }
