@@ -315,8 +315,8 @@ export const ApiErrors = {
     ar: 'الاستيراد يتجاوز الحد الأقصى للمنتجات في خطتك',
   },
   bulkImportUsageLimitExceeded: {
-    en: 'Bulk import is limited to 3 uses on the Free plan. Upgrade to Pro for unlimited imports.',
-    ar: 'استيراد القائمة محدود بـ 3 مرات في الخطة المجانية. ترقّ إلى Pro للاستيراد بدون حد.',
+    en: 'Bulk import is limited to 1 use on the Free plan. Upgrade to Pro for unlimited imports.',
+    ar: 'استيراد القائمة محدود بـ مرة واحدة في الخطة المجانية. ترقّ إلى Pro للاستيراد بدون حد.',
   },
   failedBulkImportCategories: {
     en: 'Failed to bulk import categories and items',

@@ -26,7 +26,7 @@ export const PLANS = {
 };
 
 /** Free plan: max bulk menu imports per user (Pro = unlimited). */
-export const FREE_BULK_IMPORT_MAX = 3;
+export const FREE_BULK_IMPORT_MAX = 1;
 
 export const RATE_LIMITS = {
   AUTH: {

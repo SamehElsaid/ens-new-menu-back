@@ -575,44 +575,6 @@ export async function bulkImportCategories(
     const pool = await getPool();
     const userId = req.user!.userId;
 
-    const planResult = await pool
-      .request()
-      .input("userId", sql.Int, userId)
-      .input("menuId", sql.Int, menuIdNum).query(`
-        SELECT TOP 1 p.maxProductsPerMenu, p.name as planName
-        FROM Menus m
-        JOIN Subscriptions s ON m.userId = s.userId
-          AND s.status = 'active'
-          AND (s.endDate IS NULL OR s.endDate > GETDATE())
-        JOIN Plans p ON s.planId = p.id
-        WHERE m.id = @menuId AND m.userId = @userId
-        ORDER BY s.id DESC
-      `);
-
-    if (planResult.recordset.length > 0) {
-      const { maxProductsPerMenu, planName } = planResult.recordset[0];
-      if (maxProductsPerMenu !== -1) {
-        const countResult = await pool
-          .request()
-          .input("menuId", sql.Int, menuIdNum)
-          .query(
-            "SELECT COUNT(*) as count FROM MenuItems WHERE menuId = @menuId",
-          );
-        const currentCount = countResult.recordset[0].count;
-        if (currentCount + totalItemsToImport > maxProductsPerMenu) {
-          const en = `Import would exceed the maximum number of products (${maxProductsPerMenu}) for your ${planName} plan. Current: ${currentCount}, importing: ${totalItemsToImport}.`;
-          const ar = `الاستيراد يتجاوز الحد الأقصى للمنتجات (${maxProductsPerMenu}) لخطة ${planName}. الحالي: ${currentCount}، المطلوب استيراده: ${totalItemsToImport}.`;
-          sendApiError(res, req, 403, { en, ar }, {
-            currentCount,
-            importing: totalItemsToImport,
-            maxProductsPerMenu,
-            planName,
-          });
-          return;
-        }
-      }
-    }
-
     const result = await executeTransaction(async (transaction) => {
       await assertAndRecordBulkImportUsage(
         transaction,
@@ -832,3 +794,22 @@ export async function bulkImportCategories(
     sendApiError(res, req, 500, ApiErrors.failedBulkImportCategories);
   }
 }
+
+// Check if the user can use bulk category import
+export async function checkBulkImportCanUse(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const { menuId } = req.params;
+    if (!(await requireMenuAccess(req, res, menuId))) return;
+
+    const userId = req.user!.userId;
+    const { allowed } = await canUserBulkImport(userId);
+    res.json({ canuse: allowed });
+  } catch (error) {
+    logger.error("Check bulk import canuse error:", error);
+    sendApiError(res, req, 500, ApiErrors.internalServerError);
+  }
+}
+

@@ -7,6 +7,7 @@ import {
   updateCategory,
   deleteCategory,
   bulkImportCategories,
+  checkBulkImportCanUse,
 } from '../controllers/category.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { resolveMenuParam } from '../middleware/resolveMenuIdentifier.middleware';
@@ -92,6 +93,10 @@ router.post(
     }),
   ]),
   bulkImportCategories,
+);
+router.get(
+  '/menus/:menuId/categories/bulk/canuse',
+  checkBulkImportCanUse,
 );
 router.get('/menus/:menuId/categories/:categoryId', getCategoryById);
 router.post('/menus/:menuId/categories', createCategory);
