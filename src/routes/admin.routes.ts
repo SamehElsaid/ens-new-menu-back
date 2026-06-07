@@ -22,6 +22,8 @@ import {
   getPlansForSubscription,
   applyFreePlanLimits,
   patchAdminPermissions,
+  featureUserOnHomepage,
+  unfeatureUserOnHomepage,
 } from '../controllers/admin.controller';
 import { requireAdmin } from '../middleware/auth.middleware';
 import { createAdminAppVersion } from '../controllers/version.controller';
@@ -69,6 +71,8 @@ router.put('/users/:id/suspend', toggleUserSuspension);
 router.put('/users/:id/password', adminSetUserPassword);
 router.put('/users/:id/subscription', updateUserSubscription);
 router.post('/users/:id/apply-free-limits', applyFreePlanLimits);
+router.post('/users/:id/feature-on-homepage', featureUserOnHomepage);
+router.delete('/users/:id/feature-on-homepage', unfeatureUserOnHomepage);
 router.delete('/users/:id', deleteUser);
 
 // Plans Management

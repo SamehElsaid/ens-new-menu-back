@@ -11,6 +11,7 @@ import {
   getMenuView,
   postMenuItemView,
   postAdClick,
+  getHomepageFeaturedLogos,
 } from "../controllers/public.controller";
 import {
   postAppVersion,
@@ -157,6 +158,9 @@ router.get(
 
 // GET /api/public/plans - Get all active plans
 router.get("/plans", getPublicPlans);
+
+// GET /api/public/homepage-featured-logos - Trusted-by logos on landing page
+router.get("/homepage-featured-logos", getHomepageFeaturedLogos);
 
 // POST /api/public/version - App version check (mobile clients)
 router.post("/version", postAppVersion);

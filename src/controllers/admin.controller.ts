@@ -12,6 +12,12 @@ import {
   normalizePermissionKeys,
   saveAdminPermissions,
 } from "../services/adminPermissions.service";
+import {
+  addUserMenuToHomepageFeatured,
+  countUsersOnHomepage,
+  getUserFeaturedMenuId,
+  removeUserFromHomepageFeatured,
+} from "../services/homepageFeaturedLogos.service";
 
 // Get Admin Dashboard Statistics
 export async function getAdminStats(
@@ -186,6 +192,11 @@ function applyUserListFilter(
         "(u.lastLoginAt IS NULL OR u.lastLoginAt < DATEADD(day, -30, GETDATE()))",
       );
       break;
+    case "on-homepage":
+      whereConditions.push(
+        "EXISTS (SELECT 1 FROM HomepageFeaturedLogos hfl WHERE hfl.userId = u.id)",
+      );
+      break;
     default:
       break;
   }
@@ -267,7 +278,13 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
         u.isSuspended, u.suspendedAt, u.suspendedReason,
         p.name as planName, s.status as subscriptionStatus,
         s.startDate, s.endDate, s.billingCycle,
-        (SELECT COUNT(*) FROM Menus WHERE userId = u.id) as menusCount
+        (SELECT COUNT(*) FROM Menus WHERE userId = u.id) as menusCount,
+        CASE
+          WHEN EXISTS (
+            SELECT 1 FROM HomepageFeaturedLogos hfl WHERE hfl.userId = u.id
+          ) THEN 1
+          ELSE 0
+        END as featuredOnHomepage
       FROM Users u
       ${USER_LIST_SUBSCRIPTION_JOIN} ${joinPlanFilter}
       WHERE ${whereClause}
@@ -314,13 +331,14 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
       WHERE u.role = 'user'
     `;
 
-    const [usersResult, countResult, statsResult, noMenuStatsResult, planStatsResult] =
+    const [usersResult, countResult, statsResult, noMenuStatsResult, planStatsResult, usersOnHomepage] =
       await Promise.all([
         request.query(query),
         request.query(countQuery),
         pool.request().query(statsQuery),
         pool.request().query(noMenuStatsQuery),
         pool.request().query(planStatsQuery),
+        countUsersOnHomepage(),
       ]);
 
     const statsRow = statsResult.recordset[0];
@@ -341,6 +359,7 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
         freeUsers: planStatsRow.freeUsers ?? 0,
         proUsers: planStatsRow.proUsers ?? 0,
         usersWithoutMenu: noMenuStatsResult.recordset[0]?.usersWithoutMenu ?? 0,
+        usersOnHomepage,
       },
     });
   } catch (error) {
@@ -404,14 +423,84 @@ export async function getUserDetails(
         ORDER BY s.createdAt DESC
       `);
 
+    const featuredMenuId = await getUserFeaturedMenuId(Number(id));
+
     res.json({
       user: userResult.recordset[0],
       menus: menusResult.recordset,
       subscriptions: subscriptionsResult.recordset,
+      featuredOnHomepage: featuredMenuId !== null,
+      featuredMenuId,
     });
   } catch (error) {
     logger.error("Get user details error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetUserDetails);
+  }
+}
+
+export async function featureUserOnHomepage(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const userId = Number(req.params.id);
+    if (!Number.isFinite(userId) || userId < 1) {
+      sendApiError(res, req, 400, ApiErrors.invalidUserId);
+      return;
+    }
+
+    const featured = await addUserMenuToHomepageFeatured(userId);
+
+    res.status(201).json({
+      success: true,
+      message: "Menu logo added to homepage",
+      data: featured,
+    });
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+
+    if (code === "USER_NOT_FOUND") {
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
+      return;
+    }
+    if (code === "NO_MENU_WITH_LOGO") {
+      sendApiError(res, req, 400, ApiErrors.noMenuWithLogo);
+      return;
+    }
+    if (code === "ALREADY_FEATURED") {
+      sendApiError(res, req, 409, ApiErrors.menuAlreadyFeaturedOnHomepage);
+      return;
+    }
+
+    logger.error("Feature user on homepage error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedFeatureOnHomepage);
+  }
+}
+
+export async function unfeatureUserOnHomepage(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const userId = Number(req.params.id);
+    if (!Number.isFinite(userId) || userId < 1) {
+      sendApiError(res, req, 400, ApiErrors.invalidUserId);
+      return;
+    }
+
+    const removed = await removeUserFromHomepageFeatured(userId);
+    if (!removed) {
+      sendApiError(res, req, 404, ApiErrors.notFeaturedOnHomepage);
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: "Menu logo removed from homepage",
+    });
+  } catch (error) {
+    logger.error("Unfeature user on homepage error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedUnfeatureOnHomepage);
   }
 }
 

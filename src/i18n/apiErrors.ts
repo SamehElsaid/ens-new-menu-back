@@ -630,6 +630,30 @@ export const ApiErrors = {
     en: 'Failed to get user details',
     ar: 'فشل جلب تفاصيل المستخدم',
   },
+  invalidUserId: {
+    en: 'Invalid user id',
+    ar: 'معرّف المستخدم غير صالح',
+  },
+  noMenuWithLogo: {
+    en: 'User has no menu with a logo',
+    ar: 'لا يوجد منيو بشعار لهذا المستخدم',
+  },
+  menuAlreadyFeaturedOnHomepage: {
+    en: 'This menu logo is already on the homepage',
+    ar: 'شعار هذا المنيو موجود بالفعل في الصفحة الرئيسية',
+  },
+  failedFeatureOnHomepage: {
+    en: 'Failed to add menu logo to homepage',
+    ar: 'فشل إضافة شعار المنيو إلى الصفحة الرئيسية',
+  },
+  notFeaturedOnHomepage: {
+    en: 'This user is not featured on the homepage',
+    ar: 'هذا المستخدم غير موجود في الصفحة الرئيسية',
+  },
+  failedUnfeatureOnHomepage: {
+    en: 'Failed to remove menu logo from homepage',
+    ar: 'فشل إزالة شعار المنيو من الصفحة الرئيسية',
+  },
   invalidPasswordFormat: {
     en: 'Password must be at least 8 characters and include uppercase, lowercase, number, and special character',
     ar: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وصغير ورقم ورمز خاص',
