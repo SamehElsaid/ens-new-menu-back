@@ -41,10 +41,6 @@ export const RATE_LIMITS = {
     windowMs: 15 * 60 * 1000,
     max: 200,
   },
-  UPLOAD: {
-    windowMs: 60 * 60 * 1000, // 1 hour
-    max: 10,
-  },
   PASSWORD_RESET: {
     windowMs: 60 * 60 * 1000,
     max: 3,

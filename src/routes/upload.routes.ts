@@ -3,7 +3,6 @@ import { query, param, body } from "express-validator";
 import * as uploadController from "../controllers/upload.controller";
 import { uploadMemoryStorage } from "../controllers/upload.controller";
 import { requireAuth } from "../middleware/auth.middleware";
-import { uploadLimiter } from "../middleware/rateLimiter";
 
 const router = Router();
 
@@ -13,7 +12,6 @@ router.use(requireAuth);
 // POST /api/upload - Upload image
 router.post(
   "/",
-  uploadLimiter,
   uploadMemoryStorage.single("file"),
   [
     body("type")

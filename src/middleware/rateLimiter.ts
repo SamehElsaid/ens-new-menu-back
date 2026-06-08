@@ -45,20 +45,6 @@ export const publicLimiter = rateLimit({
     process.env.NODE_ENV === "test" || process.env.NODE_ENV === "development",
 });
 
-// Upload limiter
-export const uploadLimiter = rateLimit({
-  windowMs: RATE_LIMITS.UPLOAD.windowMs,
-  max: RATE_LIMITS.UPLOAD.max,
-  message: {
-    error: "Too many file uploads, please try again later.",
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  // Skip rate limiting in test and development
-  skip: (req) =>
-    process.env.NODE_ENV === "test" || process.env.NODE_ENV === "development",
-});
-
 // Password reset limiter
 export const passwordResetLimiter = rateLimit({
   windowMs: RATE_LIMITS.PASSWORD_RESET.windowMs,

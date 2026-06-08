@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
-import { uploadLimiter } from '../middleware/rateLimiter';
 import { uploadMemoryStorage, uploadStructureImage } from '../controllers/structure.controller';
 
 const router = Router();
@@ -10,7 +9,6 @@ router.use(requireAuth);
 // POST /api/structure/image/
 router.post(
   '/image/',
-  uploadLimiter,
   uploadMemoryStorage.any(),
   uploadStructureImage,
 );
