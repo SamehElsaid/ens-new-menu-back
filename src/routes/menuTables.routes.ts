@@ -7,6 +7,25 @@ import { requireProPlan } from "../middleware/planLimits";
 
 const router = Router({ mergeParams: true });
 
+const tableNumberBodyRule = body("tableNumber")
+  .notEmpty()
+  .trim()
+  .isLength({ min: 1, max: 50 })
+  .matches(/^[a-zA-Z0-9\u0600-\u06FF][a-zA-Z0-9\u0600-\u06FF\s\-_]*$/)
+  .withMessage(
+    "tableNumber must contain letters and/or numbers (max 50 characters)",
+  );
+
+const tableNumberBodyOptionalRule = body("tableNumber")
+  .optional()
+  .notEmpty()
+  .trim()
+  .isLength({ min: 1, max: 50 })
+  .matches(/^[a-zA-Z0-9\u0600-\u06FF][a-zA-Z0-9\u0600-\u06FF\s\-_]*$/)
+  .withMessage(
+    "tableNumber must contain letters and/or numbers (max 50 characters)",
+  );
+
 router.use(requireAuth);
 router.use(requireProPlan);
 
@@ -25,7 +44,7 @@ router.post(
   "/",
   validate([
     param("menuId").isInt(),
-    body("tableNumber").notEmpty().trim().isLength({ max: 50 }),
+    tableNumberBodyRule,
     body("seats").optional().isInt({ min: 1 }),
     body("isActive").optional().isBoolean(),
   ]),
@@ -38,7 +57,7 @@ router.put(
   validate([
     param("menuId").isInt(),
     param("tableId").isInt(),
-    body("tableNumber").optional().notEmpty().trim().isLength({ max: 50 }),
+    tableNumberBodyOptionalRule,
     body("seats").optional().isInt({ min: 1 }),
     body("isActive").optional().isBoolean(),
   ]),
