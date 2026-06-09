@@ -6,6 +6,10 @@ import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { getMenuAccessForRequest } from "../utils/menuAccess";
+import {
+  isValidTableNumber,
+  normalizeTableNumber,
+} from "../utils/normalizeTableNumber";
 
 async function requireMenuAccess(
   req: Request,
@@ -98,7 +102,16 @@ export async function createTable(
 ): Promise<void> {
   try {
     const { menuId } = req.params;
-    const { tableNumber, seats, isActive = true } = req.body;
+    const { seats, isActive = true } = req.body;
+    const tableNumber = normalizeTableNumber(req.body?.tableNumber);
+
+    if (!isValidTableNumber(tableNumber)) {
+      sendApiError(res, req, 400, {
+        en: "tableNumber must contain letters and/or numbers (max 50 characters)",
+        ar: "رمز الطاولة يجب أن يحتوي على أرقام و/أو حروف (حد أقصى 50 حرفًا)",
+      });
+      return;
+    }
 
     const pool = await getPool();
 
@@ -150,7 +163,11 @@ export async function updateTable(
 ): Promise<void> {
   try {
     const { menuId, tableId } = req.params;
-    const { tableNumber, seats, isActive } = req.body;
+    const { seats, isActive } = req.body;
+    const tableNumber =
+      req.body?.tableNumber !== undefined
+        ? normalizeTableNumber(req.body.tableNumber)
+        : undefined;
 
     const pool = await getPool();
 
@@ -160,6 +177,14 @@ export async function updateTable(
       return;
     }
     const ownerUserId = access.ownerUserId;
+
+    if (tableNumber !== undefined && !isValidTableNumber(tableNumber)) {
+      sendApiError(res, req, 400, {
+        en: "tableNumber must contain letters and/or numbers (max 50 characters)",
+        ar: "رمز الطاولة يجب أن يحتوي على أرقام و/أو حروف (حد أقصى 50 حرفًا)",
+      });
+      return;
+    }
 
     const checkResult = await pool
       .request()

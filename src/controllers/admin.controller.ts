@@ -250,6 +250,17 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
           u.name LIKE '%' + @search + '%'
           OR u.email LIKE '%' + @search + '%'
           OR ${phoneMatchParts.join(" OR ")}
+          OR EXISTS (
+            SELECT 1 FROM Menus m
+            LEFT JOIN MenuTranslations mtAr ON m.id = mtAr.menuId AND mtAr.locale = 'ar'
+            LEFT JOIN MenuTranslations mtEn ON m.id = mtEn.menuId AND mtEn.locale = 'en'
+            WHERE m.userId = u.id
+              AND (
+                m.slug LIKE '%' + @search + '%'
+                OR ISNULL(mtAr.name, '') LIKE '%' + @search + '%'
+                OR ISNULL(mtEn.name, '') LIKE '%' + @search + '%'
+              )
+          )
         )`,
       );
       inputs.search = searchTerm;

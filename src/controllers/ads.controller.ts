@@ -191,31 +191,65 @@ export const updateAd = async (req: Request, res: Response) => {
 
     const menuIdForLog = adCheck.recordset[0].menuId as number;
 
-    // Update ad
-    await pool
-      .request()
-      .input("adId", sql.Int, adId)
-      .input("title", sql.NVarChar, title)
-      .input("titleAr", sql.NVarChar, titleAr)
-      .input("content", sql.NVarChar, content)
-      .input("contentAr", sql.NVarChar, contentAr)
-      .input("imageUrl", sql.NVarChar, imageUrl)
-      .input("linkUrl", sql.NVarChar, linkUrl)
-      .input("position", sql.NVarChar, position)
-      .input("isActive", sql.Bit, isActive !== undefined ? isActive : true)
-      .query(`
-        UPDATE Ads
-        SET 
-          title = @title,
-          titleAr = @titleAr,
-          content = @content,
-          contentAr = @contentAr,
-          imageUrl = @imageUrl,
-          linkUrl = @linkUrl,
-          position = @position,
-          isActive = @isActive
-        WHERE id = @adId
-      `);
+    const updates: string[] = [];
+    const inputs: Record<string, unknown> = { adId: parseInt(String(adId), 10) };
+
+    if (title !== undefined) {
+      updates.push("title = @title");
+      inputs.title = title;
+    }
+    if (titleAr !== undefined) {
+      updates.push("titleAr = @titleAr");
+      inputs.titleAr = titleAr;
+    }
+    if (content !== undefined) {
+      updates.push("content = @content");
+      inputs.content = content;
+    }
+    if (contentAr !== undefined) {
+      updates.push("contentAr = @contentAr");
+      inputs.contentAr = contentAr;
+    }
+    if (imageUrl !== undefined) {
+      updates.push("imageUrl = @imageUrl");
+      inputs.imageUrl = imageUrl;
+    }
+    if (linkUrl !== undefined) {
+      updates.push("linkUrl = @linkUrl");
+      inputs.linkUrl = linkUrl;
+    }
+    if (position !== undefined) {
+      updates.push("position = @position");
+      inputs.position = position;
+    }
+    if (isActive !== undefined) {
+      updates.push("isActive = @isActive");
+      inputs.isActive = isActive;
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No fields to update",
+      });
+    }
+
+    const request = pool.request();
+    for (const [key, value] of Object.entries(inputs)) {
+      if (key === "adId") {
+        request.input(key, sql.Int, value);
+      } else if (key === "isActive") {
+        request.input(key, sql.Bit, value);
+      } else {
+        request.input(key, sql.NVarChar, value);
+      }
+    }
+
+    await request.query(`
+      UPDATE Ads
+      SET ${updates.join(", ")}
+      WHERE id = @adId
+    `);
 
     const titlesAfter = await pool
       .request()

@@ -27,6 +27,7 @@ import { ensureRestaurantNameSchema } from "./services/userSchema.service";
 import { ensureSearchInformationSchema } from "./services/searchInformationSchema.service";
 import { ensureAnalyticsSchema } from "./services/analyticsSchema.service";
 import { ensureMenuUuidSchema } from "./services/menuUuidSchema.service";
+import { ensureMenuTablesSchema } from "./services/menuTablesSchema.service";
 import { ensureBulkImportUsageSchema } from "./services/bulkImportUsage.service";
 import { ensureHomepageFeaturedLogosSchema } from "./services/homepageFeaturedLogosSchema.service";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
@@ -216,6 +217,7 @@ async function startServer() {
       await ensureSearchInformationSchema();
       await ensureAnalyticsSchema();
       await ensureMenuUuidSchema();
+      await ensureMenuTablesSchema();
       await ensureBulkImportUsageSchema();
       await ensureHomepageFeaturedLogosSchema();
     } catch (dbError) {

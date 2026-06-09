@@ -12,8 +12,6 @@ import {
 import { requireAuth } from '../middleware/auth.middleware';
 import { resolveMenuParam } from '../middleware/resolveMenuIdentifier.middleware';
 import { validate } from '../middleware/validation';
-import { checkBulkImportLimit } from '../middleware/planLimits';
-
 
 const router = express.Router();
 
@@ -26,7 +24,6 @@ router.use(requireAuth);
 router.get('/menus/:menuId/categories', getCategories);
 router.post(
   '/menus/:menuId/categories/bulk',
-  checkBulkImportLimit,
   validate([
     body().custom((_, { req }) => {
       const categories = Array.isArray(req.body)
