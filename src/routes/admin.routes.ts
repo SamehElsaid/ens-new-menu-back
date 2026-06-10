@@ -45,6 +45,29 @@ import {
   deleteAdminVoucher,
   getAdminVoucherRedemptions,
 } from '../controllers/adminVoucher.controller';
+import {
+  patchAdminUserProfile,
+  patchAdminUserBlock,
+  softDeleteAdminUser,
+  restoreAdminUser,
+  postAdminUserResetPassword,
+  getAdminUserAddresses,
+  postAdminUserAddress,
+  patchAdminUserAddress,
+  deleteAdminUserAddress,
+  getAdminUserNotes,
+  postAdminUserNote,
+  deleteAdminUserNote,
+  getAdminUserActivityLog,
+  getAdminUserOrders,
+  getAdminUserVouchers,
+  postAdminUserVoucherAssign,
+  postAdminUserVoucherBlock,
+  deleteAdminUserVoucherBlock,
+  getAdminUserSupport,
+  postAdminUserSupport,
+  patchAdminUserSupportStatus,
+} from '../controllers/adminCustomer.controller';
 
 const router = Router();
 
@@ -74,6 +97,27 @@ router.post('/users/:id/apply-free-limits', applyFreePlanLimits);
 router.post('/users/:id/feature-on-homepage', featureUserOnHomepage);
 router.delete('/users/:id/feature-on-homepage', unfeatureUserOnHomepage);
 router.delete('/users/:id', deleteUser);
+router.put('/users/:id/profile', patchAdminUserProfile);
+router.put('/users/:id/block', patchAdminUserBlock);
+router.post('/users/:id/soft-delete', softDeleteAdminUser);
+router.post('/users/:id/restore', restoreAdminUser);
+router.post('/users/:id/send-reset-password', postAdminUserResetPassword);
+router.get('/users/:id/addresses', getAdminUserAddresses);
+router.post('/users/:id/addresses', postAdminUserAddress);
+router.put('/users/:id/addresses/:addressId', patchAdminUserAddress);
+router.delete('/users/:id/addresses/:addressId', deleteAdminUserAddress);
+router.get('/users/:id/notes', getAdminUserNotes);
+router.post('/users/:id/notes', postAdminUserNote);
+router.delete('/users/:id/notes/:noteId', deleteAdminUserNote);
+router.get('/users/:id/activity-log', getAdminUserActivityLog);
+router.get('/users/:id/orders', getAdminUserOrders);
+router.get('/users/:id/vouchers', getAdminUserVouchers);
+router.post('/users/:id/vouchers/assign', postAdminUserVoucherAssign);
+router.post('/users/:id/vouchers/:voucherId/block', postAdminUserVoucherBlock);
+router.delete('/users/:id/vouchers/:voucherId/block', deleteAdminUserVoucherBlock);
+router.get('/users/:id/support', getAdminUserSupport);
+router.post('/users/:id/support', postAdminUserSupport);
+router.put('/users/:id/support/:caseId', patchAdminUserSupportStatus);
 
 // Plans Management
 router.get('/plans/subscription', getPlansForSubscription);
