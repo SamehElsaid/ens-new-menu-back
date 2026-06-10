@@ -12,6 +12,7 @@ import {
 } from "../services/menuViewTracker.service";
 import { recordAdClick } from "../services/adTracking.service";
 import { listHomepageFeaturedLogos } from "../services/homepageFeaturedLogos.service";
+import { getImageUrl } from "../utils/urlHelper";
 
 /** Optional table from QR: `?tableNumber=` or `?table=` (max 50 chars). */
 function parsePublicMenuTableNumber(req: Request): string | null {
@@ -191,14 +192,14 @@ export const getPublicMenu = async (req: Request, res: Response) => {
             id: menu.id,
             name: menu.name,
             description: menu.description,
-            logo: menu.logo,
+            logo: getImageUrl(menu.logo),
             theme: menu.theme,
             currency: menu.currency || "SAR",
             slug: menu.slug,
             isActive: menu.isActive,
             locale: menu.locale,
             ownerPlanType: menu.ownerPlanType || "free",
-            footerLogo: menu.footerLogo,
+            footerLogo: getImageUrl(menu.footerLogo),
             footerDescriptionEn: menu.footerDescriptionEn,
             footerDescriptionAr: menu.footerDescriptionAr,
             socialFacebook: menu.socialFacebook,
@@ -367,6 +368,13 @@ export const getPublicMenu = async (req: Request, res: Response) => {
 
     const rating = ratingsResult.recordset[0];
 
+    const normalizedItems = itemsResult.recordset.map(
+      (item: { image?: string | null }) => ({
+        ...item,
+        image: getImageUrl(item.image),
+      }),
+    );
+
     // Group items by category
     // If using Categories table, group by categoryId and category name
     // Otherwise, use the old category string field
@@ -374,7 +382,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
 
     if (hasCategoriesTable && hasCategoryId) {
       // Group by category ID and name
-      itemsResult.recordset.forEach((item: any) => {
+      normalizedItems.forEach((item: any) => {
         const categoryKey = item.categoryId
           ? `category_${item.categoryId}`
           : item.category || "other";
@@ -386,7 +394,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       });
     } else {
       // Fallback to old category string grouping
-      itemsResult.recordset.forEach((item: any) => {
+      normalizedItems.forEach((item: any) => {
         const categoryKey = item.category || "other";
         if (!itemsByCategory[categoryKey]) {
           itemsByCategory[categoryKey] = [];
@@ -454,6 +462,15 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     const tables = await fetchPublicMenuTablesForMenu(pool, menu.id);
     const table = resolvePublicMenuTable(tables, { tableNumber, tableId });
 
+    const normalizedCategories = categories.map((category) => ({
+      ...category,
+      image: getImageUrl(category.image),
+    }));
+    const normalizedAds = ads.map((ad: { imageUrl?: string | null }) => ({
+      ...ad,
+      imageUrl: getImageUrl(ad.imageUrl),
+    }));
+
     res.json({
       success: true,
       data: {
@@ -462,14 +479,14 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           id: menu.id,
           name: menu.name,
           description: menu.description,
-          logo: menu.logo,
+          logo: getImageUrl(menu.logo),
           theme: menu.theme,
           currency: menu.currency || "SAR",
           slug: menu.slug,
           isActive: menu.isActive,
           locale: menu.locale,
           ownerPlanType: menu.ownerPlanType || "free", // Add owner's plan type
-          footerLogo: menu.footerLogo,
+          footerLogo: getImageUrl(menu.footerLogo),
           footerDescriptionEn: menu.footerDescriptionEn,
           footerDescriptionAr: menu.footerDescriptionAr,
           socialFacebook: menu.socialFacebook,
@@ -488,8 +505,8 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           tables,
         },
         customizations,
-        categories: categories, // Add categories array
-        items: itemsResult.recordset,
+        categories: normalizedCategories,
+        items: normalizedItems,
         itemsByCategory,
         branches: branchesResult.recordset,
         rating: {
@@ -498,7 +515,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
             : 0,
           total: rating.totalRatings,
         },
-        ads: ads, // Add ads array
+        ads: normalizedAds,
       },
     });
   } catch (error: any) {

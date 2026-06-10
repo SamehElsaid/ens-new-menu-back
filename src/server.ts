@@ -132,9 +132,13 @@ const uploadsCors = (_req: Request, res: Response, next: NextFunction) => {
 };
 const uploadsStatic = express.static(path.join(__dirname, "../uploads"));
 
-app.use("/uploads", uploadsCors, uploadsStatic);
+const uploadsNotFound = (_req: Request, res: Response) => {
+  res.status(404).json({ error: "Upload not found" });
+};
+
+app.use("/uploads", uploadsCors, uploadsStatic, uploadsNotFound);
 // Backward compat: URLs built as API_URL + "/uploads/..." when API_URL wrongly included "/api"
-app.use("/api/uploads", uploadsCors, uploadsStatic);
+app.use("/api/uploads", uploadsCors, uploadsStatic, uploadsNotFound);
 
 // ------------------------------------------------------------------
 // Request logging

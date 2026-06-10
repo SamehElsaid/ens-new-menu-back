@@ -23,16 +23,20 @@ export function getImageUrl(
 ): string | null {
   if (!relativePath) return null;
 
-  // If already absolute URL, return as is
+  const baseUrl = getBaseUrl();
+
+  // Absolute URLs (e.g. legacy api.ensmenu.com) → always serve from current API host
   if (
     relativePath.startsWith("http://") ||
     relativePath.startsWith("https://")
   ) {
+    const pathname = getRelativePath(relativePath);
+    if (pathname?.includes("/uploads/")) {
+      return `${baseUrl}${pathname.startsWith("/") ? "" : "/"}${pathname}`;
+    }
     return relativePath;
   }
 
-  // Convert relative to absolute
-  const baseUrl = getBaseUrl();
   return `${baseUrl}${relativePath.startsWith("/") ? "" : "/"}${relativePath}`;
 }
 

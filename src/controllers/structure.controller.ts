@@ -1,21 +1,24 @@
-import { Request, Response } from 'express';
-import sharp from 'sharp';
-import { fileTypeFromBuffer } from 'file-type';
-import path from 'path';
-import fs from 'fs/promises';
-import { v4 as uuidv4 } from 'uuid';
-import { logger } from '../utils/logger';
-import { getImageUrl } from '../utils/urlHelper';
-import { sendApiError } from '../utils/apiErrorResponse';
-import { ApiErrors } from '../i18n/apiErrors';
-import { uploadMemoryStorage } from './upload.controller';
+import { Request, Response } from "express";
+import sharp from "sharp";
+import { fileTypeFromBuffer } from "file-type";
+import path from "path";
+import fs from "fs/promises";
+import { v4 as uuidv4 } from "uuid";
+import { logger } from "../utils/logger";
+import { getImageUrl } from "../utils/urlHelper";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
+import { uploadMemoryStorage } from "./upload.controller";
 
 export { uploadMemoryStorage };
 
-const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-const UPLOAD_SUBDIR = 'structure';
+const ALLOWED_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+const UPLOAD_SUBDIR = "structure";
 
-export async function uploadStructureImage(req: Request, res: Response): Promise<void> {
+export async function uploadStructureImage(
+  req: Request,
+  res: Response,
+): Promise<void> {
   try {
     const files = req.files as Express.Multer.File[] | undefined;
     const file = files?.[0] ?? req.file;
@@ -32,14 +35,14 @@ export async function uploadStructureImage(req: Request, res: Response): Promise
       return;
     }
 
-    const uploadDir = path.join(process.cwd(), 'uploads', UPLOAD_SUBDIR);
+    const uploadDir = path.join(process.cwd(), "uploads", UPLOAD_SUBDIR);
     await fs.mkdir(uploadDir, { recursive: true });
 
     const filename = `${uuidv4()}.webp`;
     const filePath = path.join(uploadDir, filename);
 
     await sharp(file.buffer)
-      .resize(1200, 800, { fit: 'inside', withoutEnlargement: true })
+      .resize(1200, 800, { fit: "inside", withoutEnlargement: true })
       .webp({ quality: 85 })
       .toFile(filePath);
 
@@ -49,7 +52,7 @@ export async function uploadStructureImage(req: Request, res: Response): Promise
 
     res.json({ image: imageUrl });
   } catch (error) {
-    logger.error('Upload structure image error:', error);
+    logger.error("Upload structure image error:", error);
     sendApiError(res, req, 500, ApiErrors.failedUploadImage);
   }
 }

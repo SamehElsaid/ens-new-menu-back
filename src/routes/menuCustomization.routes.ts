@@ -16,7 +16,7 @@ router.get(
   customizationController.getCustomizations
 );
 
-// PUT /api/menus/:menuId/customizations - Update customizations (Pro only)
+// PUT /api/menus/:menuId/customizations - Update colors (all owners) / hero copy (Pro)
 router.put(
   '/',
   validate([
