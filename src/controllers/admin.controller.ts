@@ -18,6 +18,11 @@ import {
   getUserFeaturedMenuId,
   removeUserFromHomepageFeatured,
 } from "../services/homepageFeaturedLogos.service";
+import {
+  logUserAdminActivity,
+  getAdminDisplayName,
+  resolveAccountStatus,
+} from "../services/adminCustomer.service";
 
 // Get Admin Dashboard Statistics
 export async function getAdminStats(
@@ -391,8 +396,9 @@ export async function getUserDetails(
     const userResult = await pool.request().input("userId", sql.Int, id).query(`
         SELECT 
           u.id, u.name, u.restaurantName, u.email, u.phoneNumber, u.country, u.dateOfBirth,
-          u.gender, u.address, u.profileImage, u.createdAt, u.lastLoginAt,
+          u.gender, u.address, u.profileImage, u.createdAt, u.lastLoginAt, u.updatedAt,
           u.isSuspended, u.suspendedAt, u.suspendedReason,
+          u.isBlocked, u.blockedAt, u.blockedReason, u.deletedAt,
           p.name as planName, s.status as subscriptionStatus,
           s.startDate, s.endDate, s.billingCycle, s.amount
         FROM Users u
@@ -435,9 +441,11 @@ export async function getUserDetails(
       `);
 
     const featuredMenuId = await getUserFeaturedMenuId(Number(id));
+    const userRow = userResult.recordset[0];
+    const accountStatus = resolveAccountStatus(userRow);
 
     res.json({
-      user: userResult.recordset[0],
+      user: { ...userRow, accountStatus },
       menus: menusResult.recordset,
       subscriptions: subscriptionsResult.recordset,
       featuredOnHomepage: featuredMenuId !== null,
@@ -567,9 +575,20 @@ export async function toggleUserSuspension(
         UPDATE Users
         SET isSuspended = @isSuspended,
             suspendedAt = @suspendedAt,
-            suspendedReason = @suspendedReason
+            suspendedReason = @suspendedReason,
+            updatedAt = SYSUTCDATETIME()
         WHERE id = @userId
       `);
+
+    const adminId = req.user?.userId ?? null;
+    const adminName = adminId ? await getAdminDisplayName(adminId) : "Admin";
+    await logUserAdminActivity(
+      Number(id),
+      adminId,
+      adminName,
+      newStatus ? "account_suspended" : "account_reactivated",
+      suspendReason,
+    );
 
     res.json({
       message: newStatus
@@ -611,7 +630,18 @@ export async function adminSetUserPassword(
       .request()
       .input("userId", sql.Int, id)
       .input("password", sql.NVarChar, hashedPassword)
-      .query("UPDATE Users SET password = @password WHERE id = @userId");
+      .query(
+        "UPDATE Users SET password = @password, updatedAt = SYSUTCDATETIME() WHERE id = @userId",
+      );
+
+    const adminId = req.user?.userId ?? null;
+    const adminName = adminId ? await getAdminDisplayName(adminId) : "Admin";
+    await logUserAdminActivity(
+      Number(id),
+      adminId,
+      adminName,
+      "password_changed_by_admin",
+    );
 
     res.json({ message: "Password updated successfully" });
   } catch (error) {
