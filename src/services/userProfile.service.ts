@@ -1,6 +1,6 @@
 import { getPool, sql } from '../config/database';
-import { ensurePhoneVerifiedSchema } from './verifykitUser.service';
-import { ensureRestaurantNameSchema } from './userSchema.service';
+import { ensurePhoneVerifiedSchema } from '../schemas/phoneVerified.schema';
+import { ensureRestaurantNameSchema } from '../schemas/restaurantName.schema';
 
 const AUTH_USER_PROFILE_QUERY = `
   SELECT 

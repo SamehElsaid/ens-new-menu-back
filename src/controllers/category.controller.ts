@@ -11,13 +11,26 @@ import {
   BulkImportLimitError,
   canUserBulkImport,
 } from "../services/bulkImportUsage.service";
+import {
+  MenuItemSize,
+  normalizeMenuItemSizesInput,
+  resolveMenuItemBasePrice,
+  serializeMenuItemSizes,
+} from "../utils/menuItemSizes";
 
 type BulkImportVariantInput = {
   id?: string;
   label?: string;
+  labelAr?: string;
   labelEn?: string;
   price?: number | null;
   flags?: unknown[];
+};
+
+type BulkImportSizeInput = {
+  nameAr?: string;
+  nameEn?: string;
+  price?: number | null;
 };
 
 type BulkImportItemInput = {
@@ -32,6 +45,7 @@ type BulkImportItemInput = {
   image?: string;
   imageUrl?: string;
   sortOrder?: number;
+  sizes?: BulkImportSizeInput[];
   variants?: BulkImportVariantInput[];
   flags?: unknown[];
 };
@@ -67,10 +81,9 @@ type BulkImportResultCategory = {
   }>;
 };
 
-function resolveItemPrice(item: BulkImportItemInput): number | null {
-  if (item.price !== null && item.price !== undefined) {
-    const price = Number(item.price);
-    if (!Number.isNaN(price) && price >= 0) return price;
+function resolveBulkItemSizes(item: BulkImportItemInput): MenuItemSize[] | null {
+  if (Array.isArray(item.sizes) && item.sizes.length > 0) {
+    return normalizeMenuItemSizesInput(item.sizes);
   }
 
   const variants = item.variants;
@@ -78,15 +91,21 @@ function resolveItemPrice(item: BulkImportItemInput): number | null {
     return null;
   }
 
-  const variantPrices = variants
-    .map((variant) => Number(variant.price))
-    .filter((price) => !Number.isNaN(price) && price >= 0);
+  return normalizeMenuItemSizesInput(
+    variants.map((variant) => ({
+      nameAr: variant.labelAr ?? variant.label,
+      nameEn: variant.labelEn ?? variant.label,
+      price: variant.price,
+    })),
+  );
+}
 
-  if (variantPrices.length === 0) {
-    return null;
-  }
+function resolveItemPrice(item: BulkImportItemInput): number | null {
+  const sizes = resolveBulkItemSizes(item);
+  const resolved = resolveMenuItemBasePrice(item.price, sizes);
+  if (resolved !== null) return resolved;
 
-  return Math.min(...variantPrices);
+  return null;
 }
 
 function normalizeBulkCategoriesPayload(
@@ -580,7 +599,7 @@ export async function bulkImportCategories(
         SELECT COLUMN_NAME
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_NAME = 'MenuItems'
-        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent')
+        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent', 'sizes')
       `);
 
       const existingColumns = columnCheck.recordset.map(
@@ -589,6 +608,7 @@ export async function bulkImportCategories(
       const hasCategoryId = existingColumns.includes("categoryId");
       const hasOriginalPrice = existingColumns.includes("originalPrice");
       const hasDiscountPercent = existingColumns.includes("discountPercent");
+      const hasSizes = existingColumns.includes("sizes");
 
       const importedCategories: BulkImportResultCategory[] = [];
 
@@ -646,6 +666,7 @@ export async function bulkImportCategories(
               ? itemInput.sortOrder
               : itemIndex;
           const categoryLabel = categoryInput.nameEn.trim() || "main";
+          const itemSizes = resolveBulkItemSizes(itemInput);
           const itemPrice = resolveItemPrice(itemInput)!;
           const descriptionAr = itemInput.descriptionAr?.trim() || null;
           const descriptionEn = itemInput.descriptionEn?.trim() || null;
@@ -692,6 +713,16 @@ export async function bulkImportCategories(
             itemColumns.push("discountPercent");
             itemValues.push("@discountPercent");
             itemRequest.input("discountPercent", sql.Int, null);
+          }
+
+          if (hasSizes) {
+            itemColumns.push("sizes");
+            itemValues.push("@sizes");
+            itemRequest.input(
+              "sizes",
+              sql.NVarChar(sql.MAX),
+              serializeMenuItemSizes(itemSizes),
+            );
           }
 
           const itemResult = await itemRequest.query(`

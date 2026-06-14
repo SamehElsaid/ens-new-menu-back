@@ -13,6 +13,7 @@ import {
 import { recordAdClick } from "../services/adTracking.service";
 import { listHomepageFeaturedLogos } from "../services/homepageFeaturedLogos.service";
 import { getImageUrl } from "../utils/urlHelper";
+import { attachParsedSizesList } from "../utils/menuItemSizes";
 
 /** Optional table from QR: `?tableNumber=` or `?table=` (max 50 chars). */
 function parsePublicMenuTableNumber(req: Request): string | null {
@@ -233,7 +234,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         SELECT COLUMN_NAME 
         FROM INFORMATION_SCHEMA.COLUMNS 
         WHERE TABLE_NAME = 'MenuItems' 
-        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent')
+        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent', 'sizes')
       `);
 
     const existingColumns = columnCheck.recordset.map(
@@ -242,6 +243,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     const hasCategoryId = existingColumns.includes("categoryId");
     const hasOriginalPrice = existingColumns.includes("originalPrice");
     const hasDiscountPercent = existingColumns.includes("discountPercent");
+    const hasSizes = existingColumns.includes("sizes");
 
     // Get categories if Categories table exists with both locales
     let categories: any[] = [];
@@ -287,6 +289,9 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     }
     if (hasDiscountPercent) {
       selectFields.push("mi.discountPercent");
+    }
+    if (hasSizes) {
+      selectFields.push("mi.sizes");
     }
 
     // Get translations for both Arabic and English
@@ -368,11 +373,11 @@ export const getPublicMenu = async (req: Request, res: Response) => {
 
     const rating = ratingsResult.recordset[0];
 
-    const normalizedItems = itemsResult.recordset.map(
-      (item: { image?: string | null }) => ({
+    const normalizedItems = attachParsedSizesList(
+      itemsResult.recordset.map((item: { image?: string | null }) => ({
         ...item,
         image: getImageUrl(item.image),
-      }),
+      })),
     );
 
     // Group items by category

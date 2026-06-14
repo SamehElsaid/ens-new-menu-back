@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { getPool, sql } from "../config/database";
-import { ensureAdminCustomerSchema } from "./adminCustomerSchema.service";
+import { ensureAdminCustomerSchema } from "../schemas/adminCustomer.schema";
 import { sendPasswordResetEmail } from "./emailService";
 import { TOKEN_EXPIRY } from "../config/constants";
 import { logAdminActivity } from "./adminActivityLog.service";

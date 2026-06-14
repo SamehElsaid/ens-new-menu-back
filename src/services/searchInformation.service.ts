@@ -1,5 +1,5 @@
 import { getPool, sql } from "../config/database";
-import { ensureSearchInformationSchema } from "./searchInformationSchema.service";
+import { ensureSearchInformationSchema } from "../schemas/searchInformation.schema";
 
 export interface SearchInformation {
   id: number;

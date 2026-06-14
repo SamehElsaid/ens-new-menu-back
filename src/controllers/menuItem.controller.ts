@@ -7,6 +7,32 @@ import { sendApiError } from '../utils/apiErrorResponse';
 import { ApiErrors } from '../i18n/apiErrors';
 import { getMenuAccessForRequest } from '../utils/menuAccess';
 import { logMenuActivitySafe } from '../services/menuActivityLog.service';
+import {
+  attachParsedSizesList,
+  normalizeMenuItemSizesInput,
+  resolveMenuItemBasePrice,
+  serializeMenuItemSizes,
+  validateMenuItemSizes,
+} from '../utils/menuItemSizes';
+
+const MENU_ITEM_OPTIONAL_COLUMNS = [
+  'categoryId',
+  'originalPrice',
+  'discountPercent',
+  'sizes',
+] as const;
+
+async function getMenuItemOptionalColumns(
+  conn: { request: () => { query: (q: string) => Promise<{ recordset: Array<{ COLUMN_NAME: string }> }> } },
+): Promise<Set<string>> {
+  const columnCheck = await conn.request().query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = 'MenuItems'
+        AND COLUMN_NAME IN ('${MENU_ITEM_OPTIONAL_COLUMNS.join("', '")}')
+      `);
+  return new Set(columnCheck.recordset.map((r) => r.COLUMN_NAME));
+}
 
 async function requireMenuAccess(
   req: Request,
@@ -44,19 +70,11 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
     if (!(await requireMenuAccess(req, res, menuId))) return;
 
     // Check which columns exist
-    const columnCheck = await pool
-      .request()
-      .query(`
-        SELECT COLUMN_NAME 
-        FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_NAME = 'MenuItems' 
-        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent')
-      `);
-    
-    const existingColumns = columnCheck.recordset.map((r: any) => r.COLUMN_NAME);
-    const hasCategoryId = existingColumns.includes('categoryId');
-    const hasOriginalPrice = existingColumns.includes('originalPrice');
-    const hasDiscountPercent = existingColumns.includes('discountPercent');
+    const existingColumns = await getMenuItemOptionalColumns(pool);
+    const hasCategoryId = existingColumns.has('categoryId');
+    const hasOriginalPrice = existingColumns.has('originalPrice');
+    const hasDiscountPercent = existingColumns.has('discountPercent');
+    const hasSizes = existingColumns.has('sizes');
     
     const categoriesTableCheck = await pool
       .request()
@@ -98,6 +116,9 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
     }
     if (hasDiscountPercent) {
       selectFields.push('mi.discountPercent');
+    }
+    if (hasSizes) {
+      selectFields.push('mi.sizes');
     }
     
     selectFields.push(
@@ -197,7 +218,7 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
     const result = await dataRequest.query(dataQuery);
 
     // Normalize image URLs to absolute paths
-    const items = normalizeImageUrls(result.recordset);
+    const items = attachParsedSizesList(normalizeImageUrls(result.recordset));
 
     const totalPages = Math.ceil(total / limit);
 
@@ -232,17 +253,11 @@ export async function getMenuItem(req: Request, res: Response): Promise<void> {
 
     if (!(await requireMenuAccess(req, res, menuId))) return;
 
-    const columnCheck = await pool.request().query(`
-        SELECT COLUMN_NAME
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_NAME = 'MenuItems'
-        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent')
-      `);
-
-    const existingColumns = columnCheck.recordset.map((r: { COLUMN_NAME: string }) => r.COLUMN_NAME);
-    const hasCategoryId = existingColumns.includes('categoryId');
-    const hasOriginalPrice = existingColumns.includes('originalPrice');
-    const hasDiscountPercent = existingColumns.includes('discountPercent');
+    const existingColumns = await getMenuItemOptionalColumns(pool);
+    const hasCategoryId = existingColumns.has('categoryId');
+    const hasOriginalPrice = existingColumns.has('originalPrice');
+    const hasDiscountPercent = existingColumns.has('discountPercent');
+    const hasSizes = existingColumns.has('sizes');
 
     const categoriesTableCheck = await pool.request().query(`
         SELECT COUNT(*) as count
@@ -261,6 +276,9 @@ export async function getMenuItem(req: Request, res: Response): Promise<void> {
     }
     if (hasDiscountPercent) {
       selectFields.push('mi.discountPercent');
+    }
+    if (hasSizes) {
+      selectFields.push('mi.sizes');
     }
     selectFields.push(
       'mi.image',
@@ -304,7 +322,7 @@ export async function getMenuItem(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const item = normalizeImageUrls(result.recordset)[0];
+    const item = attachParsedSizesList(normalizeImageUrls(result.recordset))[0];
 
     res.setHeader('Content-Language', locale);
     res.json({ locale, item });
@@ -332,10 +350,23 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
       isAvailable,          // from backend
       available,            // from frontend
       sortOrder,
+      sizes,
     } = req.body;
 
     // Handle both 'isAvailable' and 'available' for backward compatibility
     const itemIsAvailable = isAvailable !== undefined ? isAvailable : (available !== undefined ? available : true);
+
+    const normalizedSizes = normalizeMenuItemSizesInput(sizes);
+    const sizesValidationError = validateMenuItemSizes(normalizedSizes);
+    if (sizesValidationError) {
+      sendApiError(res, req, 400, {
+        en: sizesValidationError,
+        ar: sizesValidationError,
+      });
+      return;
+    }
+
+    const resolvedPrice = resolveMenuItemBasePrice(price, normalizedSizes);
 
     // Validation
     if (!nameAr || !nameEn) {
@@ -343,7 +374,7 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
       return;
     }
 
-    if (!price || parseFloat(price) < 0) {
+    if (resolvedPrice === null) {
       sendApiError(res, req, 400, ApiErrors.validPriceRequired);
       return;
     }
@@ -351,16 +382,8 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
     const pool = await getPool();
 
     // Check if new columns exist for proper validation
-    const columnCheck = await pool
-      .request()
-      .query(`
-        SELECT COLUMN_NAME 
-        FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_NAME = 'MenuItems' 
-        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent')
-      `);
-    
-    const hasNewColumns = columnCheck.recordset.length > 0;
+    const optionalColumns = await getMenuItemOptionalColumns(pool);
+    const hasNewColumns = optionalColumns.size > 0;
 
     // Category validation - must have either categoryId or category
     if (hasNewColumns) {
@@ -380,26 +403,17 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
     if (!(await requireMenuAccess(req, res, menuId))) return;
 
     const itemId = await executeTransaction(async (transaction) => {
-      // Check which columns exist
-      const columnCheck = await transaction
-        .request()
-        .query(`
-          SELECT COLUMN_NAME 
-          FROM INFORMATION_SCHEMA.COLUMNS 
-          WHERE TABLE_NAME = 'MenuItems' 
-          AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent')
-        `);
-      
-      const existingColumns = columnCheck.recordset.map((r: any) => r.COLUMN_NAME);
-      const hasCategoryId = existingColumns.includes('categoryId');
-      const hasOriginalPrice = existingColumns.includes('originalPrice');
-      const hasDiscountPercent = existingColumns.includes('discountPercent');
+      const existingColumns = await getMenuItemOptionalColumns(transaction);
+      const hasCategoryId = existingColumns.has('categoryId');
+      const hasOriginalPrice = existingColumns.has('originalPrice');
+      const hasDiscountPercent = existingColumns.has('discountPercent');
+      const hasSizes = existingColumns.has('sizes');
 
       // Build INSERT statement dynamically based on available columns
       const request = transaction.request()
         .input('menuId', sql.Int, parseInt(menuId))
         .input('category', sql.NVarChar, category || 'main')
-        .input('price', sql.Decimal(10, 2), price)
+        .input('price', sql.Decimal(10, 2), resolvedPrice)
         .input('image', sql.NVarChar, image || null)
         .input('available', sql.Bit, itemIsAvailable)
         .input('sortOrder', sql.Int, sortOrder || 0);
@@ -423,6 +437,16 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
         columns.push('discountPercent');
         values.push('@discountPercent');
         request.input('discountPercent', sql.Int, discountPercent || null);
+      }
+
+      if (hasSizes) {
+        columns.push('sizes');
+        values.push('@sizes');
+        request.input(
+          'sizes',
+          sql.NVarChar(sql.MAX),
+          serializeMenuItemSizes(normalizedSizes),
+        );
       }
 
       const itemResult = await request.query(`
@@ -495,7 +519,21 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
       isAvailable,
       available,            // Add this for compatibility
       sortOrder,
+      sizes,
     } = req.body;
+
+    const normalizedSizes =
+      sizes !== undefined ? normalizeMenuItemSizesInput(sizes) : undefined;
+    if (normalizedSizes !== undefined) {
+      const sizesValidationError = validateMenuItemSizes(normalizedSizes);
+      if (sizesValidationError) {
+        sendApiError(res, req, 400, {
+          en: sizesValidationError,
+          ar: sizesValidationError,
+        });
+        return;
+      }
+    }
 
     const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
     if (!access.ok) {
@@ -522,20 +560,11 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
         throw new Error('Menu item not found or access denied');
       }
 
-      // Check which columns exist
-      const columnCheck = await transaction
-        .request()
-        .query(`
-          SELECT COLUMN_NAME 
-          FROM INFORMATION_SCHEMA.COLUMNS 
-          WHERE TABLE_NAME = 'MenuItems' 
-          AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent')
-        `);
-      
-      const existingColumns = columnCheck.recordset.map((r: any) => r.COLUMN_NAME);
-      const hasCategoryId = existingColumns.includes('categoryId');
-      const hasOriginalPrice = existingColumns.includes('originalPrice');
-      const hasDiscountPercent = existingColumns.includes('discountPercent');
+      const existingColumns = await getMenuItemOptionalColumns(transaction);
+      const hasCategoryId = existingColumns.has('categoryId');
+      const hasOriginalPrice = existingColumns.has('originalPrice');
+      const hasDiscountPercent = existingColumns.has('discountPercent');
+      const hasSizes = existingColumns.has('sizes');
 
       // Update menu item
       const updates: string[] = [];
@@ -549,9 +578,17 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
         updates.push('category = @category');
         request.input('category', sql.NVarChar, category);
       }
-      if (price !== undefined) {
+
+      const resolvedPrice =
+        normalizedSizes !== undefined
+          ? resolveMenuItemBasePrice(price, normalizedSizes)
+          : price !== undefined
+            ? resolveMenuItemBasePrice(price, null)
+            : undefined;
+
+      if (resolvedPrice !== undefined) {
         updates.push('price = @price');
-        request.input('price', sql.Decimal(10, 2), price);
+        request.input('price', sql.Decimal(10, 2), resolvedPrice);
       }
       if (hasOriginalPrice && originalPrice !== undefined) {
         updates.push('originalPrice = @originalPrice');
@@ -573,6 +610,14 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
       if (sortOrder !== undefined) {
         updates.push('sortOrder = @sortOrder');
         request.input('sortOrder', sql.Int, sortOrder);
+      }
+      if (hasSizes && normalizedSizes !== undefined) {
+        updates.push('sizes = @sizes');
+        request.input(
+          'sizes',
+          sql.NVarChar(sql.MAX),
+          serializeMenuItemSizes(normalizedSizes),
+        );
       }
 
       if (updates.length > 0) {

@@ -13,7 +13,7 @@ import { MAX_FCM_TOKEN_LEN, addUserFcmToken, clearUserFcmTokens } from "../servi
 import { SubscriptionDowngradeService } from "../services/subscriptionDowngrade.service";
 import { PaymentService } from "../services/paymentService";
 import { getActivePlansForDisplay } from "../services/plans.service";
-import { ensureRestaurantNameSchema } from "../services/userSchema.service";
+import { ensureRestaurantNameSchema } from "../schemas/restaurantName.schema";
 
 // Get user profile
 export async function getProfile(req: Request, res: Response): Promise<void> {

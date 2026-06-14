@@ -12,11 +12,6 @@ export class BulkImportLimitError extends Error {
   }
 }
 
-/** Kept for backwards compatibility — usage limits are disabled. */
-export async function ensureBulkImportUsageSchema(): Promise<void> {
-  return;
-}
-
 export async function canUserBulkImport(_userId: number): Promise<{
   allowed: boolean;
   used: number;

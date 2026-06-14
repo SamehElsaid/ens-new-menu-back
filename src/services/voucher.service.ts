@@ -1,6 +1,6 @@
 import { getPool, sql } from "../config/database";
 import { ApiError } from "../middleware/errorHandler";
-import { ensureVoucherSchema } from "./voucherSchema.service";
+import { ensureVoucherSchema } from "../schemas/voucher.schema";
 import { notifySubscriptionCreated } from "./notificationService";
 
 export type VoucherType = "discount" | "duration";
