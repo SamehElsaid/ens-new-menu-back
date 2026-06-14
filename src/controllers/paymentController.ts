@@ -239,7 +239,7 @@ async function initiateProSubscriptionPayment(
       400,
       "name and mobile are required",
       true,
-      "الاسم والجوال مطلوبان",
+      "الاسم والهاتف مطلوبان",
     );
   }
 

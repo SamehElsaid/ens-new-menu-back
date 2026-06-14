@@ -17,7 +17,7 @@ export class SubscriptionDowngradeService {
 
       // Get free plan limits
       const freePlanResult = await pool.request().query(`
-        SELECT id, name, maxMenus, maxProductsPerMenu
+        SELECT id, name, maxMenus
         FROM Plans
         WHERE priceMonthly = 0
       `);
@@ -28,7 +28,7 @@ export class SubscriptionDowngradeService {
       }
 
       const freePlan = freePlanResult.recordset[0];
-      const { maxMenus, maxProductsPerMenu } = freePlan;
+      const { maxMenus } = freePlan;
 
       // Get user's current menus
       const menusResult = await pool.request()
@@ -63,35 +63,7 @@ export class SubscriptionDowngradeService {
         }
       }
 
-      // For each menu, limit products to free plan limit
-      for (const menu of userMenus) {
-        const productsResult = await pool.request()
-          .input('menuId', sql.Int, menu.id)
-          .query(`
-            SELECT id, createdAt
-            FROM MenuItems
-            WHERE menuId = @menuId
-            ORDER BY createdAt ASC
-          `);
-
-        const products = productsResult.recordset;
-
-        if (products.length > maxProductsPerMenu && maxProductsPerMenu !== -1) {
-          // Delete products exceeding the limit (keep oldest ones)
-          const productsToDelete = products.slice(maxProductsPerMenu);
-
-          for (const product of productsToDelete) {
-            await pool.request()
-              .input('productId', sql.Int, product.id)
-              .query(`
-                DELETE FROM MenuItems
-                WHERE id = @productId
-              `);
-
-            logger.info(`Deleted product ${product.id} from menu ${menu.id} (exceeded free plan limit)`);
-          }
-        }
-      }
+      // Products/items are kept on downgrade — free plan limits only block new additions (see checkProductLimit)
 
       // Delete all ads from user's menus (free plan doesn't support ads)
       const adsResult = await pool.request()

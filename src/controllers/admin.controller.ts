@@ -23,6 +23,10 @@ import {
   getAdminDisplayName,
   resolveAccountStatus,
 } from "../services/adminCustomer.service";
+import {
+  logAdminActivity,
+  getUserSnapshot,
+} from "../services/adminActivityLog.service";
 
 // Get Admin Dashboard Statistics
 export async function getAdminStats(
@@ -165,10 +169,7 @@ const USER_PRO_PLAN_SQL = `(
   AND ISNULL(p.priceMonthly, 0) > 0
 )`;
 
-function applyUserListFilter(
-  filter: string,
-  whereConditions: string[],
-): void {
+function applyUserListFilter(filter: string, whereConditions: string[]): void {
   switch (filter) {
     case "active":
       whereConditions.push("u.isSuspended = 0");
@@ -347,15 +348,21 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
       WHERE u.role = 'user'
     `;
 
-    const [usersResult, countResult, statsResult, noMenuStatsResult, planStatsResult, usersOnHomepage] =
-      await Promise.all([
-        request.query(query),
-        request.query(countQuery),
-        pool.request().query(statsQuery),
-        pool.request().query(noMenuStatsQuery),
-        pool.request().query(planStatsQuery),
-        countUsersOnHomepage(),
-      ]);
+    const [
+      usersResult,
+      countResult,
+      statsResult,
+      noMenuStatsResult,
+      planStatsResult,
+      usersOnHomepage,
+    ] = await Promise.all([
+      request.query(query),
+      request.query(countQuery),
+      pool.request().query(statsQuery),
+      pool.request().query(noMenuStatsQuery),
+      pool.request().query(planStatsQuery),
+      countUsersOnHomepage(),
+    ]);
 
     const statsRow = statsResult.recordset[0];
     const planStatsRow = planStatsResult.recordset[0];
@@ -570,8 +577,7 @@ export async function toggleUserSuspension(
       .input("userId", sql.Int, id)
       .input("isSuspended", sql.Bit, newStatus ? 1 : 0)
       .input("suspendedAt", sql.DateTime2, newStatus ? new Date() : null)
-      .input("suspendedReason", sql.NVarChar, suspendReason)
-      .query(`
+      .input("suspendedReason", sql.NVarChar, suspendReason).query(`
         UPDATE Users
         SET isSuspended = @isSuspended,
             suspendedAt = @suspendedAt,
@@ -658,7 +664,7 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
 
     // Check if user exists and is not an admin
     const userResult = await pool.request().input("userId", sql.Int, id).query(`
-        SELECT id, role FROM Users WHERE id = @userId
+        SELECT id, name, email, role FROM Users WHERE id = @userId
       `);
 
     if (userResult.recordset.length === 0) {
@@ -671,10 +677,26 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    const target = userResult.recordset[0];
+    const actorAdminId = req.user?.userId ?? null;
+    const actorAdminName = actorAdminId
+      ? await getAdminDisplayName(actorAdminId)
+      : "Admin";
+
     // Delete user (cascade will handle related records)
     await pool.request().input("userId", sql.Int, id).query(`
         DELETE FROM Users WHERE id = @userId
       `);
+
+    await logAdminActivity({
+      actorAdminId,
+      actorAdminName,
+      action: "user_deleted",
+      targetType: "user",
+      targetId: Number(id),
+      targetName: String(target.name),
+      targetEmail: String(target.email),
+    });
 
     res.json({ message: "User deleted successfully" });
   } catch (error) {
@@ -1141,6 +1163,23 @@ export async function createAdmin(req: Request, res: Response): Promise<void> {
     const normalizedPermissions = normalizePermissionKeys(permissions);
     await saveAdminPermissions(adminId, normalizedPermissions);
 
+    const actorAdminId = req.user?.userId ?? null;
+    const actorAdminName = actorAdminId
+      ? await getAdminDisplayName(actorAdminId)
+      : "Admin";
+    await logAdminActivity({
+      actorAdminId,
+      actorAdminName,
+      action: "admin_created",
+      targetType: "admin",
+      targetId: adminId,
+      targetName: String(result.recordset[0].name),
+      targetEmail: String(result.recordset[0].email),
+      details: normalizedPermissions
+        ? JSON.stringify({ permissions: normalizedPermissions })
+        : null,
+    });
+
     res.status(201).json({
       id: adminId,
       name: result.recordset[0].name,
@@ -1165,7 +1204,8 @@ export async function patchAdminPermissions(
     }
 
     const pool = await getPool();
-    const userResult = await pool.request().input("userId", sql.Int, adminId).query(`
+    const userResult = await pool.request().input("userId", sql.Int, adminId)
+      .query(`
       SELECT id FROM Users WHERE id = @userId AND role = 'admin'
     `);
 
@@ -1176,6 +1216,24 @@ export async function patchAdminPermissions(
 
     const normalized = normalizePermissionKeys(req.body?.permissions);
     await saveAdminPermissions(adminId, normalized);
+
+    const actorAdminId = req.user?.userId ?? null;
+    const actorAdminName = actorAdminId
+      ? await getAdminDisplayName(actorAdminId)
+      : "Admin";
+    const targetSnapshot = await getUserSnapshot(adminId);
+    await logAdminActivity({
+      actorAdminId,
+      actorAdminName,
+      action: "admin_permissions_updated",
+      targetType: "admin",
+      targetId: adminId,
+      targetName: targetSnapshot?.name ?? `Admin #${adminId}`,
+      targetEmail: targetSnapshot?.email ?? null,
+      details: normalized
+        ? JSON.stringify({ permissions: normalized })
+        : JSON.stringify({ permissions: "full_access" }),
+    });
 
     res.json({ id: adminId, permissions: normalized });
   } catch (error) {
@@ -1198,7 +1256,7 @@ export async function deleteAdmin(req: Request, res: Response): Promise<void> {
     const pool = await getPool();
 
     const userResult = await pool.request().input("userId", sql.Int, id).query(`
-        SELECT id, role FROM Users WHERE id = @userId
+        SELECT id, name, email, role FROM Users WHERE id = @userId
       `);
 
     if (userResult.recordset.length === 0) {
@@ -1211,10 +1269,26 @@ export async function deleteAdmin(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    const target = userResult.recordset[0];
+    const actorAdminId = req.user?.userId ?? null;
+    const actorAdminName = actorAdminId
+      ? await getAdminDisplayName(actorAdminId)
+      : "Admin";
+
     await pool.request().input("userId", sql.Int, id).query(`
       DELETE FROM AdminPermissions WHERE adminUserId = @userId;
       DELETE FROM Users WHERE id = @userId;
     `);
+
+    await logAdminActivity({
+      actorAdminId,
+      actorAdminName,
+      action: "admin_deleted",
+      targetType: "admin",
+      targetId: Number(id),
+      targetName: String(target.name),
+      targetEmail: String(target.email),
+    });
 
     res.json({ message: "Administrator deleted successfully" });
   } catch (error) {
@@ -1295,8 +1369,7 @@ export async function getAllAdmins(req: Request, res: Response): Promise<void> {
 
     const admins = adminsResult.recordset.map((a: { id: number }) => ({
       ...a,
-      permissions:
-        a.id in permissionsMap ? permissionsMap[a.id] : null,
+      permissions: a.id in permissionsMap ? permissionsMap[a.id] : null,
     }));
 
     res.json({
@@ -1384,7 +1457,7 @@ export async function updateUserSubscription(
 
     // Check if user exists
     const userResult = await pool.request().input("userId", sql.Int, id).query(`
-      SELECT id, role FROM Users WHERE id = @userId
+      SELECT id, name, email, role FROM Users WHERE id = @userId
     `);
 
     if (userResult.recordset.length === 0) {
@@ -1451,6 +1524,26 @@ export async function updateUserSubscription(
     const planName = planResult.recordset[0].name;
     const isFreePlan =
       typeof planName === "string" && planName.toLowerCase() === "free";
+
+    const actorAdminId = req.user?.userId ?? null;
+    const actorAdminName = actorAdminId
+      ? await getAdminDisplayName(actorAdminId)
+      : "Admin";
+    await logAdminActivity({
+      actorAdminId,
+      actorAdminName,
+      action: "user_subscription_updated",
+      targetType: "user",
+      targetId: Number(id),
+      targetName: String(userResult.recordset[0].name),
+      targetEmail: String(userResult.recordset[0].email),
+      details: JSON.stringify({
+        planId,
+        planName,
+        billingCycle,
+        status,
+      }),
+    });
 
     // عند التبديل لخطة Free: تطبيق حدود الخطة (إيقاف المنيوهات الزائدة عن الحد)
     if (isFreePlan) {

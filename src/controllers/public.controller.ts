@@ -593,8 +593,7 @@ export const postMenuItemView = async (
     const itemResult = await pool
       .request()
       .input("menuId", sql.Int, menuId)
-      .input("itemId", sql.Int, itemId)
-      .query(`
+      .input("itemId", sql.Int, itemId).query(`
         SELECT 1 AS ok FROM MenuItems
         WHERE id = @itemId AND menuId = @menuId
       `);
@@ -930,10 +929,7 @@ export const getMenuCustomAds = async (req: Request, res: Response) => {
 };
 
 /** POST /api/public/ads/:id/click — track ad click from public menu */
-export async function postAdClick(
-  req: Request,
-  res: Response,
-): Promise<void> {
+export async function postAdClick(req: Request, res: Response): Promise<void> {
   const adId = parseInt(String(req.params.id ?? ""), 10);
   if (!Number.isFinite(adId) || adId < 1) {
     res.status(400).json({ ok: false });

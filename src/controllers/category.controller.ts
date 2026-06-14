@@ -567,50 +567,7 @@ export async function bulkImportCategories(
 
     if (!(await requireMenuAccess(req, res, menuId))) return;
 
-    const totalItemsToImport = categoriesInput.reduce(
-      (sum, category) => sum + (category.items?.length ?? 0),
-      0,
-    );
-
-    const pool = await getPool();
     const userId = req.user!.userId;
-
-    const planResult = await pool
-      .request()
-      .input("userId", sql.Int, userId)
-      .input("menuId", sql.Int, menuIdNum).query(`
-        SELECT TOP 1 p.maxProductsPerMenu, p.name as planName
-        FROM Menus m
-        JOIN Subscriptions s ON m.userId = s.userId
-          AND s.status = 'active'
-          AND (s.endDate IS NULL OR s.endDate > GETDATE())
-        JOIN Plans p ON s.planId = p.id
-        WHERE m.id = @menuId AND m.userId = @userId
-        ORDER BY s.id DESC
-      `);
-
-    if (planResult.recordset.length > 0) {
-      const { maxProductsPerMenu, planName } = planResult.recordset[0];
-      if (maxProductsPerMenu !== -1) {
-        const countResult = await pool
-          .request()
-          .input("menuId", sql.Int, menuIdNum)
-          .query(
-            "SELECT COUNT(*) as count FROM MenuItems WHERE menuId = @menuId",
-          );
-        const currentCount = countResult.recordset[0].count;
-        if (currentCount + totalItemsToImport > maxProductsPerMenu) {
-          sendApiError(res, req, 403, ApiErrors.bulkImportProductLimitExceeded, {
-            code: "PRODUCT_LIMIT",
-            currentCount,
-            importing: totalItemsToImport,
-            maxProductsPerMenu,
-            planName,
-          });
-          return;
-        }
-      }
-    }
 
     const result = await executeTransaction(async (transaction) => {
       await assertAndRecordBulkImportUsage(

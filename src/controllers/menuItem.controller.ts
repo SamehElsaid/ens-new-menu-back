@@ -218,6 +218,102 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
   }
 }
 
+// Get single menu item by ID
+export async function getMenuItem(req: Request, res: Response): Promise<void> {
+  try {
+    const { menuId, itemId } = req.params;
+    const localeParam = (req.query.locale as string)?.toLowerCase();
+    const locale =
+      localeParam === 'en' || localeParam === 'ar'
+        ? localeParam
+        : getLocaleFromAcceptLanguage(req, 'ar');
+
+    const pool = await getPool();
+
+    if (!(await requireMenuAccess(req, res, menuId))) return;
+
+    const columnCheck = await pool.request().query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = 'MenuItems'
+        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent')
+      `);
+
+    const existingColumns = columnCheck.recordset.map((r: { COLUMN_NAME: string }) => r.COLUMN_NAME);
+    const hasCategoryId = existingColumns.includes('categoryId');
+    const hasOriginalPrice = existingColumns.includes('originalPrice');
+    const hasDiscountPercent = existingColumns.includes('discountPercent');
+
+    const categoriesTableCheck = await pool.request().query(`
+        SELECT COUNT(*) as count
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_NAME = 'Categories'
+      `);
+    const hasCategoriesTable = categoriesTableCheck.recordset[0].count > 0;
+
+    const selectFields: string[] = ['mi.id'];
+    if (hasCategoryId) {
+      selectFields.push('mi.categoryId');
+    }
+    selectFields.push('mi.category', 'mi.price');
+    if (hasOriginalPrice) {
+      selectFields.push('mi.originalPrice');
+    }
+    if (hasDiscountPercent) {
+      selectFields.push('mi.discountPercent');
+    }
+    selectFields.push(
+      'mi.image',
+      'mi.available',
+      'mi.sortOrder',
+      'mit.name',
+      'mit.description',
+      'mit_ar.description as description_ar',
+      'mit_en.description as description_en',
+      'mit_ar.name as name_ar',
+      'mit_en.name as name_en',
+    );
+    if (hasCategoriesTable && hasCategoryId) {
+      selectFields.push('ct.name as categoryName');
+    }
+
+    let joinClause = `
+          LEFT JOIN MenuItemTranslations mit ON mi.id = mit.menuItemId AND mit.locale = @locale
+          LEFT JOIN MenuItemTranslations mit_ar ON mi.id = mit_ar.menuItemId AND mit_ar.locale = 'ar'
+          LEFT JOIN MenuItemTranslations mit_en ON mi.id = mit_en.menuItemId AND mit_en.locale = 'en'`;
+    if (hasCategoriesTable && hasCategoryId) {
+      joinClause +=
+        '\n          LEFT JOIN Categories c ON mi.categoryId = c.id\n          LEFT JOIN CategoryTranslations ct ON c.id = ct.categoryId AND ct.locale = @locale';
+    }
+
+    const result = await pool
+      .request()
+      .input('menuId', sql.Int, parseInt(menuId, 10))
+      .input('itemId', sql.Int, parseInt(itemId, 10))
+      .input('locale', sql.NVarChar, locale)
+      .query(`
+        SELECT
+          ${selectFields.join(', ')}
+        FROM MenuItems mi
+        ${joinClause}
+        WHERE mi.menuId = @menuId AND mi.id = @itemId
+      `);
+
+    if (result.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.menuItemNotFound);
+      return;
+    }
+
+    const item = normalizeImageUrls(result.recordset)[0];
+
+    res.setHeader('Content-Language', locale);
+    res.json({ locale, item });
+  } catch (error) {
+    logger.error('Get menu item error:', error);
+    sendApiError(res, req, 500, ApiErrors.failedFetchMenuItem);
+  }
+}
+
 // Create menu item
 export async function createMenuItem(req: Request, res: Response): Promise<void> {
   try {

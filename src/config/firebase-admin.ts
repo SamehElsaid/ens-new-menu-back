@@ -1,14 +1,15 @@
 /**
- * Firebase Admin — load credentials from disk only (never commit JSON keys).
+ * Firebase Admin — credentials via environment only (never commit JSON keys to git).
  *
  * Set one of:
- * - FIREBASE_SERVICE_ACCOUNT_JSON — the full service-account JSON as an inline string (highest priority)
+ * - FIREBASE_SERVICE_ACCOUNT_JSON — full service-account JSON as an inline string (highest priority)
  * - FIREBASE_SERVICE_ACCOUNT_PATH — path to the downloaded service-account JSON (relative to cwd or absolute)
  * - GOOGLE_APPLICATION_CREDENTIALS — standard GCP env var (path to the same JSON)
  *
- * Place the file locally (e.g. `src/config/your-project-firebase-adminsdk.json`) and add `*-firebase-adminsdk-*.json` to .gitignore.
+ * Store the JSON outside the repository (e.g. a secrets folder) and reference it by path.
+ * See `.env.example` for variable names.
  *
- * SenderId mismatch: the app client must use the same Firebase project as this JSON.
+ * SenderId mismatch: the app client must use the same Firebase project as this credential.
  */
 
 import * as fs from "fs";
@@ -27,8 +28,7 @@ function resolvePath(p: string): string {
 }
 
 /**
- * Resolve credential JSON: cwd, then `src/config`-relative, then basename next to this file,
- * then common monorepo layouts (cwd = repo root vs backend folder).
+ * Resolve credential JSON from cwd-relative or absolute path.
  */
 function resolveCredentialFilePath(spec: string): string {
   const trimmed = spec.trim();
@@ -38,19 +38,10 @@ function resolveCredentialFilePath(spec: string): string {
     if (!candidates.includes(n)) candidates.push(n);
   };
 
-  const base = trimmed.endsWith(".json") ? path.basename(trimmed) : "";
-
   push(resolvePath(trimmed));
 
   if (!path.isAbsolute(trimmed)) {
     push(path.join(__dirname, trimmed));
-    if (base) {
-      push(path.join(__dirname, base));
-      push(path.join(process.cwd(), "src", "config", base));
-      push(
-        path.join(process.cwd(), "ens-new-menu-back", "src", "config", base),
-      );
-    }
   }
 
   const found = candidates.find((p) => fs.existsSync(p));
