@@ -468,7 +468,7 @@ export const ApiErrors = {
   },
   emailOrPhoneRequired: {
     en: "Email or phone number is required",
-    ar: "البريد الإلكتروني أو رقم الجوال مطلوب",
+    ar: "البريد الإلكتروني أو رقم الهاتف مطلوب",
   },
   failedCheckAvailability: {
     en: "Failed to check availability",
@@ -476,7 +476,7 @@ export const ApiErrors = {
   },
   phoneRequired: {
     en: "Phone number is required",
-    ar: "رقم الجوال مطلوب",
+    ar: "رقم الهاتف مطلوب",
   },
   emailAlreadyRegistered: {
     en: "Email already registered",
@@ -484,7 +484,7 @@ export const ApiErrors = {
   },
   phoneAlreadyRegistered: {
     en: "Phone number already registered",
-    ar: "رقم الجوال مسجّل مسبقًا",
+    ar: "رقم الهاتف مسجّل مسبقًا",
   },
   freePlanNotConfigured: {
     en: "Free plan not configured",
@@ -820,19 +820,19 @@ export const ApiErrors = {
   },
   verifykitNotConfigured: {
     en: "Phone verification service is not configured",
-    ar: "خدمة التحقق من رقم الجوال غير مهيأة",
+    ar: "خدمة التحقق من رقم الهاتف غير مهيأة",
   },
   verifykitInitFailed: {
     en: "Failed to load phone verification options",
-    ar: "فشل تحميل خيارات التحقق من رقم الجوال",
+    ar: "فشل تحميل خيارات التحقق من رقم الهاتف",
   },
   verifykitStartFailed: {
     en: "Failed to start phone verification",
-    ar: "فشل بدء التحقق من رقم الجوال",
+    ar: "فشل بدء التحقق من رقم الهاتف",
   },
   verifykitCheckFailed: {
     en: "Failed to check phone verification status",
-    ar: "فشل التحقق من حالة رقم الجوال",
+    ar: "فشل التحقق من حالة رقم الهاتف",
   },
   verifykitCountryFailed: {
     en: "Failed to load country list",
@@ -844,10 +844,10 @@ export const ApiErrors = {
   },
   verifykitResultFailed: {
     en: "Failed to complete phone verification",
-    ar: "فشل إكمال التحقق من رقم الجوال",
+    ar: "فشل إكمال التحقق من رقم الهاتف",
   },
   verifykitAccessTokenFailed: {
     en: "Failed to initialize phone verification widget",
-    ar: "فشل تهيئة واجهة التحقق من رقم الجوال",
+    ar: "فشل تهيئة واجهة التحقق من رقم الهاتف",
   },
 } as const satisfies Record<string, BilingualMessage>;

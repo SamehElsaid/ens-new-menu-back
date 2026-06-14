@@ -66,73 +66,13 @@ export async function checkMenuLimit(
   }
 }
 
+/** Product limits disabled — menus may have unlimited items. */
 export async function checkProductLimit(
-  req: Request,
-  res: Response,
+  _req: Request,
+  _res: Response,
   next: NextFunction,
 ): Promise<void> {
-  try {
-    const userId = req.user!.userId;
-    const menuId = parseInt(req.params.menuId);
-    const pool = await getPool();
-
-    // Get menu's plan limit (get the most recent active subscription by id)
-    const planResult = await pool
-      .request()
-      .input("userId", sql.Int, userId)
-      .input("menuId", sql.Int, menuId).query(`
-        SELECT TOP 1 p.maxProductsPerMenu, p.name as planName
-        FROM Menus m
-        JOIN Subscriptions s ON m.userId = s.userId 
-          AND s.status = 'active' 
-          AND (s.endDate IS NULL OR s.endDate > GETDATE())
-        JOIN Plans p ON s.planId = p.id
-        WHERE m.id = @menuId AND m.userId = @userId
-        ORDER BY s.id DESC
-      `);
-
-    if (planResult.recordset.length === 0) {
-      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
-      return;
-    }
-
-    const { maxProductsPerMenu, planName } = planResult.recordset[0];
-
-    // -1 means unlimited
-    if (maxProductsPerMenu === -1) {
-      next();
-      return;
-    }
-
-    // Count menu's products
-    const countResult = await pool
-      .request()
-      .input("menuId", sql.Int, menuId)
-      .query("SELECT COUNT(*) as count FROM MenuItems WHERE menuId = @menuId");
-
-    const currentCount = countResult.recordset[0].count;
-
-    if (currentCount >= maxProductsPerMenu) {
-      const en = `You have reached the maximum number of products (${maxProductsPerMenu}) for your ${planName} plan.`;
-      const ar = `لقد وصلت للحد الأقصى من المنتجات (${maxProductsPerMenu}) لخطة ${planName}.`;
-      sendApiError(
-        res,
-        req,
-        403,
-        { en, ar },
-        {
-          currentCount,
-          maxProductsPerMenu,
-          planName,
-        },
-      );
-      return;
-    }
-
-    next();
-  } catch (error) {
-    sendApiError(res, req, 500, ApiErrors.failedCheckProductLimit);
-  }
+  next();
 }
 
 /** Staff & tables APIs — Pro (paid) plans only; Free users get PRO_REQUIRED. */
