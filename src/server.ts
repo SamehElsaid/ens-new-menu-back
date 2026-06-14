@@ -173,7 +173,7 @@ app.get("/api/searchInformation/:id", getSearchInformationByIdHandler);
 // Other public routes (menus, plans, …)
 app.use("/api/public", publicRoutes);
 
-// API key for all routes registered below (auth login/signup skip via isPublicRoute)
+// API key for all routes registered below (except isPublicRoute / isFullyOpenPath)
 app.use(decryptApiKey);
 
 // ------------------------------------------------------------------

@@ -12,14 +12,6 @@ require("dotenv").config();
  */
 const publicRoutes = [
   "/health",
-  "/api/auth/login",
-  "/api/auth/signup",
-  "/api/auth/check-availability",
-  "/api/auth/verify-email",
-  "/api/auth/resend-verification",
-  "/api/auth/forgot-password",
-  "/api/auth/reset-password",
-  "/api/auth/refresh",
   "/api/verifykit",
   "/api/public",
   "/api/public/app-version",
@@ -66,7 +58,7 @@ function isPublicRoute(req: Request): boolean {
  * Middleware to decrypt x-api-key header if present
  * Decrypts the API key using ENCRYPTION_KEY from environment variables
  * Logs the decrypted data for debugging
- * Skips validation for public routes (login, signup, etc.)
+ * Skips validation for public routes (health, payment webhooks, etc.)
  */
 /** Paths that must never require x-api-key (mobile, public menus, health). */
 function isFullyOpenPath(req: Request): boolean {
