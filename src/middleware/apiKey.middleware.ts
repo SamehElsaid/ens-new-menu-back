@@ -3,6 +3,7 @@ import { decryptDataApi } from "../utils/decrypt";
 import { logger } from "../utils/logger";
 import { pickLocalized, sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+import { isPaymentTestRoutesEnabled } from "../utils/devFlags";
 
 require("dotenv").config();
 
@@ -28,7 +29,9 @@ const publicRoutes = [
   // EasyKash return URL + webhook (secured by gateway ref / HMAC, not x-api-key)
   "/api/payment/redirect",
   "/api/payment/easykash/callback",
-  "/api/payment/easykash/callback/test",
+  ...(isPaymentTestRoutesEnabled()
+    ? ["/api/payment/easykash/callback/test", "/api/payment/test"]
+    : []),
 ];
 
 /**

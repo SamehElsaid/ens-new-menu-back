@@ -8,7 +8,7 @@ import { ApiErrors } from "../i18n/apiErrors";
 export async function checkMenuLimit(
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     const userId = req.user!.userId;
@@ -38,7 +38,7 @@ export async function checkMenuLimit(
       .request()
       .input("userId", sql.Int, userId)
       .query(
-        "SELECT COUNT(*) as count FROM Menus WHERE userId = @userId AND isActive = 1"
+        "SELECT COUNT(*) as count FROM Menus WHERE userId = @userId AND isActive = 1",
       );
 
     const currentCount = countResult.recordset[0].count;
@@ -46,11 +46,17 @@ export async function checkMenuLimit(
     if (currentCount >= maxMenus) {
       const en = `You have reached the maximum number of menus (${maxMenus}) for your ${planName} plan.`;
       const ar = `لقد وصلت للحد الأقصى من القوائم (${maxMenus}) لخطة ${planName}.`;
-      sendApiError(res, req, 403, { en, ar }, {
-        currentCount,
-        maxMenus,
-        planName,
-      });
+      sendApiError(
+        res,
+        req,
+        403,
+        { en, ar },
+        {
+          currentCount,
+          maxMenus,
+          planName,
+        },
+      );
       return;
     }
 
@@ -63,7 +69,7 @@ export async function checkMenuLimit(
 export async function checkProductLimit(
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): Promise<void> {
   try {
     const userId = req.user!.userId;
@@ -109,11 +115,17 @@ export async function checkProductLimit(
     if (currentCount >= maxProductsPerMenu) {
       const en = `You have reached the maximum number of products (${maxProductsPerMenu}) for your ${planName} plan.`;
       const ar = `لقد وصلت للحد الأقصى من المنتجات (${maxProductsPerMenu}) لخطة ${planName}.`;
-      sendApiError(res, req, 403, { en, ar }, {
-        currentCount,
-        maxProductsPerMenu,
-        planName,
-      });
+      sendApiError(
+        res,
+        req,
+        403,
+        { en, ar },
+        {
+          currentCount,
+          maxProductsPerMenu,
+          planName,
+        },
+      );
       return;
     }
 
@@ -132,10 +144,16 @@ export async function requireProPlan(
   try {
     const userId = req.user!.userId;
     if (await isUserOnFreePlan(userId)) {
-      sendApiError(res, req, 403, {
-        en: ApiErrors.proFeatureOnly.en,
-        ar: ApiErrors.proFeatureOnly.ar,
-      }, { code: "PRO_REQUIRED" });
+      sendApiError(
+        res,
+        req,
+        403,
+        {
+          en: ApiErrors.proFeatureOnly.en,
+          ar: ApiErrors.proFeatureOnly.ar,
+        },
+        { code: "PRO_REQUIRED" },
+      );
       return;
     }
     next();

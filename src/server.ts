@@ -31,6 +31,7 @@ import { ensureMenuTablesSchema } from "./services/menuTablesSchema.service";
 import { ensureBulkImportUsageSchema } from "./services/bulkImportUsage.service";
 import { ensureHomepageFeaturedLogosSchema } from "./services/homepageFeaturedLogosSchema.service";
 import { ensureAdminCustomerSchema } from "./services/adminCustomerSchema.service";
+import { ensureAdminActivityLogSchema } from "./services/adminActivityLog.service";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
 // Routes
 import authRoutes from "./routes/auth.routes";
@@ -38,7 +39,6 @@ import googleAuthRoutes from "./routes/google-auth.routes";
 import verifykitRoutes from "./routes/verifykit.routes";
 import publicRoutes from "./routes/public.routes";
 import menuRoutes from "./routes/menu.routes";
-import menuItemsRoutes from "./routes/menuItems.routes";
 import categoryRoutes from "./routes/category.routes";
 import userRoutes from "./routes/user.routes";
 import adminRoutes from "./routes/admin.routes";
@@ -185,7 +185,6 @@ app.use("/api/staff-auth", staffAuthRoutes);
 // Backward-compatible alias for clients that accidentally prefix /api twice.
 app.use("/api/api/staff-auth", staffAuthRoutes);
 app.use("/api/menus", menuRoutes);
-app.use("/api/menus", menuItemsRoutes);
 // Must be before app.use("/api", categoryRoutes): that router runs requireAuth on all /api/* paths
 app.use("/api/payment", paymentRoutes);
 app.use("/api/vouchers", voucherRoutes);
@@ -194,8 +193,16 @@ app.use("/api/user", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.post("/api/promo", requireAdmin, postPromoHandler);
 app.post("/api/searchInformation", requireAdmin, postSearchInformationHandler);
-app.put("/api/searchInformation/:id", requireAdmin, putSearchInformationHandler);
-app.delete("/api/searchInformation/:id", requireAdmin, deleteSearchInformationHandler);
+app.put(
+  "/api/searchInformation/:id",
+  requireAdmin,
+  putSearchInformationHandler,
+);
+app.delete(
+  "/api/searchInformation/:id",
+  requireAdmin,
+  deleteSearchInformationHandler,
+);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/structure", structureRoutes);
 app.use("/api", adsRoutes);
@@ -226,6 +233,7 @@ async function startServer() {
       await ensureBulkImportUsageSchema();
       await ensureHomepageFeaturedLogosSchema();
       await ensureAdminCustomerSchema();
+      await ensureAdminActivityLogSchema();
     } catch (dbError) {
       logger.error("❌ Database connection failed:", dbError);
     }

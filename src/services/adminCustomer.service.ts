@@ -3,6 +3,7 @@ import { getPool, sql } from "../config/database";
 import { ensureAdminCustomerSchema } from "./adminCustomerSchema.service";
 import { sendPasswordResetEmail } from "./emailService";
 import { TOKEN_EXPIRY } from "../config/constants";
+import { logAdminActivity } from "./adminActivityLog.service";
 
 export type AccountStatus = "active" | "blocked" | "deleted" | "suspended";
 
@@ -169,7 +170,7 @@ export async function softDeleteUser(
   adminName: string,
 ): Promise<void> {
   await ensureSchema();
-  await assertUserExists(userId);
+  const user = await assertUserExists(userId);
   const pool = await getPool();
 
   await pool.request().input("userId", sql.Int, userId).query(`
@@ -181,6 +182,15 @@ export async function softDeleteUser(
   `);
 
   await logUserAdminActivity(userId, adminId, adminName, "account_soft_deleted");
+  await logAdminActivity({
+    actorAdminId: adminId,
+    actorAdminName: adminName,
+    action: "user_soft_deleted",
+    targetType: "user",
+    targetId: userId,
+    targetName: String(user.name),
+    targetEmail: String(user.email),
+  });
 }
 
 export async function restoreSoftDeletedUser(
@@ -194,11 +204,13 @@ export async function restoreSoftDeletedUser(
     .request()
     .input("userId", sql.Int, userId)
     .query(`
-      SELECT id FROM Users WHERE id = @userId AND role = 'user' AND deletedAt IS NOT NULL
+      SELECT id, name, email FROM Users WHERE id = @userId AND role = 'user' AND deletedAt IS NOT NULL
     `);
   if (result.recordset.length === 0) {
     throw new Error("USER_NOT_FOUND_OR_NOT_DELETED");
   }
+
+  const user = result.recordset[0];
 
   await pool.request().input("userId", sql.Int, userId).query(`
     UPDATE Users
@@ -209,6 +221,15 @@ export async function restoreSoftDeletedUser(
   `);
 
   await logUserAdminActivity(userId, adminId, adminName, "account_restored");
+  await logAdminActivity({
+    actorAdminId: adminId,
+    actorAdminName: adminName,
+    action: "user_restored",
+    targetType: "user",
+    targetId: userId,
+    targetName: String(user.name),
+    targetEmail: String(user.email),
+  });
 }
 
 export async function sendUserPasswordResetLink(

@@ -167,6 +167,7 @@ router.delete(
 
 // Nested routes
 router.use("/:menuId/items", menuItemRoutes);
+// Branch CRUD — no dashboard UI yet; Branches data is served via GET /api/public/menu/:slug
 router.use("/:menuId/branches", branchRoutes);
 router.use("/:menuId/customizations", menuCustomizationRoutes);
 router.use("/:menuId/staff", menuStaffRoutes);

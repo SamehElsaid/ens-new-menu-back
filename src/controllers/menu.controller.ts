@@ -26,9 +26,7 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
 
     const pool = await getPool();
 
-    const result = await pool
-      .request()
-      .input("userId", sql.Int, userId).query(`
+    const result = await pool.request().input("userId", sql.Int, userId).query(`
         SELECT 
           m.id, m.uuid, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt, m.updatedAt,
           mtAr.name as nameAr, 
@@ -196,8 +194,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       result = await pool
         .request()
         .input("id", sql.Int, menuIdNum)
-        .input("staffId", sql.Int, userId)
-        .query(`
+        .input("staffId", sql.Int, userId).query(`
         SELECT 
           m.id, m.uuid, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
           ISNULL(m.currency, 'SAR') as currency,
@@ -217,8 +214,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       result = await pool
         .request()
         .input("id", sql.Int, menuIdNum)
-        .input("userId", sql.Int, userId)
-        .query(`
+        .input("userId", sql.Int, userId).query(`
         SELECT 
           m.id, m.uuid, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
           ISNULL(m.currency, 'SAR') as currency,
@@ -246,7 +242,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
     let menu = result.recordset[0];
 
     // Parse workingHours if it's a JSON string
-    if (menu.workingHours && typeof menu.workingHours === 'string') {
+    if (menu.workingHours && typeof menu.workingHours === "string") {
       try {
         menu.workingHours = JSON.parse(menu.workingHours);
       } catch (e) {
@@ -256,9 +252,8 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
     }
 
     // Get statistics for the menu
-    const statsResult = await pool
-      .request()
-      .input("menuId", sql.Int, menuIdNum).query(`
+    const statsResult = await pool.request().input("menuId", sql.Int, menuIdNum)
+      .query(`
         SELECT 
           (SELECT COUNT(*) FROM MenuItems WHERE menuId = @menuId) as totalItems,
           (SELECT COUNT(*) FROM MenuItems WHERE menuId = @menuId AND available = 1) as activeItems,
@@ -269,9 +264,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
 
     const stats = statsResult.recordset[0];
 
-    const viewsResult = await pool
-      .request()
-      .input("menuId", sql.Int, menuIdNum)
+    const viewsResult = await pool.request().input("menuId", sql.Int, menuIdNum)
       .query(`
         SELECT
           ISNULL(viewCount, 0) AS viewCount,
@@ -387,9 +380,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
 
       // Update menu table fields individually
       const menuUpdates: string[] = [];
-      const menuRequest = transaction
-        .request()
-        .input("id", sql.Int, menuId);
+      const menuRequest = transaction.request().input("id", sql.Int, menuId);
 
       if (logo !== undefined) {
         touched.push("logo");
@@ -427,7 +418,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
         menuRequest.input(
           "footerDescriptionEn",
           sql.NVarChar,
-          footerDescriptionEn || null
+          footerDescriptionEn || null,
         );
       }
 
@@ -437,7 +428,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
         menuRequest.input(
           "footerDescriptionAr",
           sql.NVarChar,
-          footerDescriptionAr || null
+          footerDescriptionAr || null,
         );
       }
 
@@ -447,7 +438,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
         menuRequest.input(
           "socialFacebook",
           sql.NVarChar,
-          socialFacebook || null
+          socialFacebook || null,
         );
       }
 
@@ -457,7 +448,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
         menuRequest.input(
           "socialInstagram",
           sql.NVarChar,
-          socialInstagram || null
+          socialInstagram || null,
         );
       }
 
@@ -473,7 +464,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
         menuRequest.input(
           "socialWhatsapp",
           sql.NVarChar,
-          socialWhatsapp || null
+          socialWhatsapp || null,
         );
       }
 
@@ -501,7 +492,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
         menuRequest.input(
           "workingHours",
           sql.NVarChar(sql.MAX),
-          workingHours ? JSON.stringify(workingHours) : null
+          workingHours ? JSON.stringify(workingHours) : null,
         );
       }
 
@@ -590,7 +581,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
 // Toggle menu status
 export async function toggleMenuStatus(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     if (req.user?.role === ROLES.STAFF) {
@@ -690,7 +681,7 @@ export async function deleteMenu(req: Request, res: Response): Promise<void> {
 // Check slug availability and get similar suggestions
 export async function checkSlugAvailability(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const { slug } = req.query;

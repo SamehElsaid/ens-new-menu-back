@@ -25,6 +25,17 @@ router.get(
   menuItemController.getMenuItems
 );
 
+// GET /api/menus/:menuId/items/:itemId - Get single menu item
+router.get(
+  '/:itemId',
+  [
+    param('menuId').isInt(),
+    param('itemId').isInt(),
+    query('locale').optional().isIn(['ar', 'en']),
+  ],
+  menuItemController.getMenuItem
+);
+
 // POST /api/menus/:menuId/items - Create menu item
 router.post(
   '/',
