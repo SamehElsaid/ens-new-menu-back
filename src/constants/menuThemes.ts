@@ -97,8 +97,7 @@ export const THEME_CUSTOMIZATION_DEFAULTS: Record<
   },
 };
 
-const FALLBACK_CUSTOMIZATION_DEFAULTS =
-  THEME_CUSTOMIZATION_DEFAULTS.neon;
+const FALLBACK_CUSTOMIZATION_DEFAULTS = THEME_CUSTOMIZATION_DEFAULTS.neon;
 
 export function getThemeCustomizationDefaults(
   theme?: string | null,

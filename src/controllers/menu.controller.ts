@@ -108,9 +108,10 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
           .input("slug", sql.NVarChar, slug)
           .input("logo", sql.NVarChar, logo || null)
           .input("theme", sql.NVarChar, theme)
-          .input("currency", sql.NVarChar(3), currency).query(`
-            INSERT INTO Menus (id, uuid, userId, slug, logo, theme, currency)
-            VALUES (@id, @uuid, @userId, @slug, @logo, @theme, @currency)
+          .input("currency", sql.NVarChar(3), currency)
+          .input("approvalStatus", sql.NVarChar(20), "active").query(`
+            INSERT INTO Menus (id, uuid, userId, slug, logo, theme, currency, approvalStatus)
+            VALUES (@id, @uuid, @userId, @slug, @logo, @theme, @currency, @approvalStatus)
           `);
       } else {
         // Use IDENTITY (INT)
@@ -121,10 +122,11 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
           .input("slug", sql.NVarChar, slug)
           .input("logo", sql.NVarChar, logo || null)
           .input("theme", sql.NVarChar, theme)
-          .input("currency", sql.NVarChar(3), currency).query(`
-            INSERT INTO Menus (uuid, userId, slug, logo, theme, currency)
+          .input("currency", sql.NVarChar(3), currency)
+          .input("approvalStatus", sql.NVarChar(20), "active").query(`
+            INSERT INTO Menus (uuid, userId, slug, logo, theme, currency, approvalStatus)
             OUTPUT INSERTED.id
-            VALUES (@uuid, @userId, @slug, @logo, @theme, @currency)
+            VALUES (@uuid, @userId, @slug, @logo, @theme, @currency, @approvalStatus)
           `);
 
         newMenuId = menuResult.recordset[0].id;

@@ -8,18 +8,24 @@ import { ApiErrors } from '../i18n/apiErrors';
 import { getMenuAccessForRequest } from '../utils/menuAccess';
 import { logMenuActivitySafe } from '../services/menuActivityLog.service';
 import {
-  attachParsedSizesList,
   normalizeMenuItemSizesInput,
   resolveMenuItemBasePrice,
   serializeMenuItemSizes,
   validateMenuItemSizes,
 } from '../utils/menuItemSizes';
+import {
+  attachParsedMenuItemOptionsList,
+  normalizeMenuItemVariantsInput,
+  serializeMenuItemVariants,
+  validateMenuItemVariants,
+} from '../utils/menuItemVariants';
 
 const MENU_ITEM_OPTIONAL_COLUMNS = [
   'categoryId',
   'originalPrice',
   'discountPercent',
   'sizes',
+  'variants',
 ] as const;
 
 async function getMenuItemOptionalColumns(
@@ -75,6 +81,7 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
     const hasOriginalPrice = existingColumns.has('originalPrice');
     const hasDiscountPercent = existingColumns.has('discountPercent');
     const hasSizes = existingColumns.has('sizes');
+    const hasVariants = existingColumns.has('variants');
     
     const categoriesTableCheck = await pool
       .request()
@@ -119,6 +126,9 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
     }
     if (hasSizes) {
       selectFields.push('mi.sizes');
+    }
+    if (hasVariants) {
+      selectFields.push('mi.variants');
     }
     
     selectFields.push(
@@ -218,7 +228,7 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
     const result = await dataRequest.query(dataQuery);
 
     // Normalize image URLs to absolute paths
-    const items = attachParsedSizesList(normalizeImageUrls(result.recordset));
+    const items = attachParsedMenuItemOptionsList(normalizeImageUrls(result.recordset));
 
     const totalPages = Math.ceil(total / limit);
 
@@ -258,6 +268,7 @@ export async function getMenuItem(req: Request, res: Response): Promise<void> {
     const hasOriginalPrice = existingColumns.has('originalPrice');
     const hasDiscountPercent = existingColumns.has('discountPercent');
     const hasSizes = existingColumns.has('sizes');
+    const hasVariants = existingColumns.has('variants');
 
     const categoriesTableCheck = await pool.request().query(`
         SELECT COUNT(*) as count
@@ -279,6 +290,9 @@ export async function getMenuItem(req: Request, res: Response): Promise<void> {
     }
     if (hasSizes) {
       selectFields.push('mi.sizes');
+    }
+    if (hasVariants) {
+      selectFields.push('mi.variants');
     }
     selectFields.push(
       'mi.image',
@@ -322,7 +336,7 @@ export async function getMenuItem(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const item = attachParsedSizesList(normalizeImageUrls(result.recordset))[0];
+    const item = attachParsedMenuItemOptionsList(normalizeImageUrls(result.recordset))[0];
 
     res.setHeader('Content-Language', locale);
     res.json({ locale, item });
@@ -351,17 +365,31 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
       available,            // from frontend
       sortOrder,
       sizes,
+      variants,
     } = req.body;
 
     // Handle both 'isAvailable' and 'available' for backward compatibility
     const itemIsAvailable = isAvailable !== undefined ? isAvailable : (available !== undefined ? available : true);
 
-    const normalizedSizes = normalizeMenuItemSizesInput(sizes);
+    const normalizedSizes =
+      sizes !== undefined ? normalizeMenuItemSizesInput(sizes) : null;
+    const normalizedVariants =
+      variants !== undefined ? normalizeMenuItemVariantsInput(variants) : null;
+
     const sizesValidationError = validateMenuItemSizes(normalizedSizes);
     if (sizesValidationError) {
       sendApiError(res, req, 400, {
         en: sizesValidationError,
         ar: sizesValidationError,
+      });
+      return;
+    }
+
+    const variantsValidationError = validateMenuItemVariants(normalizedVariants);
+    if (variantsValidationError) {
+      sendApiError(res, req, 400, {
+        en: variantsValidationError,
+        ar: variantsValidationError,
       });
       return;
     }
@@ -402,12 +430,37 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
 
     if (!(await requireMenuAccess(req, res, menuId))) return;
 
+    if (
+      normalizedSizes &&
+      normalizedSizes.length > 0 &&
+      !optionalColumns.has('sizes')
+    ) {
+      sendApiError(res, req, 503, {
+        en: 'Sizes are not enabled in the database. Restart the backend to apply schema migrations.',
+        ar: 'الأحجام غير مفعّلة في قاعدة البيانات. أعد تشغيل الـ backend لتطبيق التحديثات.',
+      });
+      return;
+    }
+
+    if (
+      normalizedVariants &&
+      normalizedVariants.length > 0 &&
+      !optionalColumns.has('variants')
+    ) {
+      sendApiError(res, req, 503, {
+        en: 'Add-ons are not enabled in the database. Restart the backend to apply schema migrations.',
+        ar: 'الإضافات غير مفعّلة في قاعدة البيانات. أعد تشغيل الـ backend لتطبيق التحديثات.',
+      });
+      return;
+    }
+
     const itemId = await executeTransaction(async (transaction) => {
       const existingColumns = await getMenuItemOptionalColumns(transaction);
       const hasCategoryId = existingColumns.has('categoryId');
       const hasOriginalPrice = existingColumns.has('originalPrice');
       const hasDiscountPercent = existingColumns.has('discountPercent');
       const hasSizes = existingColumns.has('sizes');
+      const hasVariants = existingColumns.has('variants');
 
       // Build INSERT statement dynamically based on available columns
       const request = transaction.request()
@@ -446,6 +499,16 @@ export async function createMenuItem(req: Request, res: Response): Promise<void>
           'sizes',
           sql.NVarChar(sql.MAX),
           serializeMenuItemSizes(normalizedSizes),
+        );
+      }
+
+      if (hasVariants) {
+        columns.push('variants');
+        values.push('@variants');
+        request.input(
+          'variants',
+          sql.NVarChar(sql.MAX),
+          serializeMenuItemVariants(normalizedVariants),
         );
       }
 
@@ -520,16 +583,31 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
       available,            // Add this for compatibility
       sortOrder,
       sizes,
+      variants,
     } = req.body;
 
-    const normalizedSizes =
+    const sizesPayload =
       sizes !== undefined ? normalizeMenuItemSizesInput(sizes) : undefined;
-    if (normalizedSizes !== undefined) {
-      const sizesValidationError = validateMenuItemSizes(normalizedSizes);
+    const variantsPayload =
+      variants !== undefined ? normalizeMenuItemVariantsInput(variants) : undefined;
+
+    if (sizesPayload !== undefined) {
+      const sizesValidationError = validateMenuItemSizes(sizesPayload);
       if (sizesValidationError) {
         sendApiError(res, req, 400, {
           en: sizesValidationError,
           ar: sizesValidationError,
+        });
+        return;
+      }
+    }
+
+    if (variantsPayload !== undefined) {
+      const variantsValidationError = validateMenuItemVariants(variantsPayload);
+      if (variantsValidationError) {
+        sendApiError(res, req, 400, {
+          en: variantsValidationError,
+          ar: variantsValidationError,
         });
         return;
       }
@@ -541,6 +619,28 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
       return;
     }
     const ownerUserId = access.ownerUserId;
+
+    if (sizesPayload && sizesPayload.length > 0) {
+      const optionalColumns = await getMenuItemOptionalColumns(await getPool());
+      if (!optionalColumns.has('sizes')) {
+        sendApiError(res, req, 503, {
+          en: 'Sizes are not enabled in the database. Restart the backend to apply schema migrations.',
+          ar: 'الأحجام غير مفعّلة في قاعدة البيانات. أعد تشغيل الـ backend لتطبيق التحديثات.',
+        });
+        return;
+      }
+    }
+
+    if (variantsPayload && variantsPayload.length > 0) {
+      const optionalColumns = await getMenuItemOptionalColumns(await getPool());
+      if (!optionalColumns.has('variants')) {
+        sendApiError(res, req, 503, {
+          en: 'Add-ons are not enabled in the database. Restart the backend to apply schema migrations.',
+          ar: 'الإضافات غير مفعّلة في قاعدة البيانات. أعد تشغيل الـ backend لتطبيق التحديثات.',
+        });
+        return;
+      }
+    }
 
     await executeTransaction(async (transaction) => {
       // Verify ownership
@@ -565,6 +665,7 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
       const hasOriginalPrice = existingColumns.has('originalPrice');
       const hasDiscountPercent = existingColumns.has('discountPercent');
       const hasSizes = existingColumns.has('sizes');
+      const hasVariants = existingColumns.has('variants');
 
       // Update menu item
       const updates: string[] = [];
@@ -580,8 +681,8 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
       }
 
       const resolvedPrice =
-        normalizedSizes !== undefined
-          ? resolveMenuItemBasePrice(price, normalizedSizes)
+        sizesPayload !== undefined
+          ? resolveMenuItemBasePrice(price, sizesPayload)
           : price !== undefined
             ? resolveMenuItemBasePrice(price, null)
             : undefined;
@@ -611,12 +712,20 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
         updates.push('sortOrder = @sortOrder');
         request.input('sortOrder', sql.Int, sortOrder);
       }
-      if (hasSizes && normalizedSizes !== undefined) {
+      if (hasSizes && sizesPayload !== undefined) {
         updates.push('sizes = @sizes');
         request.input(
           'sizes',
           sql.NVarChar(sql.MAX),
-          serializeMenuItemSizes(normalizedSizes),
+          serializeMenuItemSizes(sizesPayload),
+        );
+      }
+      if (hasVariants && variantsPayload !== undefined) {
+        updates.push('variants = @variants');
+        request.input(
+          'variants',
+          sql.NVarChar(sql.MAX),
+          serializeMenuItemVariants(variantsPayload),
         );
       }
 
