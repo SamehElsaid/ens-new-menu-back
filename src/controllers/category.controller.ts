@@ -163,38 +163,67 @@ async function requireMenuAccess(
   return true;
 }
 
-// Get all categories for a menu (with pagination)
+// Get all categories for a menu (with pagination and optional name search)
 export async function getCategories(
   req: Request,
   res: Response
 ): Promise<void> {
   try {
     const { menuId } = req.params;
-    const { locale = "ar", page = "1", limit = "10" } = req.query;
+    const { locale = "ar", page = "1", limit = "10", search: searchQuery } =
+      req.query;
 
     const pageNum = Math.max(1, parseInt(page as string) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string) || 10));
     const offset = (pageNum - 1) * limitNum;
+    const search = (searchQuery as string)?.trim() || "";
 
     const pool = await getPool();
 
     if (!(await requireMenuAccess(req, res, menuId))) return;
 
-    // Get total count for pagination
-    const countResult = await pool
+    const categorySearchJoins = `
+        FROM Categories c
+        LEFT JOIN CategoryTranslations ar ON c.id = ar.categoryId AND ar.locale = 'ar'
+        LEFT JOIN CategoryTranslations en ON c.id = en.categoryId AND en.locale = 'en'`;
+
+    const categoryDataJoins = `
+        FROM Categories c
+        LEFT JOIN CategoryTranslations ct ON c.id = ct.categoryId AND ct.locale = @locale
+        LEFT JOIN CategoryTranslations ar ON c.id = ar.categoryId AND ar.locale = 'ar'
+        LEFT JOIN CategoryTranslations en ON c.id = en.categoryId AND en.locale = 'en'`;
+
+    const whereParts = ["c.menuId = @menuId"];
+    if (search) {
+      whereParts.push(
+        "(ar.name LIKE @searchPattern OR en.name LIKE @searchPattern)",
+      );
+    }
+    const whereClause = `WHERE ${whereParts.join(" AND ")}`;
+
+    const countRequest = pool
       .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .query("SELECT COUNT(*) as total FROM Categories WHERE menuId = @menuId");
+      .input("menuId", sql.Int, parseInt(menuId));
+    if (search) {
+      countRequest.input("searchPattern", sql.NVarChar, `%${search}%`);
+    }
+    const countResult = await countRequest.query(`
+        SELECT COUNT(DISTINCT c.id) as total
+        ${categorySearchJoins}
+        ${whereClause}
+      `);
     const total = countResult.recordset[0].total;
 
-    // Get categories with translations (all languages for forms and display)
-    const result = await pool
+    const dataRequest = pool
       .request()
       .input("menuId", sql.Int, parseInt(menuId))
       .input("locale", sql.NVarChar, locale as string)
       .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limitNum)
-      .query(`
+      .input("limit", sql.Int, limitNum);
+    if (search) {
+      dataRequest.input("searchPattern", sql.NVarChar, `%${search}%`);
+    }
+    const result = await dataRequest.query(`
         SELECT 
           c.id,
           c.image,
@@ -204,11 +233,8 @@ export async function getCategories(
           ct.name,
           ar.name as nameAr,
           en.name as nameEn
-        FROM Categories c
-        LEFT JOIN CategoryTranslations ct ON c.id = ct.categoryId AND ct.locale = @locale
-        LEFT JOIN CategoryTranslations ar ON c.id = ar.categoryId AND ar.locale = 'ar'
-        LEFT JOIN CategoryTranslations en ON c.id = en.categoryId AND en.locale = 'en'
-        WHERE c.menuId = @menuId
+        ${categoryDataJoins}
+        ${whereClause}
         ORDER BY c.sortOrder ASC, c.createdAt DESC
         OFFSET @offset ROWS
         FETCH NEXT @limit ROWS ONLY
