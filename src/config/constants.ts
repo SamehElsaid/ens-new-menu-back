@@ -68,5 +68,11 @@ export const ROLES = {
   STAFF: "staff",
 };
 
+export const MENU_APPROVAL_STATUS = {
+  PENDING: "pending",
+  ACTIVE: "active",
+  REJECTED: "rejected",
+} as const;
+
 export const LOCALES = ["ar", "en"] as const;
 export type Locale = (typeof LOCALES)[number];
