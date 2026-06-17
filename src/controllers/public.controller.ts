@@ -14,6 +14,61 @@ import { recordAdClick } from "../services/adTracking.service";
 import { listHomepageFeaturedLogos } from "../services/homepageFeaturedLogos.service";
 import { getImageUrl } from "../utils/urlHelper";
 import { attachParsedMenuItemOptionsList } from "../utils/menuItemVariants";
+import { ensureDeliverySchema } from "../schemas/delivery.schema";
+
+const DELIVERY_GOVERNORATE_COLUMNS =
+  "id, nameAr, nameEn, price, lat, lan, createdAt, updatedAt";
+
+export type PublicDeliverySettings = {
+  deliveryOn: boolean;
+  deliveryPhone: string | null;
+  phoneNumber: string | null;
+  governorates: Record<string, unknown>[];
+};
+
+async function fetchPublicDeliveryForUser(
+  pool: Awaited<ReturnType<typeof getPool>>,
+  userId: number,
+): Promise<PublicDeliverySettings> {
+  await ensureDeliverySchema();
+
+  const userResult = await pool.request().input("userId", sql.Int, userId).query(`
+      SELECT deliveryOn, deliveryPhone, phoneNumber
+      FROM Users
+      WHERE id = @userId
+    `);
+
+  if (userResult.recordset.length === 0) {
+    return {
+      deliveryOn: false,
+      deliveryPhone: null,
+      phoneNumber: null,
+      governorates: [],
+    };
+  }
+
+  const user = userResult.recordset[0] as {
+    deliveryOn: boolean | number;
+    deliveryPhone: string | null;
+    phoneNumber: string | null;
+  };
+
+  const governoratesResult = await pool
+    .request()
+    .input("userId", sql.Int, userId).query(`
+        SELECT ${DELIVERY_GOVERNORATE_COLUMNS}
+        FROM UserDeliveryGovernorates
+        WHERE userId = @userId
+        ORDER BY id
+      `);
+
+  return {
+    deliveryOn: Boolean(user.deliveryOn),
+    deliveryPhone: user.deliveryPhone ?? null,
+    phoneNumber: user.phoneNumber ?? null,
+    governorates: governoratesResult.recordset as Record<string, unknown>[],
+  };
+}
 
 /** Optional table from QR: `?tableNumber=` or `?table=` (max 50 chars). */
 function parsePublicMenuTableNumber(req: Request): string | null {
@@ -179,6 +234,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     }
 
     const menu = menuResult.recordset[0];
+    const delivery = await fetchPublicDeliveryForUser(pool, menu.userId);
 
     // إذا كانت القائمة غير نشطة، أرسل بيانات محدودة لصفحة الصيانة فقط
     if (!menu.isActive) {
@@ -189,6 +245,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         success: true,
         data: {
           locale,
+          delivery,
           menu: {
             id: menu.id,
             name: menu.name,
@@ -484,6 +541,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       success: true,
       data: {
         locale,
+        delivery,
         menu: {
           id: menu.id,
           name: menu.name,
