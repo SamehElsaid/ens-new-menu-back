@@ -1,5 +1,17 @@
 import { logger } from "../utils/logger";
 
+/** Dev API (devapi.ensbot.net) + local — not production ensapi / *.ensmenu.com frontends. */
+function isDevCorsDeployment(): boolean {
+  if (process.env.CORS_ALLOW_VERCEL === "true") return true;
+  if (process.env.NODE_ENV !== "production") return true;
+  const apiUrl = process.env.API_URL?.trim().toLowerCase() ?? "";
+  return apiUrl.includes("devapi.ensbot.net");
+}
+
+function isVercelPreviewOrigin(url: URL): boolean {
+  return url.protocol === "https:" && url.hostname.endsWith(".vercel.app");
+}
+
 /** Comma-separated full origin strings, e.g. `https://app.example.com,capacitor://localhost` */
 function parseExtraOrigins(): Set<string> {
   const raw = process.env.CORS_EXTRA_ORIGINS?.trim();
@@ -45,12 +57,19 @@ export function corsOriginDelegate(
 
   try {
     const url = new URL(origin);
-    if (
+    const isEnsmenuOrigin =
       url.hostname === "ensmenu.com" ||
       url.hostname.endsWith(".ensmenu.com") ||
       url.hostname === "ensmenu.ens.eg" ||
-      url.hostname.endsWith(".ensmenu.ens.eg")
-    ) {
+      url.hostname.endsWith(".ensmenu.ens.eg");
+
+    if (isEnsmenuOrigin) {
+      callback(null, true);
+      return;
+    }
+
+    // Vercel previews (e.g. ens-menu-dev.vercel.app) — dev API only
+    if (isDevCorsDeployment() && isVercelPreviewOrigin(url)) {
       callback(null, true);
       return;
     }
@@ -68,7 +87,7 @@ export function corsOriginDelegate(
   }
 
   logger.warn(
-    `CORS rejected: origin not allowed — origin=${JSON.stringify(origin)} (set CORS_EXTRA_ORIGINS or use *.ensmenu.com / *.ensmenu.ens.eg / hybrid localhost origin)`
+    `CORS rejected: origin not allowed — origin=${JSON.stringify(origin)} (production: *.ensmenu.com; dev API: *.vercel.app + localhost; or set CORS_EXTRA_ORIGINS)`
   );
   callback(null, false);
 }

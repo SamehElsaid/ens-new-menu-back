@@ -103,7 +103,12 @@ app.use(
     origin: corsOriginDelegate,
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "x-api-key",
+      "Accept-Language",
+    ],
   }),
 );
 
