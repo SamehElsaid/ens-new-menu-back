@@ -10,6 +10,14 @@ import {
   quoteMenuStaffIdent,
 } from "../config/menuStaffColumns";
 import { logger } from "../utils/logger";
+import {
+  type MenuItemSize,
+  normalizeMenuItemSizesInput,
+} from "../utils/menuItemSizes";
+import {
+  type MenuItemVariant,
+  normalizeMenuItemVariantsInput,
+} from "../utils/menuItemVariants";
 import { isUserOnFreePlan } from "./subscriptionPlan.service";
 import { logMenuOrderEventSafe } from "./menuActivityLog.service";
 
@@ -53,6 +61,10 @@ export type StaffOrderItem = {
   /** Line total (price × quantity), set by server after resolve. */
   total?: number;
   notes?: string;
+  /** Selected size (when the menu item has size options). */
+  size?: MenuItemSize | null;
+  /** Selected add-on / variant. */
+  variant?: MenuItemVariant | null;
 };
 
 export type GuestStaffCallOptions = {
@@ -93,6 +105,82 @@ function parsePriceField(
 
 function lineTotal(unit: number, quantity: number): number {
   return Math.round(unit * quantity * 100) / 100;
+}
+
+function parseStaffOrderLineSize(
+  raw: unknown,
+): { ok: true; value: MenuItemSize | undefined } | { ok: false } {
+  if (raw === null || raw === undefined || raw === "") {
+    return { ok: true, value: undefined };
+  }
+  const normalized = normalizeMenuItemSizesInput([raw]);
+  if (!normalized || normalized.length !== 1) {
+    return { ok: false };
+  }
+  return { ok: true, value: normalized[0] };
+}
+
+function parseStaffOrderLineVariant(
+  raw: unknown,
+): { ok: true; value: MenuItemVariant | undefined } | { ok: false } {
+  if (raw === null || raw === undefined || raw === "") {
+    return { ok: true, value: undefined };
+  }
+  const normalized = normalizeMenuItemVariantsInput([raw]);
+  if (!normalized || normalized.length !== 1) {
+    return { ok: false };
+  }
+  return { ok: true, value: normalized[0] };
+}
+
+function pickStaffOrderItemOptions(
+  o: Record<string, unknown>,
+):
+  | { ok: true; size?: MenuItemSize; variant?: MenuItemVariant }
+  | { ok: false } {
+  const sizeParsed = parseStaffOrderLineSize(o.size);
+  if (!sizeParsed.ok) {
+    return { ok: false };
+  }
+  const variantParsed = parseStaffOrderLineVariant(o.variant);
+  if (!variantParsed.ok) {
+    return { ok: false };
+  }
+  return {
+    ok: true,
+    ...(sizeParsed.value ? { size: sizeParsed.value } : {}),
+    ...(variantParsed.value ? { variant: variantParsed.value } : {}),
+  };
+}
+
+function appendOptionsToStaffItemName(
+  baseName: string,
+  size?: MenuItemSize,
+  variant?: MenuItemVariant,
+): string {
+  const parts = [baseName];
+  if (size) {
+    parts.push(size.nameEn || size.nameAr);
+  }
+  if (variant) {
+    parts.push(variant.labelEn || variant.labelAr);
+  }
+  if (parts.length === 1) {
+    return baseName;
+  }
+  return parts.join(" · ");
+}
+
+function computeStaffLineUnitPrice(
+  dbBasePrice: number,
+  item: Pick<StaffOrderItem, "price" | "size" | "variant">,
+): number {
+  if (item.price !== undefined) {
+    return item.price;
+  }
+  const base = item.size?.price ?? dbBasePrice;
+  const addon = item.variant?.price ?? 0;
+  return Math.round((base + addon) * 100) / 100;
 }
 
 export function computeOrderTotalFromItems(items: StaffOrderItem[]): number {
@@ -153,12 +241,18 @@ function parseOrderItemsInput(
       }
       const priceParsed = parsePriceField(o.price);
       const fromClient = priceParsed.ok ? priceParsed.value : undefined;
+      const options = pickStaffOrderItemOptions(o);
+      if (!options.ok) {
+        return { ok: false };
+      }
       out.push({
         name: nameRaw,
         menuItemId,
         quantity,
         ...(fromClient !== undefined ? { price: fromClient } : {}),
         ...(notes ? { notes } : {}),
+        ...(options.size ? { size: options.size } : {}),
+        ...(options.variant ? { variant: options.variant } : {}),
       });
       continue;
     }
@@ -179,11 +273,17 @@ function parseOrderItemsInput(
       notes = String(o.notes).trim().slice(0, 500);
     }
     const optPrice = parsePriceField(o.price);
+    const options = pickStaffOrderItemOptions(o);
+    if (!options.ok) {
+      return { ok: false };
+    }
     out.push({
       name: nameRaw,
       quantity,
       ...(optPrice.ok ? { price: optPrice.value } : {}),
       ...(notes ? { notes } : {}),
+      ...(options.size ? { size: options.size } : {}),
+      ...(options.variant ? { variant: options.variant } : {}),
     });
   }
   return { ok: true, items: out };
@@ -239,21 +339,34 @@ export async function enrichMenuItemsFromDb(
 
   return items.map((it) => {
     if (it.menuItemId == null) {
-      const unit = it.price ?? 0;
+      const unit = computeStaffLineUnitPrice(0, it);
       const total = lineTotal(unit, it.quantity);
+      const name = appendOptionsToStaffItemName(
+        String(it.name ?? "").trim() || "—",
+        it.size ?? undefined,
+        it.variant ?? undefined,
+      );
       return {
         ...it,
-        name: String(it.name ?? "").trim() || "—",
-        ...(it.price !== undefined ? { price: unit } : {}),
+        name,
+        ...(unit > 0 || it.price !== undefined ? { price: unit } : {}),
+        ...(it.size ? { size: it.size } : {}),
+        ...(it.variant ? { variant: it.variant } : {}),
         total,
       };
     }
 
     const db = byId.get(it.menuItemId);
     const nameFromClient = String(it.name ?? "").trim();
-    const name = nameFromClient || (db?.displayName ?? `Item ${it.menuItemId}`);
+    const baseName =
+      nameFromClient || (db?.displayName ?? `Item ${it.menuItemId}`);
+    const name = appendOptionsToStaffItemName(
+      baseName,
+      it.size ?? undefined,
+      it.variant ?? undefined,
+    );
 
-    const unit = it.price !== undefined ? it.price : (db?.unitPrice ?? 0);
+    const unit = computeStaffLineUnitPrice(db?.unitPrice ?? 0, it);
     const total = lineTotal(unit, it.quantity);
 
     return {
@@ -263,6 +376,8 @@ export async function enrichMenuItemsFromDb(
       quantity: it.quantity,
       total,
       ...(it.notes ? { notes: it.notes } : {}),
+      ...(it.size ? { size: it.size } : {}),
+      ...(it.variant ? { variant: it.variant } : {}),
     };
   });
 }
@@ -588,6 +703,11 @@ function parseOrderItemsFromStored(raw: unknown): StaffOrderItem[] {
       }
     }
 
+    const sizeParsed = parseStaffOrderLineSize(o.size);
+    const size = sizeParsed.ok ? sizeParsed.value : undefined;
+    const variantParsed = parseStaffOrderLineVariant(o.variant);
+    const variant = variantParsed.ok ? variantParsed.value : undefined;
+
     if (menuItemId !== undefined) {
       const row: StaffOrderItem = {
         name: nameRaw || `Item ${menuItemId}`,
@@ -596,6 +716,8 @@ function parseOrderItemsFromStored(raw: unknown): StaffOrderItem[] {
         ...(price !== undefined ? { price } : {}),
         ...(total !== undefined ? { total } : {}),
         ...(notes ? { notes } : {}),
+        ...(size ? { size } : {}),
+        ...(variant ? { variant } : {}),
       };
       if (row.total === undefined && row.price !== undefined) {
         row.total = lineTotal(row.price, row.quantity);
@@ -611,6 +733,8 @@ function parseOrderItemsFromStored(raw: unknown): StaffOrderItem[] {
       ...(price !== undefined ? { price } : {}),
       ...(total !== undefined ? { total } : {}),
       ...(notes ? { notes } : {}),
+      ...(size ? { size } : {}),
+      ...(variant ? { variant } : {}),
     };
     if (row.total === undefined && row.price !== undefined) {
       row.total = lineTotal(row.price, row.quantity);

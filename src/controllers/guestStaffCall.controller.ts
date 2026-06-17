@@ -26,10 +26,18 @@ function statusForError(error: string): number {
  *   tableNumber: string,
  *   customerName?: string,
  *   items?: Array<
- *     | { menuItemId: number; quantity: number; price?: number; name?: string; notes?: string }
+ *     | {
+ *         menuItemId: number;
+ *         quantity: number;
+ *         price?: number;
+ *         name?: string;
+ *         notes?: string;
+ *         size?: { nameAr: string; nameEn: string; price: number } | null;
+ *         variant?: { labelAr: string; labelEn: string; price: number } | null;
+ *       }
  *     | { name: string; quantity?: number; price?: number; notes?: string }
  *   >
- *   (price optional — filled from MenuItems; response includes line totals + orderTotal)
+ *   (price optional — filled from MenuItems + size/variant; response includes line totals + orderTotal)
  *   status?: "pending" | "confirmed" | "cancelled" — optional; default pending (confirmed sets acknowledgedAt)
  * }
  */
