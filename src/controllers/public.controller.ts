@@ -13,7 +13,7 @@ import {
 import { recordAdClick } from "../services/adTracking.service";
 import { listHomepageFeaturedLogos } from "../services/homepageFeaturedLogos.service";
 import { getImageUrl } from "../utils/urlHelper";
-import { attachParsedSizesList } from "../utils/menuItemSizes";
+import { attachParsedMenuItemOptionsList } from "../utils/menuItemVariants";
 
 /** Optional table from QR: `?tableNumber=` or `?table=` (max 50 chars). */
 function parsePublicMenuTableNumber(req: Request): string | null {
@@ -234,7 +234,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         SELECT COLUMN_NAME 
         FROM INFORMATION_SCHEMA.COLUMNS 
         WHERE TABLE_NAME = 'MenuItems' 
-        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent', 'sizes')
+        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent', 'sizes', 'variants')
       `);
 
     const existingColumns = columnCheck.recordset.map(
@@ -244,6 +244,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     const hasOriginalPrice = existingColumns.includes("originalPrice");
     const hasDiscountPercent = existingColumns.includes("discountPercent");
     const hasSizes = existingColumns.includes("sizes");
+    const hasVariants = existingColumns.includes("variants");
 
     // Get categories if Categories table exists with both locales
     let categories: any[] = [];
@@ -292,6 +293,9 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     }
     if (hasSizes) {
       selectFields.push("mi.sizes");
+    }
+    if (hasVariants) {
+      selectFields.push("mi.variants");
     }
 
     // Get translations for both Arabic and English
@@ -373,7 +377,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
 
     const rating = ratingsResult.recordset[0];
 
-    const normalizedItems = attachParsedSizesList(
+    const normalizedItems = attachParsedMenuItemOptionsList(
       itemsResult.recordset.map((item: { image?: string | null }) => ({
         ...item,
         image: getImageUrl(item.image),
