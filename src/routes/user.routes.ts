@@ -81,6 +81,9 @@ router.post(
     body("nameAr").notEmpty().trim().isLength({ max: 255 }),
     body("nameEn").notEmpty().trim().isLength({ max: 255 }),
     body("price").isFloat({ min: 0 }),
+    body("lat").optional({ values: "null" }).isFloat({ min: -90, max: 90 }),
+    body("lan").optional({ values: "null" }).isFloat({ min: -180, max: 180 }),
+    body("lng").optional({ values: "null" }).isFloat({ min: -180, max: 180 }),
   ]),
   deliveryController.createDeliveryGovernorate,
 );
@@ -93,6 +96,9 @@ router.put(
     body("nameAr").optional().notEmpty().trim().isLength({ max: 255 }),
     body("nameEn").optional().notEmpty().trim().isLength({ max: 255 }),
     body("price").optional().isFloat({ min: 0 }),
+    body("lat").optional({ values: "null" }).isFloat({ min: -90, max: 90 }),
+    body("lan").optional({ values: "null" }).isFloat({ min: -180, max: 180 }),
+    body("lng").optional({ values: "null" }).isFloat({ min: -180, max: 180 }),
   ]),
   deliveryController.updateDeliveryGovernorate,
 );

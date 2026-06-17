@@ -28,6 +28,8 @@ export async function ensureDeliverySchema(): Promise<void> {
         nameAr NVARCHAR(255) NOT NULL,
         nameEn NVARCHAR(255) NOT NULL,
         price DECIMAL(10, 2) NOT NULL CONSTRAINT DF_UserDeliveryGovernorates_price DEFAULT 0,
+        lat DECIMAL(10, 8) NULL,
+        lan DECIMAL(11, 8) NULL,
         createdAt DATETIME2 NOT NULL CONSTRAINT DF_UserDeliveryGovernorates_createdAt DEFAULT GETDATE(),
         updatedAt DATETIME2 NOT NULL CONSTRAINT DF_UserDeliveryGovernorates_updatedAt DEFAULT GETDATE(),
         CONSTRAINT FK_UserDeliveryGovernorates_Users
@@ -36,6 +38,16 @@ export async function ensureDeliverySchema(): Promise<void> {
 
       CREATE INDEX IX_UserDeliveryGovernorates_userId
         ON UserDeliveryGovernorates(userId);
+    END
+
+    IF COL_LENGTH('UserDeliveryGovernorates', 'lat') IS NULL
+    BEGIN
+      ALTER TABLE UserDeliveryGovernorates ADD lat DECIMAL(10, 8) NULL;
+    END
+
+    IF COL_LENGTH('UserDeliveryGovernorates', 'lan') IS NULL
+    BEGIN
+      ALTER TABLE UserDeliveryGovernorates ADD lan DECIMAL(11, 8) NULL;
     END
   `);
 }

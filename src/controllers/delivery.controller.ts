@@ -5,6 +5,37 @@ import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
 
+const GOVERNORATE_COLUMNS =
+  "id, nameAr, nameEn, price, lat, lan, createdAt, updatedAt";
+
+function parseOptionalCoord(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Accepts `lan` or `lng` for longitude. */
+function readGovernorateCoords(body: Record<string, unknown>): {
+  lat: number | null;
+  lan: number | null;
+  latProvided: boolean;
+  lanProvided: boolean;
+} {
+  const latProvided = Object.prototype.hasOwnProperty.call(body, "lat");
+  const lanProvided =
+    Object.prototype.hasOwnProperty.call(body, "lan") ||
+    Object.prototype.hasOwnProperty.call(body, "lng");
+
+  return {
+    lat: latProvided ? parseOptionalCoord(body.lat) : null,
+    lan: lanProvided
+      ? parseOptionalCoord(body.lan ?? body.lng)
+      : null,
+    latProvided,
+    lanProvided,
+  };
+}
+
 const USER_DELIVERY_FIELDS = `
   id, email, name, restaurantName, phoneNumber, deliveryPhone, deliveryOn,
   country, dateOfBirth, gender, address,
@@ -83,7 +114,7 @@ export async function getDeliverySettings(
 
     const governoratesResult = await pool.request().input("userId", sql.Int, userId)
       .query(`
-        SELECT id, nameAr, nameEn, price, createdAt, updatedAt
+        SELECT ${GOVERNORATE_COLUMNS}
         FROM UserDeliveryGovernorates
         WHERE userId = @userId
         ORDER BY id
@@ -125,6 +156,17 @@ export async function updateDeliverySettings(
     const pool = await getPool();
     const updates: string[] = [];
     const request = pool.request().input("userId", sql.Int, userId);
+    const trimmedPhone =
+      typeof deliveryPhone === "string" ? deliveryPhone.trim() : "";
+
+    if (deliveryPhone !== undefined) {
+      if (!trimmedPhone) {
+        sendApiError(res, req, 400, ApiErrors.deliveryPhoneRequired);
+        return;
+      }
+      updates.push("deliveryPhone = @deliveryPhone");
+      request.input("deliveryPhone", sql.NVarChar, trimmedPhone);
+    }
 
     if (deliveryOn !== undefined) {
       const enabled = Boolean(deliveryOn);
@@ -132,11 +174,9 @@ export async function updateDeliverySettings(
       request.input("deliveryOn", sql.Bit, enabled);
 
       if (enabled) {
-        const incomingPhone =
-          typeof deliveryPhone === "string" ? deliveryPhone.trim() : "";
         const current = await getUserDeliveryContact(userId);
         const resolvedPhone =
-          incomingPhone ||
+          trimmedPhone ||
           current.deliveryPhone ||
           current.phoneNumber ||
           "";
@@ -146,20 +186,16 @@ export async function updateDeliverySettings(
           return;
         }
 
-        if (incomingPhone || !current.deliveryPhone) {
+        if (!updates.includes("deliveryPhone = @deliveryPhone")) {
           updates.push("deliveryPhone = @deliveryPhone");
           request.input("deliveryPhone", sql.NVarChar, resolvedPhone);
         }
       }
-    } else if (deliveryPhone !== undefined) {
-      const trimmed =
-        typeof deliveryPhone === "string" ? deliveryPhone.trim() : "";
-      if (!trimmed) {
-        sendApiError(res, req, 400, ApiErrors.deliveryPhoneRequired);
-        return;
-      }
-      updates.push("deliveryPhone = @deliveryPhone");
-      request.input("deliveryPhone", sql.NVarChar, trimmed);
+    }
+
+    if (updates.length === 0) {
+      sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
+      return;
     }
 
     await request.query(`
@@ -191,7 +227,7 @@ export async function getDeliveryGovernorates(
 
     const pool = await getPool();
     const result = await pool.request().input("userId", sql.Int, userId).query(`
-        SELECT id, nameAr, nameEn, price, createdAt, updatedAt
+        SELECT ${GOVERNORATE_COLUMNS}
         FROM UserDeliveryGovernorates
         WHERE userId = @userId
         ORDER BY id
@@ -211,6 +247,7 @@ export async function createDeliveryGovernorate(
   try {
     const userId = req.user!.userId;
     const { nameAr, nameEn, price } = req.body;
+    const { lat, lan } = readGovernorateCoords(req.body);
 
     await ensureDeliverySchema();
 
@@ -220,11 +257,13 @@ export async function createDeliveryGovernorate(
       .input("userId", sql.Int, userId)
       .input("nameAr", sql.NVarChar, nameAr)
       .input("nameEn", sql.NVarChar, nameEn)
-      .input("price", sql.Decimal(10, 2), price).query(`
-        INSERT INTO UserDeliveryGovernorates (userId, nameAr, nameEn, price)
+      .input("price", sql.Decimal(10, 2), price)
+      .input("lat", sql.Decimal(10, 8), lat)
+      .input("lan", sql.Decimal(11, 8), lan).query(`
+        INSERT INTO UserDeliveryGovernorates (userId, nameAr, nameEn, price, lat, lan)
         OUTPUT INSERTED.id, INSERTED.nameAr, INSERTED.nameEn, INSERTED.price,
-               INSERTED.createdAt, INSERTED.updatedAt
-        VALUES (@userId, @nameAr, @nameEn, @price)
+               INSERTED.lat, INSERTED.lan, INSERTED.createdAt, INSERTED.updatedAt
+        VALUES (@userId, @nameAr, @nameEn, @price, @lat, @lan)
       `);
 
     res.status(201).json({ governorate: result.recordset[0] });
@@ -242,6 +281,7 @@ export async function updateDeliveryGovernorate(
     const userId = req.user!.userId;
     const governorateId = parseInt(req.params.governorateId, 10);
     const { nameAr, nameEn, price } = req.body;
+    const coords = readGovernorateCoords(req.body);
 
     await ensureDeliverySchema();
 
@@ -267,6 +307,16 @@ export async function updateDeliveryGovernorate(
       request.input("price", sql.Decimal(10, 2), price);
     }
 
+    if (coords.latProvided) {
+      updates.push("lat = @lat");
+      request.input("lat", sql.Decimal(10, 8), coords.lat);
+    }
+
+    if (coords.lanProvided) {
+      updates.push("lan = @lan");
+      request.input("lan", sql.Decimal(11, 8), coords.lan);
+    }
+
     if (updates.length === 1) {
       sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
       return;
@@ -276,7 +326,7 @@ export async function updateDeliveryGovernorate(
       UPDATE UserDeliveryGovernorates
       SET ${updates.join(", ")}
       OUTPUT INSERTED.id, INSERTED.nameAr, INSERTED.nameEn, INSERTED.price,
-             INSERTED.createdAt, INSERTED.updatedAt
+             INSERTED.lat, INSERTED.lan, INSERTED.createdAt, INSERTED.updatedAt
       WHERE id = @governorateId AND userId = @userId
     `);
 
