@@ -8,7 +8,12 @@ function isVercelPreviewOrigin(url: URL): boolean {
 function parseExtraOrigins(): Set<string> {
   const raw = process.env.CORS_EXTRA_ORIGINS?.trim();
   if (!raw) return new Set();
-  return new Set(raw.split(",").map((s) => s.trim()).filter(Boolean));
+  return new Set(
+    raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
 }
 
 /**
@@ -53,7 +58,8 @@ export function corsOriginDelegate(
       url.hostname === "ensmenu.com" ||
       url.hostname.endsWith(".ensmenu.com") ||
       url.hostname === "ensmenu.ens.eg" ||
-      url.hostname.endsWith(".ensmenu.ens.eg");
+      url.hostname.endsWith(".ensmenu.ens.eg") ||
+      url.hostname.endsWith(".vercel.app");
 
     if (isEnsmenuOrigin || isVercelPreviewOrigin(url)) {
       callback(null, true);
@@ -66,14 +72,17 @@ export function corsOriginDelegate(
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     logger.warn(
-      `CORS rejected: invalid origin URL — origin=${JSON.stringify(origin)} — ${detail}`
+      `CORS rejected: invalid origin URL — origin=${JSON.stringify(origin)} — ${detail}`,
     );
     callback(null, false);
     return;
   }
 
   logger.warn(
-    `CORS rejected: origin not allowed — origin=${JSON.stringify(origin)} (allowed: *.ensmenu.com, *.ensmenu.ens.eg, *.vercel.app, localhost; or set CORS_EXTRA_ORIGINS)`
+    `CORS rejected: origin not allowed — origin=${JSON.stringify(origin)} (allowed: *.ensmenu.com, *.ensmenu.ens.eg, *.vercel.app, localhost; or set CORS_EXTRA_ORIGINS)`,
   );
   callback(null, false);
+
+  logger.warn(`CORS Blocked: ${origin}`);
+  logger.info(`CORS Origin Received: ${origin}`);
 }
