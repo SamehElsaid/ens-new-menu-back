@@ -70,6 +70,10 @@ function isFullyOpenPath(req: Request): boolean {
 }
 
 export function decryptApiKey(req: Request, res: Response, next: NextFunction) {
+  if (process.env.NODE_ENV === "development") {
+    return next();
+  }
+
   // Always allow public API + health (works even if route order differs on deploy)
   if (isFullyOpenPath(req) || isPublicRoute(req)) {
     return next();
