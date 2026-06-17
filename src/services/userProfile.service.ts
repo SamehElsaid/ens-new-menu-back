@@ -1,10 +1,12 @@
 import { getPool, sql } from '../config/database';
 import { ensurePhoneVerifiedSchema } from '../schemas/phoneVerified.schema';
 import { ensureRestaurantNameSchema } from '../schemas/restaurantName.schema';
+import { ensureDeliverySchema } from '../schemas/delivery.schema';
 
 const AUTH_USER_PROFILE_QUERY = `
   SELECT 
-    u.id, u.email, u.name, u.restaurantName, u.role, u.phoneNumber, u.country,
+    u.id, u.email, u.name, u.restaurantName, u.role, u.phoneNumber, u.deliveryPhone, u.deliveryOn,
+    u.country,
     u.dateOfBirth, u.gender, u.address, u.profileImage,
     u.isEmailVerified, u.isPhoneVerified, u.phoneVerifiedAt, u.createdAt,
     u.isSuspended, u.suspendedReason,
@@ -24,6 +26,8 @@ export function formatAuthUserProfile(profile: {
   restaurantName: string | null;
   role: string;
   phoneNumber: string | null;
+  deliveryPhone: string | null;
+  deliveryOn?: boolean | number | null;
   country: string | null;
   dateOfBirth: Date | null;
   gender: string | null;
@@ -50,6 +54,8 @@ export function formatAuthUserProfile(profile: {
     restaurantName: profile.restaurantName ?? null,
     role: profile.role,
     phoneNumber: profile.phoneNumber,
+    deliveryPhone: profile.deliveryPhone ?? null,
+    deliveryOn: Boolean(profile.deliveryOn),
     country: profile.country,
     dateOfBirth: profile.dateOfBirth,
     gender: profile.gender,
@@ -75,6 +81,7 @@ export function formatAuthUserProfile(profile: {
 export async function getAuthUserProfile(userId: number) {
   await ensurePhoneVerifiedSchema();
   await ensureRestaurantNameSchema();
+  await ensureDeliverySchema();
 
   const pool = await getPool();
   const profileResult = await pool

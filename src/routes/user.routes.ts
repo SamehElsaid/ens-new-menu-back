@@ -1,7 +1,8 @@
 import { Router } from "express";
-import { body } from "express-validator";
+import { body, param } from "express-validator";
 import * as userController from "../controllers/user.controller";
 import * as pushTokenController from "../controllers/pushToken.controller";
+import * as deliveryController from "../controllers/delivery.controller";
 import { validate } from "../middleware/validation";
 import { requireAuth } from "../middleware/auth.middleware";
 import { uploadMemoryStorage } from "../controllers/upload.controller";
@@ -44,6 +45,8 @@ router.put(
     body("gender").optional().isIn(["male", "female", "other"]),
     body("address").optional().isString().trim().isLength({ max: 500 }),
     body("profileImage").optional().isString().trim().isLength({ max: 500 }),
+    body("deliveryOn").optional().isBoolean(),
+    body("deliveryPhone").optional().isString().trim().isLength({ max: 50 }),
     body("fcmToken")
       .optional({ values: "null" })
       .custom((value) => {
@@ -53,6 +56,58 @@ router.put(
       }),
   ]),
   userController.updateProfile,
+);
+
+// GET /api/user/delivery/settings - Delivery toggle, phone, and governorates
+router.get("/delivery/settings", deliveryController.getDeliverySettings);
+
+// PUT /api/user/delivery/settings - Update delivery toggle and phone
+router.put(
+  "/delivery/settings",
+  validate([
+    body("deliveryOn").optional().isBoolean(),
+    body("deliveryPhone").optional().isString().trim().isLength({ max: 50 }),
+  ]),
+  deliveryController.updateDeliverySettings,
+);
+
+// GET /api/user/delivery/governorates
+router.get("/delivery/governorates", deliveryController.getDeliveryGovernorates);
+
+// POST /api/user/delivery/governorates
+router.post(
+  "/delivery/governorates",
+  validate([
+    body("nameAr").notEmpty().trim().isLength({ max: 255 }),
+    body("nameEn").notEmpty().trim().isLength({ max: 255 }),
+    body("price").isFloat({ min: 0 }),
+    body("lat").optional({ values: "null" }).isFloat({ min: -90, max: 90 }),
+    body("lan").optional({ values: "null" }).isFloat({ min: -180, max: 180 }),
+    body("lng").optional({ values: "null" }).isFloat({ min: -180, max: 180 }),
+  ]),
+  deliveryController.createDeliveryGovernorate,
+);
+
+// PUT /api/user/delivery/governorates/:governorateId
+router.put(
+  "/delivery/governorates/:governorateId",
+  validate([
+    param("governorateId").isInt(),
+    body("nameAr").optional().notEmpty().trim().isLength({ max: 255 }),
+    body("nameEn").optional().notEmpty().trim().isLength({ max: 255 }),
+    body("price").optional().isFloat({ min: 0 }),
+    body("lat").optional({ values: "null" }).isFloat({ min: -90, max: 90 }),
+    body("lan").optional({ values: "null" }).isFloat({ min: -180, max: 180 }),
+    body("lng").optional({ values: "null" }).isFloat({ min: -180, max: 180 }),
+  ]),
+  deliveryController.updateDeliveryGovernorate,
+);
+
+// DELETE /api/user/delivery/governorates/:governorateId
+router.delete(
+  "/delivery/governorates/:governorateId",
+  validate([param("governorateId").isInt()]),
+  deliveryController.deleteDeliveryGovernorate,
 );
 
 // POST /api/user/change-password - Change password

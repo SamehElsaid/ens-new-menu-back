@@ -12,6 +12,7 @@ import { ensureMenuUuidSchema } from "./menuUuid.schema";
 import { ensurePhoneVerifiedSchema } from "./phoneVerified.schema";
 import { ensurePromoSchema } from "./promo.schema";
 import { ensureRestaurantNameSchema } from "./restaurantName.schema";
+import { ensureDeliverySchema } from "./delivery.schema";
 import { ensureSearchInformationSchema } from "./searchInformation.schema";
 import { ensureVoucherSchema } from "./voucher.schema";
 
@@ -28,6 +29,7 @@ export { ensureMenuUuidSchema } from "./menuUuid.schema";
 export { ensurePhoneVerifiedSchema } from "./phoneVerified.schema";
 export { ensurePromoSchema } from "./promo.schema";
 export { ensureRestaurantNameSchema } from "./restaurantName.schema";
+export { ensureDeliverySchema } from "./delivery.schema";
 export { ensureSearchInformationSchema } from "./searchInformation.schema";
 export { ensureVoucherSchema } from "./voucher.schema";
 
@@ -39,6 +41,7 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "voucher", run: ensureVoucherSchema },
     { name: "phoneVerified", run: ensurePhoneVerifiedSchema },
     { name: "restaurantName", run: ensureRestaurantNameSchema },
+    { name: "delivery", run: ensureDeliverySchema },
     { name: "searchInformation", run: ensureSearchInformationSchema },
     { name: "analytics", run: ensureAnalyticsSchema },
     { name: "menuUuid", run: ensureMenuUuidSchema },
