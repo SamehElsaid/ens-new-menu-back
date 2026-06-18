@@ -13,6 +13,7 @@ export const ALLOWED_MENU_THEMES = [
   "arcane",
   "music",
   "retro",
+  "onecard",
 ] as const;
 
 export type MenuThemeId = (typeof ALLOWED_MENU_THEMES)[number];
@@ -92,6 +93,12 @@ export const THEME_CUSTOMIZATION_DEFAULTS: Record<
   retro: {
     primaryColor: "#C67115",
     secondaryColor: "#84623E",
+    backgroundColor: "#ffffff",
+    textColor: "#0f172a",
+  },
+  onecard: {
+    primaryColor: "#9333EA",
+    secondaryColor: "#7C3AED",
     backgroundColor: "#ffffff",
     textColor: "#0f172a",
   },

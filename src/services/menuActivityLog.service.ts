@@ -6,6 +6,7 @@ import {
   quoteMenuStaffIdent,
 } from "../config/menuStaffColumns";
 import { normalizeStaffJobRole } from "../config/staffJobRoles";
+import { ensureMenuAuditLogSchema } from "../schemas/menuAuditLog.schema";
 import type { TokenPayload } from "../utils/tokenHelper";
 import { logger } from "../utils/logger";
 import { broadcastMenuActivityUpdated } from "../socket/staffIoBroadcast";
@@ -241,6 +242,41 @@ export async function resolveActorForLog(req: Request): Promise<{
 /**
  * Non-blocking: failures are logged, never thrown.
  */
+async function appendMenuAuditLog(
+  menuId: number,
+  actor: MenuOrderActor,
+  row: MenuActivityInsert,
+): Promise<void> {
+  await ensureMenuAuditLogSchema();
+  const pool = await getPool();
+  await pool
+    .request()
+    .input("menuId", sql.Int, menuId)
+    .input("action", sql.NVarChar, row.action)
+    .input("targetType", sql.NVarChar, String(row.targetType ?? ""))
+    .input(
+      "targetId",
+      sql.Int,
+      Number.isFinite(row.targetId ?? NaN) ? row.targetId : null,
+    )
+    .input("summaryAr", sql.NVarChar, row.summaryAr)
+    .input("summaryEn", sql.NVarChar, row.summaryEn)
+    .input("detailJson", sql.NVarChar(sql.MAX), row.detailJson ?? null)
+    .input("actorRole", sql.NVarChar, actor.actorRole)
+    .input("actorName", sql.NVarChar, actor.actorName)
+    .query(`
+      INSERT INTO dbo.MenuAuditLog (
+        menuId, action, targetType, targetId,
+        summaryAr, summaryEn, detailJson, actorRole, actorName
+      )
+      VALUES (
+        @menuId, @action, @targetType, @targetId,
+        @summaryAr, @summaryEn, @detailJson, @actorRole, @actorName
+      )
+    `);
+  broadcastMenuActivityUpdated(menuId);
+}
+
 export async function logMenuActivitySafe(
   req: Request,
   menuId: number,
@@ -248,19 +284,22 @@ export async function logMenuActivitySafe(
 ): Promise<void> {
   try {
     if (!Number.isFinite(menuId) || menuId <= 0) return;
-    if (!Number.isFinite(row.targetId ?? NaN) || (row.targetId ?? 0) <= 0)
-      return;
 
     const targetType = String(row.targetType ?? "")
       .trim()
       .toLowerCase();
-    if (targetType !== "table_call") {
+
+    if (targetType === "table_call") {
+      if (!Number.isFinite(row.targetId ?? NaN) || (row.targetId ?? 0) <= 0)
+        return;
+      const actor = await resolveActorForLog(req);
+      const orderId = Number(row.targetId);
+      await appendMenuOrderActivity(menuId, orderId, actor, row);
       return;
     }
 
     const actor = await resolveActorForLog(req);
-    const orderId = Number(row.targetId);
-    await appendMenuOrderActivity(menuId, orderId, actor, row);
+    await appendMenuAuditLog(menuId, actor, row);
   } catch (e) {
     logger.warn("logMenuActivitySafe skipped", e);
   }
@@ -502,6 +541,113 @@ export async function listMenuActivityLogs(
     return { rows, total, page: safePage, limit: safeLimit };
   } catch (error) {
     logger.error("listMenuActivityLogs error:", error);
+    return { rows: [], total: 0, page: safePage, limit: safeLimit };
+  }
+}
+
+export type MenuAuditLogRow = {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: number | null;
+  summaryAr: string;
+  summaryEn: string;
+  actorRole: string;
+  actorName: string;
+  createdAt: string;
+};
+
+export async function listMenuAuditLogs(
+  menuId: number,
+  page: number,
+  limit: number,
+  search?: string | null,
+): Promise<{
+  rows: MenuAuditLogRow[];
+  total: number;
+  page: number;
+  limit: number;
+}> {
+  const safePage = Math.max(1, Math.floor(page));
+  const safeLimit = Math.min(500, Math.max(1, Math.floor(limit)));
+  const offset = (safePage - 1) * safeLimit;
+  const nameFilter = sanitizeActorNameSearch(search ?? null);
+
+  try {
+    await ensureMenuAuditLogSchema();
+    const pool = await getPool();
+
+    const tableCheck = await pool.request().query(`
+      SELECT OBJECT_ID(N'dbo.MenuAuditLog', N'U') AS oid
+    `);
+    if (!tableCheck.recordset[0]?.oid) {
+      return { rows: [], total: 0, page: safePage, limit: safeLimit };
+    }
+
+    const countReq = pool.request().input("menuId", sql.Int, menuId);
+    const rowsReq = pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("offset", sql.Int, offset)
+      .input("limit", sql.Int, safeLimit);
+
+    let searchCondition = "";
+    if (nameFilter != null) {
+      countReq.input("searchFilter", sql.NVarChar, nameFilter);
+      rowsReq.input("searchFilter", sql.NVarChar, nameFilter);
+      searchCondition = `
+        AND (
+          mal.summaryAr LIKE N'%' + @searchFilter + N'%'
+          OR mal.summaryEn LIKE N'%' + @searchFilter + N'%'
+          OR mal.action LIKE N'%' + @searchFilter + N'%'
+          OR mal.actorName LIKE N'%' + @searchFilter + N'%'
+        )`;
+    }
+
+    const countR = await countReq.query(`
+      SELECT COUNT(*) AS c
+      FROM dbo.MenuAuditLog mal
+      WHERE mal.menuId = @menuId
+      ${searchCondition}
+    `);
+    const total = Number(countR.recordset[0]?.c ?? 0);
+
+    const rowsR = await rowsReq.query(`
+      SELECT
+        mal.id,
+        mal.action,
+        mal.targetType,
+        mal.targetId,
+        mal.summaryAr,
+        mal.summaryEn,
+        mal.actorRole,
+        mal.actorName,
+        mal.createdAt
+      FROM dbo.MenuAuditLog mal
+      WHERE mal.menuId = @menuId
+      ${searchCondition}
+      ORDER BY mal.createdAt DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
+
+    const rows = (rowsR.recordset as Record<string, unknown>[]).map((r) => ({
+      id: String(r.id),
+      action: String(r.action ?? ""),
+      targetType: String(r.targetType ?? ""),
+      targetId:
+        r.targetId != null && Number.isFinite(Number(r.targetId))
+          ? Number(r.targetId)
+          : null,
+      summaryAr: String(r.summaryAr ?? ""),
+      summaryEn: String(r.summaryEn ?? ""),
+      actorRole: String(r.actorRole ?? ""),
+      actorName: String(r.actorName ?? ""),
+      createdAt: r.createdAt ? String(r.createdAt) : "",
+    }));
+
+    return { rows, total, page: safePage, limit: safeLimit };
+  } catch (error) {
+    logger.error("listMenuAuditLogs error:", error);
     return { rows: [], total: 0, page: safePage, limit: safeLimit };
   }
 }

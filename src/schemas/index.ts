@@ -7,6 +7,7 @@ import { ensureBulkImportUsageSchema } from "./bulkImportUsage.schema";
 import { ensureHomepageFeaturedLogosSchema } from "./homepageFeaturedLogos.schema";
 import { ensureMenuItemSizesSchema } from "./menuItemSizes.schema";
 import { ensureMenuItemVariantsSchema } from "./menuItemVariants.schema";
+import { ensureMenuAuditLogSchema } from "./menuAuditLog.schema";
 import { ensureMenuTablesSchema } from "./menuTables.schema";
 import { ensureMenuUuidSchema } from "./menuUuid.schema";
 import { ensurePhoneVerifiedSchema } from "./phoneVerified.schema";
@@ -24,6 +25,7 @@ export { ensureBulkImportUsageSchema } from "./bulkImportUsage.schema";
 export { ensureHomepageFeaturedLogosSchema } from "./homepageFeaturedLogos.schema";
 export { ensureMenuItemSizesSchema } from "./menuItemSizes.schema";
 export { ensureMenuItemVariantsSchema } from "./menuItemVariants.schema";
+export { ensureMenuAuditLogSchema } from "./menuAuditLog.schema";
 export { ensureMenuTablesSchema } from "./menuTables.schema";
 export { ensureMenuUuidSchema } from "./menuUuid.schema";
 export { ensurePhoneVerifiedSchema } from "./phoneVerified.schema";
@@ -52,6 +54,7 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "adminActivityLog", run: ensureAdminActivityLogSchema },
     { name: "menuItemSizes", run: ensureMenuItemSizesSchema },
     { name: "menuItemVariants", run: ensureMenuItemVariantsSchema },
+    { name: "menuAuditLog", run: ensureMenuAuditLogSchema },
   ];
 
   for (const step of steps) {

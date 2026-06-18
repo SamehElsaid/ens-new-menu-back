@@ -64,6 +64,19 @@ router.get(
   getMenuAnalytics,
 );
 
+// GET /api/menus/:menuId/audit-logs — menu audit trail (create/update/delete)
+router.get(
+  "/:menuId/audit-logs",
+  validate([
+    param("menuId").isInt(),
+    query("page").optional().isInt(),
+    query("limit").optional().isInt(),
+    query("q").optional().isString().trim().isLength({ max: 100 }),
+    query("search").optional().isString().trim().isLength({ max: 100 }),
+  ]),
+  menuActivityLogController.listMenuAuditLogsHandler,
+);
+
 // GET /api/menus/:menuId/activity-logs/:id — single activity log entry
 router.get(
   "/:menuId/activity-logs/:id",
