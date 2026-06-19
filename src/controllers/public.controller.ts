@@ -23,6 +23,7 @@ export type PublicDeliverySettings = {
   deliveryOn: boolean;
   deliveryPhone: string | null;
   phoneNumber: string | null;
+  deliveryWhatsAppOn: boolean;
   governorates: Record<string, unknown>[];
 };
 
@@ -33,7 +34,7 @@ async function fetchPublicDeliveryForUser(
   await ensureDeliverySchema();
 
   const userResult = await pool.request().input("userId", sql.Int, userId).query(`
-      SELECT deliveryOn, deliveryPhone, phoneNumber
+      SELECT deliveryOn, deliveryPhone, phoneNumber, deliveryWhatsAppOn
       FROM Users
       WHERE id = @userId
     `);
@@ -43,6 +44,7 @@ async function fetchPublicDeliveryForUser(
       deliveryOn: false,
       deliveryPhone: null,
       phoneNumber: null,
+      deliveryWhatsAppOn: true,
       governorates: [],
     };
   }
@@ -51,6 +53,7 @@ async function fetchPublicDeliveryForUser(
     deliveryOn: boolean | number;
     deliveryPhone: string | null;
     phoneNumber: string | null;
+    deliveryWhatsAppOn?: boolean | number | null;
   };
 
   const governoratesResult = await pool
@@ -66,6 +69,10 @@ async function fetchPublicDeliveryForUser(
     deliveryOn: Boolean(user.deliveryOn),
     deliveryPhone: user.deliveryPhone ?? null,
     phoneNumber: user.phoneNumber ?? null,
+    deliveryWhatsAppOn:
+      user.deliveryWhatsAppOn == null
+        ? true
+        : Boolean(user.deliveryWhatsAppOn),
     governorates: governoratesResult.recordset as Record<string, unknown>[],
   };
 }

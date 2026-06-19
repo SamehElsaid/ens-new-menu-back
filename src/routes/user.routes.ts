@@ -66,6 +66,7 @@ router.put(
   "/delivery/settings",
   validate([
     body("deliveryOn").optional().isBoolean(),
+    body("deliveryWhatsAppOn").optional().isBoolean(),
     body("deliveryPhone").optional().isString().trim().isLength({ max: 50 }),
   ]),
   deliveryController.updateDeliverySettings,

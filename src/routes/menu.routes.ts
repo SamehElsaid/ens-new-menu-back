@@ -87,6 +87,25 @@ router.get(
   menuActivityLogController.getMenuActivityLogByIdHandler,
 );
 
+// POST /api/menus/:menuId/activity-logs/:id/actions — accept / reject / prepare / deliver
+router.post(
+  "/:menuId/activity-logs/:id/actions",
+  validate([
+    param("menuId").isInt(),
+    param("id").isInt(),
+    body("action")
+      .isString()
+      .trim()
+      .isIn([
+        "TABLE_CALL_CONFIRMED",
+        "TABLE_CALL_CANCELLED",
+        "TABLE_CALL_PREPARED",
+        "TABLE_CALL_DELIVERED",
+      ]),
+  ]),
+  menuActivityLogController.postMenuOrderActionHandler,
+);
+
 // GET /api/menus/:menuId/activity-logs — audit trail (owner / authorised staff)
 router.get(
   "/:menuId/activity-logs",

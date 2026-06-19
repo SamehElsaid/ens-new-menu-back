@@ -7,9 +7,16 @@ import {
 } from "../config/menuStaffColumns";
 import { normalizeStaffJobRole } from "../config/staffJobRoles";
 import { ensureMenuAuditLogSchema } from "../schemas/menuAuditLog.schema";
+import { ensureStaffTableCallsOrderTypeSchema } from "../schemas/staffTableCallsOrderType.schema";
 import type { TokenPayload } from "../utils/tokenHelper";
 import { logger } from "../utils/logger";
 import { broadcastMenuActivityUpdated } from "../socket/staffIoBroadcast";
+import {
+  advanceStaffTableCallStatus,
+  getStaffTableCallSnapshot,
+  setStaffTableCallStatus,
+  type StaffTableCallRow,
+} from "./staffTableCall.service";
 
 export type MenuActivityInsert = {
   action: string;
@@ -74,6 +81,9 @@ function inferStatus(action: string, detail: ParsedDetail): string {
   if (statusRaw) return statusRaw;
   if (action === "TABLE_CALL_CONFIRMED") return "confirmed";
   if (action === "TABLE_CALL_CANCELLED") return "cancelled";
+  if (action === "TABLE_CALL_PREPARED") return "prepared";
+  if (action === "TABLE_CALL_DELIVERED") return "delivered";
+  if (action === "TABLE_CALL_CREATED") return "pending";
   if (
     action === "TABLE_CALL_ITEMS_UPDATED" ||
     action === "TABLE_CALL_UPDATED"
@@ -344,17 +354,42 @@ function sanitizeActorNameSearch(
  * `StaffTableCalls.id`. Other features incorrectly reused `targetId` as `orderId`
  * (e.g. staff id), which polluted this feed — exclude those rows.
  */
-async function menuOrdersTableCallExistsSql(): Promise<string> {
+export type MenuOrderChannel = "delivery" | "table";
+
+async function menuOrdersTableCallExistsSql(
+  channel?: MenuOrderChannel | null,
+): Promise<string> {
+  await ensureStaffTableCallsOrderTypeSchema();
   const pool = await getPool();
   const oid = await pool.request().query(`
     SELECT OBJECT_ID(N'dbo.StaffTableCalls', N'U') AS oid
   `);
   if (!oid.recordset?.[0]?.oid) return "";
+
+  let channelFilter = "";
+  if (channel === "delivery") {
+    channelFilter = `
+      AND (
+        stc.orderType = N'delivery'
+        OR (
+          (stc.orderType IS NULL OR LTRIM(RTRIM(stc.orderType)) = N'')
+          AND LOWER(LTRIM(RTRIM(ISNULL(stc.tableNumber, N'')))) = N'delivery'
+        )
+      )`;
+  } else if (channel === "table") {
+    channelFilter = `
+      AND (
+        ISNULL(NULLIF(LTRIM(RTRIM(stc.orderType)), N''), N'table') = N'table'
+        AND LOWER(LTRIM(RTRIM(ISNULL(stc.tableNumber, N'')))) <> N'delivery'
+      )`;
+  }
+
   return `
     AND EXISTS (
       SELECT 1
       FROM dbo.StaffTableCalls stc
       WHERE stc.menuId = mo.menuId AND stc.id = mo.orderId
+      ${channelFilter}
     )`;
 }
 
@@ -370,6 +405,13 @@ export async function getMenuActivityLogById(
   items: any[];
   totalPrice: number;
   updatedAt: string | null;
+  customerPhone?: string | null;
+  customerAddress?: string | null;
+  orderNotes?: string | null;
+  governorateId?: number | null;
+  governorateNameAr?: string | null;
+  governorateNameEn?: string | null;
+  deliveryFee?: number | null;
 } | null> {
   try {
     const pool = await getPool();
@@ -389,8 +431,14 @@ export async function getMenuActivityLogById(
           mo.orderId,
           mo.orderJson,
           mo.actionsJson,
-          mo.updatedAt
+          mo.updatedAt,
+          stc.customerPhone,
+          stc.customerAddress,
+          stc.orderNotes,
+          stc.orderType
         FROM dbo.MenuOrders mo
+        LEFT JOIN dbo.StaffTableCalls stc
+          ON stc.menuId = mo.menuId AND stc.id = mo.orderId
         WHERE mo.menuId = @menuId AND mo.id = @id
         ${tableCallOnly}
       `);
@@ -417,6 +465,23 @@ export async function getMenuActivityLogById(
     const lastAction =
       actions.length > 0 ? actions[actions.length - 1].action : "";
 
+    const stcPhone =
+      r.customerPhone != null && String(r.customerPhone).trim() !== ""
+        ? String(r.customerPhone).trim()
+        : null;
+    const stcAddress =
+      r.customerAddress != null && String(r.customerAddress).trim() !== ""
+        ? String(r.customerAddress).trim()
+        : null;
+    const stcNotes =
+      r.orderNotes != null && String(r.orderNotes).trim() !== ""
+        ? String(r.orderNotes).trim()
+        : null;
+
+    if (!order.customerPhone && stcPhone) order.customerPhone = stcPhone;
+    if (!order.customerAddress && stcAddress) order.customerAddress = stcAddress;
+    if (!order.orderNotes && stcNotes) order.orderNotes = stcNotes;
+
     return {
       id: String(r.id),
       orderId: String(r.orderId),
@@ -426,6 +491,16 @@ export async function getMenuActivityLogById(
       items: order.items || [],
       totalPrice: Number(order.orderTotal || 0),
       updatedAt: r.updatedAt ? String(r.updatedAt) : null,
+      customerPhone: order.customerPhone ?? stcPhone,
+      customerAddress: order.customerAddress ?? stcAddress,
+      orderNotes: order.orderNotes ?? stcNotes,
+      governorateId: order.governorateId ?? null,
+      governorateNameAr: order.governorateNameAr ?? null,
+      governorateNameEn: order.governorateNameEn ?? null,
+      deliveryFee:
+        order.deliveryFee != null && Number.isFinite(Number(order.deliveryFee))
+          ? Number(order.deliveryFee)
+          : null,
     };
   } catch (error) {
     logger.error("getMenuActivityLogById error:", error);
@@ -438,6 +513,7 @@ export async function listMenuActivityLogs(
   page: number,
   limit: number,
   actorNameSearch?: string | null,
+  channel?: MenuOrderChannel | null,
 ): Promise<{
   rows: any[];
   total: number;
@@ -458,7 +534,7 @@ export async function listMenuActivityLogs(
       return { rows: [], total: 0, page: safePage, limit: safeLimit };
     }
 
-    const tableCallOnly = await menuOrdersTableCallExistsSql();
+    const tableCallOnly = await menuOrdersTableCallExistsSql(channel ?? null);
 
     const countReq = pool.request().input("menuId", sql.Int, menuId);
     const rowsReq = pool
@@ -527,12 +603,64 @@ export async function listMenuActivityLogs(
           ? String(order.customerName).trim()
           : null;
 
+      const tableNumber =
+        order.tableNumber != null && String(order.tableNumber).trim() !== ""
+          ? String(order.tableNumber).trim()
+          : null;
+
+      const governorateId =
+        order.governorateId != null && Number.isFinite(Number(order.governorateId))
+          ? Number(order.governorateId)
+          : null;
+
+      const orderTypeRaw = String(order.type ?? order.orderChannel ?? "").trim().toLowerCase();
+      const orderType =
+        orderTypeRaw === "delivery" || orderTypeRaw === "table"
+          ? orderTypeRaw
+          : tableNumber?.toLowerCase() === "delivery"
+            ? "delivery"
+            : "table";
+
+      const customerPhone =
+        order.customerPhone != null && String(order.customerPhone).trim() !== ""
+          ? String(order.customerPhone).trim()
+          : null;
+
+      const customerAddress =
+        order.customerAddress != null &&
+        String(order.customerAddress).trim() !== ""
+          ? String(order.customerAddress).trim()
+          : null;
+
+      const orderNotes =
+        order.orderNotes != null && String(order.orderNotes).trim() !== ""
+          ? String(order.orderNotes).trim()
+          : null;
+
       return {
         id: String(r.id),
         orderId: String(r.orderId),
         lastAction: String(lastAction),
         actionDetails: actionDetails,
         customerName,
+        tableNumber,
+        type: orderType,
+        customerPhone,
+        customerAddress,
+        orderNotes,
+        governorateId,
+        governorateNameAr:
+          order.governorateNameAr != null
+            ? String(order.governorateNameAr)
+            : null,
+        governorateNameEn:
+          order.governorateNameEn != null
+            ? String(order.governorateNameEn)
+            : null,
+        deliveryFee:
+          order.deliveryFee != null && Number.isFinite(Number(order.deliveryFee))
+            ? Number(order.deliveryFee)
+            : null,
         items: order.items || [],
         totalPrice: Number(order.orderTotal || 0),
       };
@@ -649,5 +777,203 @@ export async function listMenuAuditLogs(
   } catch (error) {
     logger.error("listMenuAuditLogs error:", error);
     return { rows: [], total: 0, page: safePage, limit: safeLimit };
+  }
+}
+
+export type MenuOrderActionType =
+  | "TABLE_CALL_CONFIRMED"
+  | "TABLE_CALL_CANCELLED"
+  | "TABLE_CALL_PREPARED"
+  | "TABLE_CALL_DELIVERED";
+
+export type ApplyMenuOrderActionError =
+  | "NOT_FOUND"
+  | "INVALID_STATE"
+  | "INVALID_ACTION"
+  | "SERVER_ERROR";
+
+function orderActionSummaries(
+  snap: StaffTableCallRow | null,
+  action: MenuOrderActionType,
+): { ar: string; en: string } {
+  const isDelivery = snap?.type === "delivery";
+  const cust =
+    snap?.customerName != null && String(snap.customerName).trim() !== ""
+      ? String(snap.customerName).trim()
+      : "";
+  const tbl = String(snap?.tableNumber ?? "").trim();
+
+  if (action === "TABLE_CALL_CONFIRMED") {
+    if (isDelivery) {
+      return cust
+        ? { ar: `قبول طلب توصيل ${cust}`, en: `Accepted delivery order — ${cust}` }
+        : { ar: "قبول طلب توصيل", en: "Accepted delivery order" };
+    }
+    return cust
+      ? { ar: `قبول طلب ${cust} — طاولة ${tbl || "?"}`, en: `Accepted order — ${cust} — table ${tbl || "?"}` }
+      : { ar: `قبول طلب طاولة ${tbl || "?"}`, en: `Accepted table ${tbl || "?"} order` };
+  }
+  if (action === "TABLE_CALL_CANCELLED") {
+    if (isDelivery) {
+      return cust
+        ? { ar: `رفض طلب توصيل ${cust}`, en: `Rejected delivery order — ${cust}` }
+        : { ar: "رفض طلب توصيل", en: "Rejected delivery order" };
+    }
+    return cust
+      ? { ar: `رفض طلب ${cust} — طاولة ${tbl || "?"}`, en: `Rejected order — ${cust} — table ${tbl || "?"}` }
+      : { ar: `رفض طلب طاولة ${tbl || "?"}`, en: `Rejected table ${tbl || "?"} order` };
+  }
+  if (action === "TABLE_CALL_PREPARED") {
+    if (isDelivery) {
+      return cust
+        ? { ar: `تم تحضير طلب توصيل ${cust}`, en: `Delivery order prepared — ${cust}` }
+        : { ar: "تم تحضير طلب التوصيل", en: "Delivery order prepared" };
+    }
+    return cust
+      ? { ar: `تم تحضير طلب ${cust} — طاولة ${tbl || "?"}`, en: `Order prepared — ${cust} — table ${tbl || "?"}` }
+      : { ar: `تم تحضير طلب طاولة ${tbl || "?"}`, en: `Table ${tbl || "?"} order prepared` };
+  }
+  if (isDelivery) {
+    return cust
+      ? { ar: `تم تسليم طلب توصيل ${cust}`, en: `Delivery order delivered — ${cust}` }
+      : { ar: "تم تسليم طلب التوصيل", en: "Delivery order delivered" };
+  }
+  return cust
+    ? { ar: `تم تسليم طلب ${cust} — طاولة ${tbl || "?"}`, en: `Order delivered — ${cust} — table ${tbl || "?"}` }
+    : { ar: `تم تسليم طلب طاولة ${tbl || "?"}`, en: `Table ${tbl || "?"} order delivered` };
+}
+
+function buildOrderDetailForLog(
+  snap: StaffTableCallRow | null,
+  existingOrder: Record<string, unknown>,
+  status: string,
+): Record<string, unknown> {
+  return {
+    ...existingOrder,
+    type: snap?.type ?? existingOrder.type,
+    tableNumber: snap?.tableNumber ?? existingOrder.tableNumber ?? null,
+    customerName: snap?.customerName ?? existingOrder.customerName ?? null,
+    customerPhone: snap?.customerPhone ?? existingOrder.customerPhone ?? null,
+    customerAddress:
+      snap?.customerAddress ?? existingOrder.customerAddress ?? null,
+    orderNotes: snap?.orderNotes ?? existingOrder.orderNotes ?? null,
+    items: snap?.items ?? existingOrder.items ?? [],
+    orderTotal: snap?.orderTotal ?? existingOrder.orderTotal ?? 0,
+    status,
+  };
+}
+
+function actionToStatus(action: MenuOrderActionType): string {
+  if (action === "TABLE_CALL_CONFIRMED") return "confirmed";
+  if (action === "TABLE_CALL_CANCELLED") return "cancelled";
+  if (action === "TABLE_CALL_PREPARED") return "prepared";
+  return "delivered";
+}
+
+/**
+ * Dashboard order action: `MenuOrders.id` (activity log row) + lifecycle action.
+ */
+export async function applyMenuOrderAction(
+  menuId: number,
+  menuOrderLogId: number,
+  action: MenuOrderActionType,
+  req: Request,
+): Promise<
+  | { ok: true; status: string }
+  | { ok: false; error: ApplyMenuOrderActionError }
+> {
+  try {
+    const pool = await getPool();
+    const logRow = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("logId", sql.Int, menuOrderLogId).query(`
+        SELECT id, orderId, orderJson
+        FROM dbo.MenuOrders
+        WHERE menuId = @menuId AND id = @logId
+      `);
+
+    const row = logRow.recordset[0] as
+      | { orderId?: number; orderJson?: string | null }
+      | undefined;
+    if (!row?.orderId) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+
+    const callId = Number(row.orderId);
+    if (!Number.isFinite(callId) || callId <= 0) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+
+    const snapBefore = await getStaffTableCallSnapshot(menuId, callId);
+    if (!snapBefore) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+
+    let existingOrder: Record<string, unknown> = {};
+    try {
+      existingOrder = row.orderJson
+        ? (JSON.parse(String(row.orderJson)) as Record<string, unknown>)
+        : {};
+    } catch {
+      existingOrder = {};
+    }
+
+    const currentStatus = String(snapBefore.status ?? "pending").toLowerCase();
+    let applied = false;
+
+    if (action === "TABLE_CALL_CONFIRMED") {
+      if (currentStatus !== "pending") {
+        return { ok: false, error: "INVALID_STATE" };
+      }
+      applied = await setStaffTableCallStatus(callId, menuId, "confirmed");
+    } else if (action === "TABLE_CALL_CANCELLED") {
+      if (currentStatus !== "pending") {
+        return { ok: false, error: "INVALID_STATE" };
+      }
+      applied = await setStaffTableCallStatus(callId, menuId, "cancelled");
+    } else if (action === "TABLE_CALL_PREPARED") {
+      if (currentStatus !== "confirmed") {
+        return { ok: false, error: "INVALID_STATE" };
+      }
+      applied = await advanceStaffTableCallStatus(callId, menuId, "prepared");
+    } else if (action === "TABLE_CALL_DELIVERED") {
+      if (currentStatus !== "prepared") {
+        return { ok: false, error: "INVALID_STATE" };
+      }
+      applied = await advanceStaffTableCallStatus(callId, menuId, "delivered");
+    } else {
+      return { ok: false, error: "INVALID_ACTION" };
+    }
+
+    if (!applied) {
+      return { ok: false, error: "INVALID_STATE" };
+    }
+
+    const snapAfter = await getStaffTableCallSnapshot(menuId, callId);
+    const nextStatus = actionToStatus(action);
+    const sums = orderActionSummaries(snapAfter, action);
+    const orderDetail = buildOrderDetailForLog(
+      snapAfter,
+      existingOrder,
+      nextStatus,
+    );
+
+    await logMenuActivitySafe(req, menuId, {
+      action,
+      targetType: "table_call",
+      targetId: callId,
+      summaryAr: sums.ar,
+      summaryEn: sums.en,
+      detailJson: JSON.stringify({
+        status: nextStatus,
+        order: orderDetail,
+      }),
+    });
+
+    return { ok: true, status: nextStatus };
+  } catch (error) {
+    logger.error("applyMenuOrderAction error:", error);
+    return { ok: false, error: "SERVER_ERROR" };
   }
 }

@@ -20,9 +20,18 @@ import {
 } from "../utils/menuItemVariants";
 import { isUserOnFreePlan } from "./subscriptionPlan.service";
 import { logMenuOrderEventSafe } from "./menuActivityLog.service";
+import { ensureDeliverySchema } from "../schemas/delivery.schema";
+import { ensureStaffTableCallsOrderTypeSchema } from "../schemas/staffTableCallsOrderType.schema";
+
+export type StaffOrderType = "table" | "delivery";
 
 /** Persisted on StaffTableCalls.status (after migration). */
-export type StaffTableCallStatus = "pending" | "confirmed" | "cancelled";
+export type StaffTableCallStatus =
+  | "pending"
+  | "confirmed"
+  | "cancelled"
+  | "prepared"
+  | "delivered";
 
 export function normalizeStaffTableCallStatus(
   statusRaw: unknown,
@@ -34,7 +43,16 @@ export function normalizeStaffTableCallStatus(
   if (s === "cancelled") {
     return "cancelled";
   }
-  if (s === "confirmed" || acknowledgedAt) {
+  if (s === "delivered") {
+    return "delivered";
+  }
+  if (s === "prepared") {
+    return "prepared";
+  }
+  if (s === "confirmed") {
+    return "confirmed";
+  }
+  if (acknowledgedAt) {
     return "confirmed";
   }
   if (s === "pending" || s === "") {
@@ -48,6 +66,10 @@ export type GuestStaffCallError =
   | "INVALID_ORDER_ITEMS"
   | "MENU_NOT_FOUND"
   | "INVALID_TABLE"
+  | "INVALID_GOVERNORATE"
+  | "INVALID_PHONE"
+  | "INVALID_ADDRESS"
+  | "DELIVERY_DISABLED"
   | "FEATURE_REQUIRES_PRO"
   | "SERVER_ERROR";
 
@@ -69,10 +91,115 @@ export type StaffOrderItem = {
 
 export type GuestStaffCallOptions = {
   customerName?: string | null;
+  customerPhone?: string | null;
+  customerAddress?: string | null;
+  orderNotes?: string | null;
+  /** `table` | `delivery` — preferred over legacy heuristics. */
+  type?: unknown;
   items?: unknown;
   /** If set, stored on insert (default `pending`). */
   status?: unknown;
+  governorateId?: number | null;
 };
+
+function parseOrderType(
+  raw: unknown,
+  governorateId: number | null,
+  tableNumber: string,
+): StaffOrderType {
+  const normalized = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (normalized === "delivery" || normalized === "table") {
+    return normalized;
+  }
+  if (
+    governorateId != null ||
+    tableNumber.toLowerCase() === "delivery"
+  ) {
+    return "delivery";
+  }
+  return "table";
+}
+
+function parseCustomerPhone(
+  raw: unknown,
+  required: boolean,
+): { ok: true; value: string | null } | { ok: false } {
+  if (raw == null || String(raw).trim() === "") {
+    if (required) return { ok: false };
+    return { ok: true, value: null };
+  }
+  const trimmed = String(raw).trim().slice(0, 50);
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length < 8 || digits.length > 15) {
+    return { ok: false };
+  }
+  return { ok: true, value: trimmed };
+}
+
+function parseOrderNotes(raw: unknown): string | null {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim().slice(0, 500);
+  return trimmed.length ? trimmed : null;
+}
+
+function parseCustomerAddress(
+  raw: unknown,
+  required: boolean,
+): { ok: true; value: string | null } | { ok: false } {
+  if (raw == null || String(raw).trim() === "") {
+    if (required) return { ok: false };
+    return { ok: true, value: null };
+  }
+  const trimmed = String(raw).trim().slice(0, 500);
+  return trimmed.length ? { ok: true, value: trimmed } : { ok: false };
+}
+
+function parseGovernorateId(raw: unknown): number | null {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) return null;
+  return n;
+}
+
+async function resolveDeliveryGovernorate(
+  ownerId: number,
+  governorateId: number,
+): Promise<
+  | {
+      ok: true;
+      governorate: {
+        id: number;
+        nameAr: string;
+        nameEn: string;
+        price: number;
+      };
+    }
+  | { ok: false }
+> {
+  await ensureDeliverySchema();
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input("userId", sql.Int, ownerId)
+    .input("governorateId", sql.Int, governorateId).query(`
+      SELECT id, nameAr, nameEn, price
+      FROM UserDeliveryGovernorates
+      WHERE id = @governorateId AND userId = @userId
+    `);
+
+  const row = result.recordset[0] as
+    | {
+        id: number;
+        nameAr: string;
+        nameEn: string;
+        price: number;
+      }
+    | undefined;
+  if (!row) return { ok: false };
+  return { ok: true, governorate: row };
+}
 
 function parseCustomerName(raw: unknown): string | null {
   if (raw == null) return null;
@@ -414,9 +541,13 @@ export async function processGuestStaffCall(
       ok: true;
       id: number;
       menuId: number;
+      type: StaffOrderType;
       tableNumber: string;
       createdAt: Date;
       customerName: string | null;
+      customerPhone: string | null;
+      customerAddress: string | null;
+      orderNotes: string | null;
       items: StaffOrderItem[];
       orderTotal: number;
       status: StaffTableCallStatus;
@@ -429,11 +560,38 @@ export async function processGuestStaffCall(
   const safeTable = String(tableNumber ?? "")
     .trim()
     .slice(0, 50);
-  if (!safeTable) {
+
+  const governorateIdFromOptions = parseGovernorateId(options?.governorateId);
+  const orderType = parseOrderType(
+    options?.type,
+    governorateIdFromOptions,
+    safeTable,
+  );
+  const isDeliveryOrder = orderType === "delivery";
+
+  if (!isDeliveryOrder && !safeTable) {
     return { ok: false, error: "INVALID_PAYLOAD" };
   }
 
   const customerName = parseCustomerName(options?.customerName);
+  const phoneParsed = parseCustomerPhone(
+    options?.customerPhone,
+    isDeliveryOrder,
+  );
+  if (!phoneParsed.ok) {
+    return { ok: false, error: "INVALID_PHONE" };
+  }
+  const customerPhone = phoneParsed.value;
+  const addressParsed = parseCustomerAddress(
+    options?.customerAddress,
+    isDeliveryOrder,
+  );
+  if (!addressParsed.ok) {
+    return { ok: false, error: "INVALID_ADDRESS" };
+  }
+  const customerAddress = addressParsed.value;
+  const orderNotes = parseOrderNotes(options?.orderNotes);
+  const effectiveTable = isDeliveryOrder ? "" : safeTable;
   const initialStatus = parseGuestInitialStaffCallStatus(options?.status);
   const parsedItems = parseOrderItemsInput(options?.items);
   if (!parsedItems.ok) {
@@ -468,12 +626,43 @@ export async function processGuestStaffCall(
       return { ok: false, error: "FEATURE_REQUIRES_PRO" };
     }
 
+    let deliveryGovernorate:
+      | {
+          id: number;
+          nameAr: string;
+          nameEn: string;
+          price: number;
+        }
+      | null = null;
+
+    if (isDeliveryOrder) {
+      await ensureDeliverySchema();
+      const deliverySettings = await pool
+        .request()
+        .input("userId", sql.Int, ownerId)
+        .query(`SELECT deliveryOn FROM Users WHERE id = @userId`);
+      const deliveryOn = Boolean(deliverySettings.recordset[0]?.deliveryOn);
+      if (!deliveryOn) {
+        return { ok: false, error: "DELIVERY_DISABLED" };
+      }
+
+      const governorateId = governorateIdFromOptions;
+      if (!governorateId) {
+        return { ok: false, error: "INVALID_PAYLOAD" };
+      }
+      const govResult = await resolveDeliveryGovernorate(ownerId, governorateId);
+      if (!govResult.ok) {
+        return { ok: false, error: "INVALID_GOVERNORATE" };
+      }
+      deliveryGovernorate = govResult.governorate;
+    }
+
     const tablesCount = await pool
       .request()
       .input("menuId", sql.Int, menuId)
       .query(`SELECT COUNT(*) as c FROM MenuTables WHERE menuId = @menuId`);
     const hasTables = Number(tablesCount.recordset[0]?.c) > 0;
-    if (hasTables) {
+    if (hasTables && !isDeliveryOrder) {
       const tableMeta = await getMenuTablesColumnMeta();
       const activeSql = tableMeta.activeColumnQuoted
         ? ` AND ${tableMeta.activeColumnQuoted} = 1`
@@ -481,7 +670,7 @@ export async function processGuestStaffCall(
       const match = await pool
         .request()
         .input("menuId", sql.Int, menuId)
-        .input("tableNumber", sql.NVarChar, safeTable)
+        .input("tableNumber", sql.NVarChar, effectiveTable)
         .query(
           `SELECT id FROM MenuTables WHERE menuId = @menuId AND tableNumber = @tableNumber${activeSql}`,
         );
@@ -502,10 +691,16 @@ export async function processGuestStaffCall(
 
     const persisted = await createStaffTableCall(
       menuId,
-      safeTable,
+      effectiveTable,
       customerName,
       itemsResolved,
       initialStatus,
+      {
+        orderType,
+        customerPhone,
+        customerAddress,
+        orderNotes,
+      },
     );
     if (!persisted) {
       return { ok: false, error: "SERVER_ERROR" };
@@ -518,20 +713,40 @@ export async function processGuestStaffCall(
         action: "TABLE_CALL_CREATED",
         targetType: "order",
         targetId: persisted.id,
-        summaryAr: customerName
-          ? `طلب جديد من ${customerName} - طاولة ${safeTable}`
-          : `طلب جديد - طاولة ${safeTable}`,
-        summaryEn: customerName
-          ? `New order from ${customerName} - table ${safeTable}`
-          : `New order - table ${safeTable}`,
+        summaryAr: isDeliveryOrder
+          ? customerName
+            ? `طلب توصيل جديد من ${customerName}${deliveryGovernorate ? ` - ${deliveryGovernorate.nameAr}` : ""}`
+            : `طلب توصيل جديد${deliveryGovernorate ? ` - ${deliveryGovernorate.nameAr}` : ""}`
+          : customerName
+            ? `طلب جديد من ${customerName} - طاولة ${effectiveTable}`
+            : `طلب جديد - طاولة ${effectiveTable}`,
+        summaryEn: isDeliveryOrder
+          ? customerName
+            ? `New delivery order from ${customerName}${deliveryGovernorate ? ` - ${deliveryGovernorate.nameEn}` : ""}`
+            : `New delivery order${deliveryGovernorate ? ` - ${deliveryGovernorate.nameEn}` : ""}`
+          : customerName
+            ? `New order from ${customerName} - table ${effectiveTable}`
+            : `New order - table ${effectiveTable}`,
         detailJson: JSON.stringify({
           status: initialStatus,
           order: {
-            tableNumber: safeTable,
+            type: orderType,
+            tableNumber: effectiveTable || null,
             customerName,
+            customerPhone,
+            customerAddress,
+            orderNotes,
             items: itemsResolved,
             orderTotal,
             status: initialStatus,
+            ...(deliveryGovernorate
+              ? {
+                  governorateId: deliveryGovernorate.id,
+                  governorateNameAr: deliveryGovernorate.nameAr,
+                  governorateNameEn: deliveryGovernorate.nameEn,
+                  deliveryFee: Number(deliveryGovernorate.price) || 0,
+                }
+              : {}),
           },
         }),
       },
@@ -545,9 +760,13 @@ export async function processGuestStaffCall(
       ok: true,
       id: persisted.id,
       menuId,
-      tableNumber: safeTable,
+      type: orderType,
+      tableNumber: effectiveTable,
       createdAt: persisted.createdAt,
       customerName,
+      customerPhone,
+      customerAddress,
+      orderNotes,
       items: itemsResolved,
       orderTotal,
       status: initialStatus,
@@ -561,9 +780,13 @@ export async function processGuestStaffCall(
 export type StaffTableCallRow = {
   id: number;
   menuId: number;
+  type: StaffOrderType;
   tableNumber: string;
   createdAt: Date;
   customerName: string | null;
+  customerPhone: string | null;
+  customerAddress: string | null;
+  orderNotes: string | null;
   items: StaffOrderItem[];
   /** Sum of line totals for this call. */
   orderTotal: number;
@@ -759,6 +982,10 @@ type StaffTableCallsSchemaFlags = {
   acknowledgedAt: boolean;
   lastEditedByStaffId: boolean;
   lastEditedAt: boolean;
+  orderType: boolean;
+  customerPhone: boolean;
+  customerAddress: boolean;
+  orderNotes: boolean;
 };
 
 type StaffTableCallsLastEditCols = {
@@ -773,6 +1000,7 @@ async function getStaffTableCallsSchemaFlags(): Promise<StaffTableCallsSchemaFla
   if (staffTableCallsSchemaCache) {
     return staffTableCallsSchemaCache;
   }
+  await ensureStaffTableCallsOrderTypeSchema();
   const pool = await getPool();
   const r = await pool.request().query(`
     SELECT COLUMN_NAME
@@ -789,6 +1017,10 @@ async function getStaffTableCallsSchemaFlags(): Promise<StaffTableCallsSchemaFla
     acknowledgedAt: lower.has("acknowledgedat"),
     lastEditedByStaffId: lower.has("lasteditedbystaffid"),
     lastEditedAt: lower.has("lasteditedat"),
+    orderType: lower.has("ordertype"),
+    customerPhone: lower.has("customerphone"),
+    customerAddress: lower.has("customeraddress"),
+    orderNotes: lower.has("ordernotes"),
   };
   return staffTableCallsSchemaCache;
 }
@@ -856,13 +1088,35 @@ function buildOrderItemsSetSql(
   return sets.join(",\n            ");
 }
 
+function resolveStaffOrderType(
+  row: {
+    orderType?: string | null;
+    tableNumber?: string | null;
+  },
+): StaffOrderType {
+  const raw = String(row.orderType ?? "")
+    .trim()
+    .toLowerCase();
+  if (raw === "delivery" || raw === "table") return raw;
+  const table = String(row.tableNumber ?? "")
+    .trim()
+    .toLowerCase();
+  return table === "delivery" ? "delivery" : "table";
+}
+
 function toStaffTableCallRow(
   row: {
     id: number;
     menuId: number;
     tableNumber: string;
+    orderType?: string | null;
     createdAt: Date;
     customerName: string | null;
+    customerPhone?:
+      | string
+      | null;
+    customerAddress?: string | null;
+    orderNotes?: string | null;
     orderItemsJson?: string;
     status?: string | null;
     acknowledgedAt?: Date | null;
@@ -880,11 +1134,24 @@ function toStaffTableCallRow(
   const base: StaffTableCallRow = {
     id: row.id,
     menuId: row.menuId,
+    type: resolveStaffOrderType(row),
     tableNumber: String(row.tableNumber),
     createdAt: row.createdAt,
     customerName:
       row.customerName != null && String(row.customerName).trim() !== ""
         ? String(row.customerName).trim()
+        : null,
+    customerPhone:
+      row.customerPhone != null && String(row.customerPhone).trim() !== ""
+        ? String(row.customerPhone).trim()
+        : null,
+    customerAddress:
+      row.customerAddress != null && String(row.customerAddress).trim() !== ""
+        ? String(row.customerAddress).trim()
+        : null,
+    orderNotes:
+      row.orderNotes != null && String(row.orderNotes).trim() !== ""
+        ? String(row.orderNotes).trim()
         : null,
     items,
     orderTotal: computeOrderTotalFromItems(items),
@@ -920,12 +1187,20 @@ export async function createStaffTableCall(
   customerName: string | null,
   items: StaffOrderItem[],
   initialStatus: StaffTableCallStatus = "pending",
+  meta?: {
+    orderType?: StaffOrderType;
+    customerPhone?: string | null;
+    customerAddress?: string | null;
+    orderNotes?: string | null;
+  },
 ): Promise<{ id: number; createdAt: Date } | null> {
   try {
+    await ensureStaffTableCallsOrderTypeSchema();
     const pool = await getPool();
     const orderJson = items.length > 0 ? JSON.stringify(items) : null;
     const statusNorm = parseGuestInitialStaffCallStatus(initialStatus);
     const acknowledgedAt = statusNorm === "confirmed" ? new Date() : null;
+    const orderType = meta?.orderType === "delivery" ? "delivery" : "table";
     const result = await pool
       .request()
       .input("menuId", sql.Int, menuId)
@@ -933,10 +1208,24 @@ export async function createStaffTableCall(
       .input("customerName", sql.NVarChar, customerName)
       .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson)
       .input("status", sql.NVarChar(20), statusNorm)
-      .input("acknowledgedAt", sql.DateTime2, acknowledgedAt).query(`
-        INSERT INTO StaffTableCalls (menuId, tableNumber, customerName, orderItemsJson, status, acknowledgedAt)
+      .input("acknowledgedAt", sql.DateTime2, acknowledgedAt)
+      .input("orderType", sql.NVarChar(20), orderType)
+      .input("customerPhone", sql.NVarChar(50), meta?.customerPhone ?? null)
+      .input(
+        "customerAddress",
+        sql.NVarChar(500),
+        meta?.customerAddress ?? null,
+      )
+      .input("orderNotes", sql.NVarChar(500), meta?.orderNotes ?? null).query(`
+        INSERT INTO StaffTableCalls (
+          menuId, tableNumber, customerName, orderItemsJson, status, acknowledgedAt,
+          orderType, customerPhone, customerAddress, orderNotes
+        )
         OUTPUT INSERTED.id, INSERTED.createdAt
-        VALUES (@menuId, @tableNumber, @customerName, @orderItemsJson, @status, @acknowledgedAt)
+        VALUES (
+          @menuId, @tableNumber, @customerName, @orderItemsJson, @status, @acknowledgedAt,
+          @orderType, @customerPhone, @customerAddress, @orderNotes
+        )
       `);
     const row = result.recordset[0];
     if (!row?.id) {
@@ -1042,6 +1331,10 @@ export async function getPendingStaffTableCalls(
           id,
           menuId,
           tableNumber,
+          orderType,
+          customerPhone,
+          customerAddress,
+          orderNotes,
           createdAt,
           customerName,
           orderItemsJson,
@@ -1055,32 +1348,12 @@ export async function getPendingStaffTableCalls(
           )
         ORDER BY createdAt ASC
       `);
-    return (result.recordset as StaffTableCallRow[]).map((row) => {
-      const items = parseOrderItemsJson(
-        (row as { orderItemsJson?: string }).orderItemsJson,
-      );
-      const r = row as {
-        status?: string | null;
-        acknowledgedAt?: Date | null;
-      };
-      const status = normalizeStaffTableCallStatus(
-        r.status,
-        r.acknowledgedAt ?? null,
-      );
-      return {
-        id: row.id,
-        menuId: row.menuId,
-        tableNumber: String(row.tableNumber),
-        createdAt: row.createdAt,
-        customerName:
-          row.customerName != null && String(row.customerName).trim() !== ""
-            ? String(row.customerName).trim()
-            : null,
-        items,
-        orderTotal: computeOrderTotalFromItems(items),
-        status,
-      };
-    });
+    return (result.recordset as Record<string, unknown>[]).map((row) =>
+      toStaffTableCallRow(
+        row as Parameters<typeof toStaffTableCallRow>[0],
+        false,
+      ),
+    );
   } catch (error) {
     logger.error("getPendingStaffTableCalls error:", error);
     return [];
@@ -1254,6 +1527,40 @@ export async function setStaffTableCallStatus(
     return (result.rowsAffected?.[0] ?? 0) > 0;
   } catch (error) {
     logger.error("setStaffTableCallStatus error:", error);
+    return false;
+  }
+}
+
+/**
+ * Advance lifecycle after confirm: `confirmed` → `prepared` → `delivered`.
+ */
+export async function advanceStaffTableCallStatus(
+  callId: number,
+  menuId: number,
+  nextStatus: "prepared" | "delivered",
+): Promise<boolean> {
+  try {
+    const pool = await getPool();
+    const schema = await getStaffTableCallsSchemaFlags();
+    if (!schema.status) {
+      return false;
+    }
+    const requiredCurrent =
+      nextStatus === "prepared" ? "confirmed" : "prepared";
+    const result = await pool
+      .request()
+      .input("id", sql.Int, callId)
+      .input("menuId", sql.Int, menuId)
+      .input("nextStatus", sql.NVarChar(20), nextStatus)
+      .input("requiredCurrent", sql.NVarChar(20), requiredCurrent).query(`
+        UPDATE StaffTableCalls
+        SET status = @nextStatus
+        WHERE id = @id AND menuId = @menuId
+          AND LOWER(LTRIM(RTRIM(ISNULL(status, '')))) = @requiredCurrent
+      `);
+    return (result.rowsAffected?.[0] ?? 0) > 0;
+  } catch (error) {
+    logger.error("advanceStaffTableCallStatus error:", error);
     return false;
   }
 }

@@ -102,7 +102,7 @@ export async function getDeliverySettings(
     const pool = await getPool();
     const userResult = await pool.request().input("userId", sql.Int, userId)
       .query(`
-        SELECT deliveryOn, deliveryPhone, phoneNumber
+        SELECT deliveryOn, deliveryPhone, phoneNumber, deliveryWhatsAppOn
         FROM Users
         WHERE id = @userId
       `);
@@ -124,12 +124,16 @@ export async function getDeliverySettings(
       deliveryOn: boolean | number;
       deliveryPhone: string | null;
       phoneNumber: string | null;
+      deliveryWhatsAppOn?: boolean | number | null;
     };
 
     res.json({
       deliveryOn: Boolean(user.deliveryOn),
       deliveryPhone: user.deliveryPhone ?? null,
       phoneNumber: user.phoneNumber ?? null,
+      deliveryWhatsAppOn: user.deliveryWhatsAppOn == null
+        ? true
+        : Boolean(user.deliveryWhatsAppOn),
       governorates: governoratesResult.recordset,
     });
   } catch (error) {
@@ -144,11 +148,15 @@ export async function updateDeliverySettings(
 ): Promise<void> {
   try {
     const userId = req.user!.userId;
-    const { deliveryOn, deliveryPhone } = req.body;
+    const { deliveryOn, deliveryPhone, deliveryWhatsAppOn } = req.body;
 
     await ensureDeliverySchema();
 
-    if (deliveryOn === undefined && deliveryPhone === undefined) {
+    if (
+      deliveryOn === undefined &&
+      deliveryPhone === undefined &&
+      deliveryWhatsAppOn === undefined
+    ) {
       sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
       return;
     }
@@ -160,12 +168,22 @@ export async function updateDeliverySettings(
       typeof deliveryPhone === "string" ? deliveryPhone.trim() : "";
 
     if (deliveryPhone !== undefined) {
-      if (!trimmedPhone) {
+      const whatsAppRequired =
+        deliveryWhatsAppOn === true ||
+        (deliveryWhatsAppOn === undefined && deliveryOn !== false);
+      if (!trimmedPhone && whatsAppRequired) {
         sendApiError(res, req, 400, ApiErrors.deliveryPhoneRequired);
         return;
       }
-      updates.push("deliveryPhone = @deliveryPhone");
-      request.input("deliveryPhone", sql.NVarChar, trimmedPhone);
+      if (trimmedPhone) {
+        updates.push("deliveryPhone = @deliveryPhone");
+        request.input("deliveryPhone", sql.NVarChar, trimmedPhone);
+      }
+    }
+
+    if (deliveryWhatsAppOn !== undefined) {
+      updates.push("deliveryWhatsAppOn = @deliveryWhatsAppOn");
+      request.input("deliveryWhatsAppOn", sql.Bit, Boolean(deliveryWhatsAppOn));
     }
 
     if (deliveryOn !== undefined) {
@@ -181,15 +199,42 @@ export async function updateDeliverySettings(
           current.phoneNumber ||
           "";
 
-        if (!resolvedPhone) {
+        const whatsAppEnabled =
+          deliveryWhatsAppOn !== undefined
+            ? Boolean(deliveryWhatsAppOn)
+            : undefined;
+
+        if (whatsAppEnabled !== false && !resolvedPhone) {
           sendApiError(res, req, 400, ApiErrors.deliveryPhoneRequired);
           return;
         }
 
-        if (!updates.includes("deliveryPhone = @deliveryPhone")) {
+        if (
+          resolvedPhone &&
+          !updates.includes("deliveryPhone = @deliveryPhone")
+        ) {
           updates.push("deliveryPhone = @deliveryPhone");
           request.input("deliveryPhone", sql.NVarChar, resolvedPhone);
         }
+      }
+    }
+
+    if (deliveryWhatsAppOn === true && deliveryOn !== false) {
+      const current = await getUserDeliveryContact(userId);
+      const resolvedPhone =
+        trimmedPhone ||
+        current.deliveryPhone ||
+        current.phoneNumber ||
+        "";
+
+      if (!resolvedPhone) {
+        sendApiError(res, req, 400, ApiErrors.deliveryPhoneRequired);
+        return;
+      }
+
+      if (!updates.includes("deliveryPhone = @deliveryPhone")) {
+        updates.push("deliveryPhone = @deliveryPhone");
+        request.input("deliveryPhone", sql.NVarChar, resolvedPhone);
       }
     }
 

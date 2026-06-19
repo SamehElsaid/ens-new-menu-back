@@ -14,6 +14,12 @@ export async function ensureDeliverySchema(): Promise<void> {
     BEGIN
       ALTER TABLE Users ADD deliveryPhone NVARCHAR(50) NULL;
     END
+
+    IF COL_LENGTH('Users', 'deliveryWhatsAppOn') IS NULL
+    BEGIN
+      ALTER TABLE Users ADD deliveryWhatsAppOn BIT NOT NULL
+        CONSTRAINT DF_Users_deliveryWhatsAppOn DEFAULT 1;
+    END
   `);
 
   await pool.request().query(`
