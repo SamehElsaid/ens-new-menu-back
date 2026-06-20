@@ -17,6 +17,8 @@ import {
 } from "../config/menuStaffColumns";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 import { generateMenuUuid } from "../utils/menuIdentifier";
+import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
+import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
@@ -28,7 +30,8 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
 
     const result = await pool.request().input("userId", sql.Int, userId).query(`
         SELECT 
-          m.id, m.uuid, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt, m.updatedAt,
+          m.id, m.uuid, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
+          ISNULL(m.chatbotEnabled, 1) as chatbotEnabled, m.updatedAt,
           mtAr.name as nameAr, 
           mtAr.description as descriptionAr,
           mtEn.name as nameEn,
@@ -40,7 +43,12 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
         ORDER BY m.createdAt DESC
       `);
 
-    res.json({ menus: result.recordset });
+    res.json({
+      menus: result.recordset.map((row: Record<string, unknown>) => ({
+        ...row,
+        chatbotEnabled: normalizeChatbotEnabled(row.chatbotEnabled),
+      })),
+    });
   } catch (error) {
     logger.error("Get user menus error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetMenus);
@@ -80,6 +88,9 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
 
     // Check if menu ID is INT or NVARCHAR
     const pool = await getPool();
+
+    await ensureMenuChatbotSchema();
+
     const columnCheck = await pool.request().query(`
         SELECT COLUMN_NAME, DATA_TYPE
         FROM INFORMATION_SCHEMA.COLUMNS
@@ -220,6 +231,7 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
 // Get menu by ID
 export async function getMenuById(req: Request, res: Response): Promise<void> {
   try {
+    await ensureMenuChatbotSchema();
     const auth = req.user!;
     const userId = auth.userId;
     const { id } = req.params;
@@ -237,6 +249,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
         .input("staffId", sql.Int, userId).query(`
         SELECT 
           m.id, m.uuid, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
+          ISNULL(m.chatbotEnabled, 1) as chatbotEnabled,
           ISNULL(m.currency, 'SAR') as currency,
           m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
           m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
@@ -257,6 +270,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
         .input("userId", sql.Int, userId).query(`
         SELECT 
           m.id, m.uuid, m.userId, m.slug, m.logo, m.theme, m.isActive, m.createdAt,
+          ISNULL(m.chatbotEnabled, 1) as chatbotEnabled,
           ISNULL(m.currency, 'SAR') as currency,
           m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
           m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
@@ -280,6 +294,10 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
     }
 
     let menu = result.recordset[0];
+    menu = {
+      ...menu,
+      chatbotEnabled: normalizeChatbotEnabled(menu.chatbotEnabled),
+    };
 
     // Parse workingHours if it's a JSON string
     if (menu.workingHours && typeof menu.workingHours === "string") {
@@ -392,6 +410,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       theme,
       currency,
       isActive,
+      chatbotEnabled,
       footerLogo,
       footerDescriptionEn,
       footerDescriptionAr,
@@ -406,6 +425,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
     } = req.body;
 
     const touched: string[] = [];
+    await ensureMenuChatbotSchema();
     await executeTransaction(async (transaction) => {
       // Verify ownership
       const checkResult = await transaction
@@ -444,6 +464,12 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
         touched.push("isActive");
         menuUpdates.push("isActive = @isActive");
         menuRequest.input("isActive", sql.Bit, isActive ? 1 : 0);
+      }
+
+      if (chatbotEnabled !== undefined) {
+        touched.push("chatbotEnabled");
+        menuUpdates.push("chatbotEnabled = @chatbotEnabled");
+        menuRequest.input("chatbotEnabled", sql.Bit, chatbotEnabled ? 1 : 0);
       }
 
       if (footerLogo !== undefined) {

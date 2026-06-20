@@ -8,6 +8,7 @@ import { ensureHomepageFeaturedLogosSchema } from "./homepageFeaturedLogos.schem
 import { ensureMenuItemSizesSchema } from "./menuItemSizes.schema";
 import { ensureMenuItemVariantsSchema } from "./menuItemVariants.schema";
 import { ensureMenuAuditLogSchema } from "./menuAuditLog.schema";
+import { ensureMenuChatbotSchema } from "./menuChatbot.schema";
 import { ensureMenuTablesSchema } from "./menuTables.schema";
 import { ensureMenuUuidSchema } from "./menuUuid.schema";
 import { ensurePhoneVerifiedSchema } from "./phoneVerified.schema";
@@ -27,6 +28,7 @@ export { ensureHomepageFeaturedLogosSchema } from "./homepageFeaturedLogos.schem
 export { ensureMenuItemSizesSchema } from "./menuItemSizes.schema";
 export { ensureMenuItemVariantsSchema } from "./menuItemVariants.schema";
 export { ensureMenuAuditLogSchema } from "./menuAuditLog.schema";
+export { ensureMenuChatbotSchema } from "./menuChatbot.schema";
 export { ensureMenuTablesSchema } from "./menuTables.schema";
 export { ensureMenuUuidSchema } from "./menuUuid.schema";
 export { ensurePhoneVerifiedSchema } from "./phoneVerified.schema";
@@ -58,6 +60,7 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "menuItemSizes", run: ensureMenuItemSizesSchema },
     { name: "menuItemVariants", run: ensureMenuItemVariantsSchema },
     { name: "menuAuditLog", run: ensureMenuAuditLogSchema },
+    { name: "menuChatbot", run: ensureMenuChatbotSchema },
   ];
 
   for (const step of steps) {

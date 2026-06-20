@@ -161,6 +161,7 @@ router.put(
       .isIn([...ALLOWED_MENU_THEMES]),
     body("currency").optional().isString().isLength({ min: 3, max: 3 }),
     body("isActive").optional().isBoolean(),
+    body("chatbotEnabled").optional().isBoolean(),
     body("addressEn")
       .optional({ nullable: true, checkFalsy: true })
       .isString()
