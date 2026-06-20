@@ -15,6 +15,7 @@ import { listHomepageFeaturedLogos } from "../services/homepageFeaturedLogos.ser
 import { getImageUrl } from "../utils/urlHelper";
 import { attachParsedMenuItemOptionsList } from "../utils/menuItemVariants";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
+import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
 
 const DELIVERY_GOVERNORATE_COLUMNS =
   "id, nameAr, nameEn, price, lat, lan, createdAt, updatedAt";
@@ -190,6 +191,8 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     const tableNumber = parsePublicMenuTableNumber(req);
     const tableId = parsePublicMenuTableId(req);
 
+    await ensureMenuChatbotSchema();
+
     const pool = await getPool();
 
     // Get menu details with translations and owner's subscription plan
@@ -204,6 +207,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           m.theme,
           ISNULL(m.currency, 'SAR') as currency,
           m.isActive,
+          ISNULL(m.chatbotEnabled, 1) as chatbotEnabled,
           m.userId,
           m.footerLogo,
           m.footerDescriptionEn,
@@ -262,6 +266,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
             currency: menu.currency || "SAR",
             slug: menu.slug,
             isActive: menu.isActive,
+            chatbotEnabled: Boolean(menu.chatbotEnabled),
             locale: menu.locale,
             ownerPlanType: menu.ownerPlanType || "free",
             footerLogo: getImageUrl(menu.footerLogo),
@@ -558,6 +563,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           currency: menu.currency || "SAR",
           slug: menu.slug,
           isActive: menu.isActive,
+          chatbotEnabled: Boolean(menu.chatbotEnabled),
           locale: menu.locale,
           ownerPlanType: menu.ownerPlanType || "free", // Add owner's plan type
           footerLogo: getImageUrl(menu.footerLogo),

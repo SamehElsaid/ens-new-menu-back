@@ -122,6 +122,14 @@ export const ApiErrors = {
     en: "Failed to update menu status",
     ar: "فشل تحديث حالة المنيو",
   },
+  chatbotEnabledMustBeBoolean: {
+    en: "chatbotEnabled must be a boolean value",
+    ar: "يجب أن تكون chatbotEnabled قيمة منطقية (true/false)",
+  },
+  failedUpdateChatbotStatus: {
+    en: "Failed to update chatbot status",
+    ar: "فشل تحديث حالة المساعد الذكي",
+  },
   failedDeleteMenu: {
     en: "Failed to delete menu",
     ar: "فشل حذف المنيو",
