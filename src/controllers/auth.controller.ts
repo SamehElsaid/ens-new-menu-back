@@ -21,7 +21,7 @@ import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { getAuthUserProfile } from "../services/userProfile.service";
-import { ensureRestaurantNameSchema } from "../services/userSchema.service";
+import { ensureRestaurantNameSchema } from "../schemas/restaurantName.schema";
 import {
   getUserFcmTokens,
   MAX_FCM_TOKEN_LEN,

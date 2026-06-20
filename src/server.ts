@@ -19,19 +19,7 @@ import { decryptApiKey } from "./middleware/apiKey.middleware";
 import { validateJWTSecrets } from "./utils/tokenHelper";
 import { CleanupService } from "./services/cleanup.service";
 import { ensureUploadDirectories } from "./controllers/upload.controller";
-import { ensureAppVersionSchema } from "./services/appVersionSchema.service";
-import { ensureVoucherSchema } from "./services/voucherSchema.service";
-import { ensurePromoSchema } from "./services/promoSchema.service";
-import { ensurePhoneVerifiedSchema } from "./services/verifykitUser.service";
-import { ensureRestaurantNameSchema } from "./services/userSchema.service";
-import { ensureSearchInformationSchema } from "./services/searchInformationSchema.service";
-import { ensureAnalyticsSchema } from "./services/analyticsSchema.service";
-import { ensureMenuUuidSchema } from "./services/menuUuidSchema.service";
-import { ensureMenuTablesSchema } from "./services/menuTablesSchema.service";
-import { ensureBulkImportUsageSchema } from "./services/bulkImportUsage.service";
-import { ensureHomepageFeaturedLogosSchema } from "./services/homepageFeaturedLogosSchema.service";
-import { ensureAdminCustomerSchema } from "./services/adminCustomerSchema.service";
-import { ensureAdminActivityLogSchema } from "./services/adminActivityLog.service";
+import { ensureDatabaseSchemas } from "./schemas";
 import { startSubscriptionScheduler } from "./services/subscriptionNotificationService";
 // Routes
 import authRoutes from "./routes/auth.routes";
@@ -115,7 +103,12 @@ app.use(
     origin: corsOriginDelegate,
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "x-api-key",
+      "Accept-Language",
+    ],
   }),
 );
 
@@ -221,19 +214,7 @@ async function startServer() {
     try {
       await getPool();
       logger.info("✅ Database connected successfully");
-      await ensureAppVersionSchema();
-      await ensurePromoSchema();
-      await ensureVoucherSchema();
-      await ensurePhoneVerifiedSchema();
-      await ensureRestaurantNameSchema();
-      await ensureSearchInformationSchema();
-      await ensureAnalyticsSchema();
-      await ensureMenuUuidSchema();
-      await ensureMenuTablesSchema();
-      await ensureBulkImportUsageSchema();
-      await ensureHomepageFeaturedLogosSchema();
-      await ensureAdminCustomerSchema();
-      await ensureAdminActivityLogSchema();
+      await ensureDatabaseSchemas();
     } catch (dbError) {
       logger.error("❌ Database connection failed:", dbError);
     }

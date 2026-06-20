@@ -3,7 +3,7 @@ import { decryptDataApi } from "../utils/decrypt";
 import { logger } from "../utils/logger";
 import { pickLocalized, sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
-import { isPaymentTestRoutesEnabled } from "../utils/devFlags";
+import { isPaymentTestRoutesEnabled, isApiKeyValidationSkipped } from "../utils/devFlags";
 
 require("dotenv").config();
 
@@ -70,6 +70,10 @@ function isFullyOpenPath(req: Request): boolean {
 }
 
 export function decryptApiKey(req: Request, res: Response, next: NextFunction) {
+  if (isApiKeyValidationSkipped()) {
+    return next();
+  }
+
   // Always allow public API + health (works even if route order differs on deploy)
   if (isFullyOpenPath(req) || isPublicRoute(req)) {
     return next();

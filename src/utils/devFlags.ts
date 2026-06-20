@@ -8,3 +8,12 @@ export function isPaymentTestRoutesEnabled(): boolean {
     process.env.ENABLE_PAYMENT_TEST_ROUTES === "true"
   );
 }
+
+/** Skip x-api-key validation in local dev, tests, or when explicitly enabled (e.g. devapi deploy). */
+export function isApiKeyValidationSkipped(): boolean {
+  return (
+    process.env.NODE_ENV === "development" ||
+    process.env.NODE_ENV === "test" ||
+    process.env.SKIP_API_KEY_CHECK === "true"
+  );
+}

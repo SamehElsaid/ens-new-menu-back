@@ -1,6 +1,6 @@
 import { getPool, sql } from "../config/database";
 import { resolveFeaturedLogoCountryCode } from "../utils/countryCode.util";
-import { ensureHomepageFeaturedLogosSchema } from "./homepageFeaturedLogosSchema.service";
+import { ensureHomepageFeaturedLogosSchema } from "../schemas/homepageFeaturedLogos.schema";
 
 export type HomepageFeaturedLogo = {
   id: number;

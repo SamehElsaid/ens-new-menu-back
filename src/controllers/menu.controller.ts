@@ -10,7 +10,7 @@ import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
 import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
-import { ROLES } from "../config/constants";
+import { MENU_APPROVAL_STATUS, ROLES } from "../config/constants";
 import {
   getMenuStaffColumnMeta,
   normalizeStaffRow,
@@ -81,14 +81,21 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
     // Check if menu ID is INT or NVARCHAR
     const pool = await getPool();
     const columnCheck = await pool.request().query(`
-        SELECT DATA_TYPE 
-        FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_NAME = 'Menus' AND COLUMN_NAME = 'id'
+        SELECT COLUMN_NAME, DATA_TYPE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = 'Menus' AND COLUMN_NAME IN ('id', 'approvalStatus')
       `);
 
+    const menuColumns = columnCheck.recordset as {
+      COLUMN_NAME: string;
+      DATA_TYPE: string;
+    }[];
+    const idColumn = menuColumns.find((c) => c.COLUMN_NAME === "id");
     const isIdString =
-      columnCheck.recordset.length > 0 &&
-      columnCheck.recordset[0].DATA_TYPE === "nvarchar";
+      idColumn != null && idColumn.DATA_TYPE === "nvarchar";
+    const hasApprovalStatus = menuColumns.some(
+      (c) => c.COLUMN_NAME === "approvalStatus",
+    );
 
     const newMenuUuid = generateMenuUuid();
 
@@ -99,8 +106,14 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
         // Generate unique menu ID (7+ characters)
         newMenuId = await generateUniqueMenuId(7);
 
-        // Insert menu with generated ID
-        await transaction
+        const menuColumns = hasApprovalStatus
+          ? "id, uuid, userId, slug, logo, theme, currency, approvalStatus"
+          : "id, uuid, userId, slug, logo, theme, currency";
+        const menuValues = hasApprovalStatus
+          ? "@id, @uuid, @userId, @slug, @logo, @theme, @currency, @approvalStatus"
+          : "@id, @uuid, @userId, @slug, @logo, @theme, @currency";
+
+        const insertRequest = transaction
           .request()
           .input("id", sql.NVarChar, newMenuId)
           .input("uuid", sql.UniqueIdentifier, newMenuUuid)
@@ -108,23 +121,50 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
           .input("slug", sql.NVarChar, slug)
           .input("logo", sql.NVarChar, logo || null)
           .input("theme", sql.NVarChar, theme)
-          .input("currency", sql.NVarChar(3), currency).query(`
-            INSERT INTO Menus (id, uuid, userId, slug, logo, theme, currency)
-            VALUES (@id, @uuid, @userId, @slug, @logo, @theme, @currency)
+          .input("currency", sql.NVarChar(3), currency);
+
+        if (hasApprovalStatus) {
+          insertRequest.input(
+            "approvalStatus",
+            sql.NVarChar(20),
+            MENU_APPROVAL_STATUS.ACTIVE,
+          );
+        }
+
+        await insertRequest.query(`
+            INSERT INTO Menus (${menuColumns})
+            VALUES (${menuValues})
           `);
       } else {
         // Use IDENTITY (INT)
-        const menuResult = await transaction
+        const menuColumns = hasApprovalStatus
+          ? "uuid, userId, slug, logo, theme, currency, approvalStatus"
+          : "uuid, userId, slug, logo, theme, currency";
+        const menuValues = hasApprovalStatus
+          ? "@uuid, @userId, @slug, @logo, @theme, @currency, @approvalStatus"
+          : "@uuid, @userId, @slug, @logo, @theme, @currency";
+
+        const insertRequest = transaction
           .request()
           .input("uuid", sql.UniqueIdentifier, newMenuUuid)
           .input("userId", sql.Int, userId)
           .input("slug", sql.NVarChar, slug)
           .input("logo", sql.NVarChar, logo || null)
           .input("theme", sql.NVarChar, theme)
-          .input("currency", sql.NVarChar(3), currency).query(`
-            INSERT INTO Menus (uuid, userId, slug, logo, theme, currency)
+          .input("currency", sql.NVarChar(3), currency);
+
+        if (hasApprovalStatus) {
+          insertRequest.input(
+            "approvalStatus",
+            sql.NVarChar(20),
+            MENU_APPROVAL_STATUS.ACTIVE,
+          );
+        }
+
+        const menuResult = await insertRequest.query(`
+            INSERT INTO Menus (${menuColumns})
             OUTPUT INSERTED.id
-            VALUES (@uuid, @userId, @slug, @logo, @theme, @currency)
+            VALUES (${menuValues})
           `);
 
         newMenuId = menuResult.recordset[0].id;

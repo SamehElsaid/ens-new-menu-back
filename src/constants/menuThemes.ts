@@ -13,6 +13,7 @@ export const ALLOWED_MENU_THEMES = [
   "arcane",
   "music",
   "retro",
+  "onecard",
 ] as const;
 
 export type MenuThemeId = (typeof ALLOWED_MENU_THEMES)[number];
@@ -95,10 +96,15 @@ export const THEME_CUSTOMIZATION_DEFAULTS: Record<
     backgroundColor: "#ffffff",
     textColor: "#0f172a",
   },
+  onecard: {
+    primaryColor: "#9333EA",
+    secondaryColor: "#7C3AED",
+    backgroundColor: "#ffffff",
+    textColor: "#0f172a",
+  },
 };
 
-const FALLBACK_CUSTOMIZATION_DEFAULTS =
-  THEME_CUSTOMIZATION_DEFAULTS.neon;
+const FALLBACK_CUSTOMIZATION_DEFAULTS = THEME_CUSTOMIZATION_DEFAULTS.neon;
 
 export function getThemeCustomizationDefaults(
   theme?: string | null,

@@ -176,7 +176,7 @@ export const ApiErrors = {
   },
   failedUpdateCallItems: {
     en: "Failed to update order items",
-    ar: "فشل تحديث عناصر الطلب",
+    ar: "فشل تحديث منتاجاتالطلب",
   },
   tableNotFound: {
     en: "Table not found",
@@ -341,6 +341,38 @@ export const ApiErrors = {
   failedDeleteBranch: {
     en: "Failed to delete branch",
     ar: "فشل حذف الفرع",
+  },
+  deliveryPhoneRequired: {
+    en: "Delivery phone number is required to enable delivery",
+    ar: "رقم هاتف التوصيل مطلوب لتفعيل الدلفري",
+  },
+  failedGetDeliverySettings: {
+    en: "Failed to get delivery settings",
+    ar: "فشل جلب إعدادات التوصيل",
+  },
+  failedUpdateDeliverySettings: {
+    en: "Failed to update delivery settings",
+    ar: "فشل تحديث إعدادات التوصيل",
+  },
+  failedGetDeliveryGovernorates: {
+    en: "Failed to get delivery governorates",
+    ar: "فشل جلب محافظات التوصيل",
+  },
+  failedCreateDeliveryGovernorate: {
+    en: "Failed to add delivery governorate",
+    ar: "فشل إضافة محافظة التوصيل",
+  },
+  failedUpdateDeliveryGovernorate: {
+    en: "Failed to update delivery governorate",
+    ar: "فشل تحديث محافظة التوصيل",
+  },
+  failedDeleteDeliveryGovernorate: {
+    en: "Failed to delete delivery governorate",
+    ar: "فشل حذف محافظة التوصيل",
+  },
+  deliveryGovernorateNotFound: {
+    en: "Delivery governorate not found",
+    ar: "محافظة التوصيل غير موجودة",
   },
   userNotFound: {
     en: "User not found",

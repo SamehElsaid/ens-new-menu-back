@@ -1,5 +1,5 @@
 import { getPool, sql } from "../config/database";
-import { ensurePromoSchema } from "./promoSchema.service";
+import { ensurePromoSchema } from "../schemas/promo.schema";
 
 export interface Promo {
   text: string;

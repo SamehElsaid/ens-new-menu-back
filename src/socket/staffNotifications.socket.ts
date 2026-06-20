@@ -152,6 +152,11 @@ export function attachStaffNotificationsSocket(
           customerName?: string;
           items?: unknown;
           status?: unknown;
+          governorateId?: number;
+          customerPhone?: string;
+          customerAddress?: string;
+          orderNotes?: string;
+          type?: "table" | "delivery";
         },
         cb,
       ) => {
@@ -168,8 +173,13 @@ export function attachStaffNotificationsSocket(
           const tableNumber = String(payload?.tableNumber ?? "").trim();
           const result = await processGuestStaffCall(menuId, tableNumber, {
             customerName: payload?.customerName,
+            customerPhone: payload?.customerPhone,
+            customerAddress: payload?.customerAddress,
+            orderNotes: payload?.orderNotes,
+            type: payload?.type,
             items: payload?.items,
             status: payload?.status,
+            governorateId: payload?.governorateId,
           });
 
           if (!result.ok) {

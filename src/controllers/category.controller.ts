@@ -11,13 +11,26 @@ import {
   BulkImportLimitError,
   canUserBulkImport,
 } from "../services/bulkImportUsage.service";
+import {
+  MenuItemSize,
+  normalizeMenuItemSizesInput,
+  resolveMenuItemBasePrice,
+  serializeMenuItemSizes,
+} from "../utils/menuItemSizes";
 
 type BulkImportVariantInput = {
   id?: string;
   label?: string;
+  labelAr?: string;
   labelEn?: string;
   price?: number | null;
   flags?: unknown[];
+};
+
+type BulkImportSizeInput = {
+  nameAr?: string;
+  nameEn?: string;
+  price?: number | null;
 };
 
 type BulkImportItemInput = {
@@ -32,6 +45,7 @@ type BulkImportItemInput = {
   image?: string;
   imageUrl?: string;
   sortOrder?: number;
+  sizes?: BulkImportSizeInput[];
   variants?: BulkImportVariantInput[];
   flags?: unknown[];
 };
@@ -67,10 +81,9 @@ type BulkImportResultCategory = {
   }>;
 };
 
-function resolveItemPrice(item: BulkImportItemInput): number | null {
-  if (item.price !== null && item.price !== undefined) {
-    const price = Number(item.price);
-    if (!Number.isNaN(price) && price >= 0) return price;
+function resolveBulkItemSizes(item: BulkImportItemInput): MenuItemSize[] | null {
+  if (Array.isArray(item.sizes) && item.sizes.length > 0) {
+    return normalizeMenuItemSizesInput(item.sizes);
   }
 
   const variants = item.variants;
@@ -78,15 +91,21 @@ function resolveItemPrice(item: BulkImportItemInput): number | null {
     return null;
   }
 
-  const variantPrices = variants
-    .map((variant) => Number(variant.price))
-    .filter((price) => !Number.isNaN(price) && price >= 0);
+  return normalizeMenuItemSizesInput(
+    variants.map((variant) => ({
+      nameAr: variant.labelAr ?? variant.label,
+      nameEn: variant.labelEn ?? variant.label,
+      price: variant.price,
+    })),
+  );
+}
 
-  if (variantPrices.length === 0) {
-    return null;
-  }
+function resolveItemPrice(item: BulkImportItemInput): number | null {
+  const sizes = resolveBulkItemSizes(item);
+  const resolved = resolveMenuItemBasePrice(item.price, sizes);
+  if (resolved !== null) return resolved;
 
-  return Math.min(...variantPrices);
+  return null;
 }
 
 function normalizeBulkCategoriesPayload(
@@ -144,38 +163,67 @@ async function requireMenuAccess(
   return true;
 }
 
-// Get all categories for a menu (with pagination)
+// Get all categories for a menu (with pagination and optional name search)
 export async function getCategories(
   req: Request,
   res: Response
 ): Promise<void> {
   try {
     const { menuId } = req.params;
-    const { locale = "ar", page = "1", limit = "10" } = req.query;
+    const { locale = "ar", page = "1", limit = "10", search: searchQuery } =
+      req.query;
 
     const pageNum = Math.max(1, parseInt(page as string) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit as string) || 10));
     const offset = (pageNum - 1) * limitNum;
+    const search = (searchQuery as string)?.trim() || "";
 
     const pool = await getPool();
 
     if (!(await requireMenuAccess(req, res, menuId))) return;
 
-    // Get total count for pagination
-    const countResult = await pool
+    const categorySearchJoins = `
+        FROM Categories c
+        LEFT JOIN CategoryTranslations ar ON c.id = ar.categoryId AND ar.locale = 'ar'
+        LEFT JOIN CategoryTranslations en ON c.id = en.categoryId AND en.locale = 'en'`;
+
+    const categoryDataJoins = `
+        FROM Categories c
+        LEFT JOIN CategoryTranslations ct ON c.id = ct.categoryId AND ct.locale = @locale
+        LEFT JOIN CategoryTranslations ar ON c.id = ar.categoryId AND ar.locale = 'ar'
+        LEFT JOIN CategoryTranslations en ON c.id = en.categoryId AND en.locale = 'en'`;
+
+    const whereParts = ["c.menuId = @menuId"];
+    if (search) {
+      whereParts.push(
+        "(ar.name LIKE @searchPattern OR en.name LIKE @searchPattern)",
+      );
+    }
+    const whereClause = `WHERE ${whereParts.join(" AND ")}`;
+
+    const countRequest = pool
       .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .query("SELECT COUNT(*) as total FROM Categories WHERE menuId = @menuId");
+      .input("menuId", sql.Int, parseInt(menuId));
+    if (search) {
+      countRequest.input("searchPattern", sql.NVarChar, `%${search}%`);
+    }
+    const countResult = await countRequest.query(`
+        SELECT COUNT(DISTINCT c.id) as total
+        ${categorySearchJoins}
+        ${whereClause}
+      `);
     const total = countResult.recordset[0].total;
 
-    // Get categories with translations (all languages for forms and display)
-    const result = await pool
+    const dataRequest = pool
       .request()
       .input("menuId", sql.Int, parseInt(menuId))
       .input("locale", sql.NVarChar, locale as string)
       .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limitNum)
-      .query(`
+      .input("limit", sql.Int, limitNum);
+    if (search) {
+      dataRequest.input("searchPattern", sql.NVarChar, `%${search}%`);
+    }
+    const result = await dataRequest.query(`
         SELECT 
           c.id,
           c.image,
@@ -185,11 +233,8 @@ export async function getCategories(
           ct.name,
           ar.name as nameAr,
           en.name as nameEn
-        FROM Categories c
-        LEFT JOIN CategoryTranslations ct ON c.id = ct.categoryId AND ct.locale = @locale
-        LEFT JOIN CategoryTranslations ar ON c.id = ar.categoryId AND ar.locale = 'ar'
-        LEFT JOIN CategoryTranslations en ON c.id = en.categoryId AND en.locale = 'en'
-        WHERE c.menuId = @menuId
+        ${categoryDataJoins}
+        ${whereClause}
         ORDER BY c.sortOrder ASC, c.createdAt DESC
         OFFSET @offset ROWS
         FETCH NEXT @limit ROWS ONLY
@@ -580,7 +625,7 @@ export async function bulkImportCategories(
         SELECT COLUMN_NAME
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_NAME = 'MenuItems'
-        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent')
+        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent', 'sizes')
       `);
 
       const existingColumns = columnCheck.recordset.map(
@@ -589,6 +634,7 @@ export async function bulkImportCategories(
       const hasCategoryId = existingColumns.includes("categoryId");
       const hasOriginalPrice = existingColumns.includes("originalPrice");
       const hasDiscountPercent = existingColumns.includes("discountPercent");
+      const hasSizes = existingColumns.includes("sizes");
 
       const importedCategories: BulkImportResultCategory[] = [];
 
@@ -646,6 +692,7 @@ export async function bulkImportCategories(
               ? itemInput.sortOrder
               : itemIndex;
           const categoryLabel = categoryInput.nameEn.trim() || "main";
+          const itemSizes = resolveBulkItemSizes(itemInput);
           const itemPrice = resolveItemPrice(itemInput)!;
           const descriptionAr = itemInput.descriptionAr?.trim() || null;
           const descriptionEn = itemInput.descriptionEn?.trim() || null;
@@ -692,6 +739,16 @@ export async function bulkImportCategories(
             itemColumns.push("discountPercent");
             itemValues.push("@discountPercent");
             itemRequest.input("discountPercent", sql.Int, null);
+          }
+
+          if (hasSizes) {
+            itemColumns.push("sizes");
+            itemValues.push("@sizes");
+            itemRequest.input(
+              "sizes",
+              sql.NVarChar(sql.MAX),
+              serializeMenuItemSizes(itemSizes),
+            );
           }
 
           const itemResult = await itemRequest.query(`

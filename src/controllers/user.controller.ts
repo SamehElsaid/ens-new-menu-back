@@ -13,7 +13,8 @@ import { MAX_FCM_TOKEN_LEN, addUserFcmToken, clearUserFcmTokens } from "../servi
 import { SubscriptionDowngradeService } from "../services/subscriptionDowngrade.service";
 import { PaymentService } from "../services/paymentService";
 import { getActivePlansForDisplay } from "../services/plans.service";
-import { ensureRestaurantNameSchema } from "../services/userSchema.service";
+import { ensureRestaurantNameSchema } from "../schemas/restaurantName.schema";
+import { ensureDeliverySchema } from "../schemas/delivery.schema";
 
 // Get user profile
 export async function getProfile(req: Request, res: Response): Promise<void> {
@@ -21,11 +22,13 @@ export async function getProfile(req: Request, res: Response): Promise<void> {
     const userId = req.user!.userId;
 
     await ensureRestaurantNameSchema();
+    await ensureDeliverySchema();
     const pool = await getPool();
 
     const result = await pool.request().input("userId", sql.Int, userId).query(`
         SELECT 
-          id, email, name, restaurantName, phoneNumber, country, dateOfBirth, gender, address,
+          id, email, name, restaurantName, phoneNumber, deliveryPhone, deliveryOn,
+          country, dateOfBirth, gender, address,
           role, isEmailVerified, isPhoneVerified, phoneVerifiedAt, createdAt, profileImage,
           CAST(
             CASE
@@ -47,6 +50,7 @@ export async function getProfile(req: Request, res: Response): Promise<void> {
       hasFcmToken?: unknown;
       isPhoneVerified?: boolean | number | null;
       phoneVerifiedAt?: Date | null;
+      deliveryOn?: boolean | number | null;
     };
     res.json({
       user: {
@@ -54,6 +58,7 @@ export async function getProfile(req: Request, res: Response): Promise<void> {
         hasFcmToken: Boolean(row.hasFcmToken),
         isPhoneVerified: Boolean(row.isPhoneVerified),
         phoneVerifiedAt: row.phoneVerifiedAt ?? null,
+        deliveryOn: Boolean(row.deliveryOn),
       },
     });
   } catch (error) {
@@ -80,9 +85,12 @@ export async function updateProfile(
       address,
       profileImage: profileImageBody,
       fcmToken: fcmTokenBody,
+      deliveryOn,
+      deliveryPhone,
     } = req.body;
 
     await ensureRestaurantNameSchema();
+    await ensureDeliverySchema();
 
     // If client sent multipart with a file, save it and get URL (same as /api/upload type=profile-images)
     let profileImageUrl: string | null = null;
@@ -157,6 +165,63 @@ export async function updateProfile(
       request.input("profileImage", sql.NVarChar, profileImage || null);
     }
 
+    if (deliveryPhone !== undefined) {
+      const trimmed =
+        typeof deliveryPhone === "string" ? deliveryPhone.trim() : "";
+      updates.push("deliveryPhone = @deliveryPhone");
+      request.input("deliveryPhone", sql.NVarChar, trimmed || null);
+    }
+
+    if (deliveryOn !== undefined) {
+      const enabled = Boolean(deliveryOn);
+      updates.push("deliveryOn = @deliveryOn");
+      request.input("deliveryOn", sql.Bit, enabled);
+
+      if (enabled) {
+        const incomingDeliveryPhone =
+          typeof deliveryPhone === "string" ? deliveryPhone.trim() : "";
+        const incomingProfilePhone =
+          typeof phoneValue === "string" ? phoneValue.trim() : "";
+
+        const currentUser = await pool
+          .request()
+          .input("userId", sql.Int, userId)
+          .query(`
+            SELECT deliveryPhone, phoneNumber
+            FROM Users
+            WHERE id = @userId
+          `);
+
+        const current = currentUser.recordset[0] as {
+          deliveryPhone: string | null;
+          phoneNumber: string | null;
+        };
+
+        const resolvedPhone =
+          incomingDeliveryPhone ||
+          incomingProfilePhone ||
+          current.deliveryPhone?.trim() ||
+          current.phoneNumber?.trim() ||
+          "";
+
+        if (!resolvedPhone) {
+          sendApiError(res, req, 400, ApiErrors.deliveryPhoneRequired);
+          return;
+        }
+
+        if (
+          incomingDeliveryPhone ||
+          incomingProfilePhone ||
+          !current.deliveryPhone?.trim()
+        ) {
+          if (!updates.includes("deliveryPhone = @deliveryPhone")) {
+            updates.push("deliveryPhone = @deliveryPhone");
+          }
+          request.input("deliveryPhone", sql.NVarChar, resolvedPhone);
+        }
+      }
+    }
+
     if (fcmTokenBody !== undefined) {
       fcmHandled = true;
       if (fcmTokenBody === null || fcmTokenBody === "") {
@@ -202,7 +267,8 @@ export async function updateProfile(
     const userResult = await pool.request().input("userId", sql.Int, userId)
       .query(`
         SELECT 
-          id, email, name, restaurantName, phoneNumber, country, dateOfBirth, gender, address,
+          id, email, name, restaurantName, phoneNumber, deliveryPhone, deliveryOn,
+          country, dateOfBirth, gender, address,
           role, isEmailVerified, isPhoneVerified, phoneVerifiedAt, createdAt, profileImage,
           CAST(
             CASE
@@ -219,6 +285,7 @@ export async function updateProfile(
       hasFcmToken?: unknown;
       isPhoneVerified?: boolean | number | null;
       phoneVerifiedAt?: Date | null;
+      deliveryOn?: boolean | number | null;
     };
 
     res.json({
@@ -228,6 +295,7 @@ export async function updateProfile(
         hasFcmToken: Boolean(updated.hasFcmToken),
         isPhoneVerified: Boolean(updated.isPhoneVerified),
         phoneVerifiedAt: updated.phoneVerifiedAt ?? null,
+        deliveryOn: Boolean(updated.deliveryOn),
       },
     });
   } catch (error) {

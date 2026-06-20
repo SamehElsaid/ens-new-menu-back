@@ -34,7 +34,13 @@ router.post(
   "/staff-call",
   validate([
     body("menuId").isInt({ min: 1 }).toInt(),
-    body("tableNumber").isString().trim().notEmpty().isLength({ min: 1, max: 50 }),
+    body("type").optional().isIn(["table", "delivery"]),
+    body("tableNumber").optional().isString().trim().isLength({ max: 50 }),
+    body("customerName").optional().isString().trim().isLength({ max: 200 }),
+    body("customerPhone").optional().isString().trim().isLength({ max: 50 }),
+    body("customerAddress").optional().isString().trim().isLength({ max: 500 }),
+    body("orderNotes").optional().isString().trim().isLength({ max: 500 }),
+    body("governorateId").optional().isInt({ min: 1 }).toInt(),
     body("status")
       .optional()
       .isIn(["pending", "confirmed", "cancelled"])

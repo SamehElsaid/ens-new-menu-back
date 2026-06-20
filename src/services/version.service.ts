@@ -1,5 +1,5 @@
 import { getPool, sql } from "../config/database";
-import { ensureAppVersionSchema } from "./appVersionSchema.service";
+import { ensureAppVersionSchema } from "../schemas/appVersion.schema";
 
 export interface AppVersion {
   latestVersion: string;
