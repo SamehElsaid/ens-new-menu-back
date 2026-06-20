@@ -176,7 +176,7 @@ export const ApiErrors = {
   },
   failedUpdateCallItems: {
     en: "Failed to update order items",
-    ar: "فشل تحديث عناصر الطلب",
+    ar: "فشل تحديث منتاجاتالطلب",
   },
   tableNotFound: {
     en: "Table not found",

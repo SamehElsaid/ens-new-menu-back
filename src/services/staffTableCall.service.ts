@@ -582,10 +582,7 @@ export async function processGuestStaffCall(
     return { ok: false, error: "INVALID_PHONE" };
   }
   const customerPhone = phoneParsed.value;
-  const addressParsed = parseCustomerAddress(
-    options?.customerAddress,
-    isDeliveryOrder,
-  );
+  const addressParsed = parseCustomerAddress(options?.customerAddress, false);
   if (!addressParsed.ok) {
     return { ok: false, error: "INVALID_ADDRESS" };
   }
