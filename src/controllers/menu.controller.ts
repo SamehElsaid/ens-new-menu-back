@@ -18,10 +18,7 @@ import {
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 import { generateMenuUuid } from "../utils/menuIdentifier";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
-
-function normalizeChatbotEnabled(value: unknown): boolean {
-  return value === true || value === 1 || value === "1";
-}
+import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
@@ -46,7 +43,12 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
         ORDER BY m.createdAt DESC
       `);
 
-    res.json({ menus: result.recordset });
+    res.json({
+      menus: result.recordset.map((row: Record<string, unknown>) => ({
+        ...row,
+        chatbotEnabled: normalizeChatbotEnabled(row.chatbotEnabled),
+      })),
+    });
   } catch (error) {
     logger.error("Get user menus error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetMenus);
@@ -86,6 +88,9 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
 
     // Check if menu ID is INT or NVARCHAR
     const pool = await getPool();
+
+    await ensureMenuChatbotSchema();
+
     const columnCheck = await pool.request().query(`
         SELECT COLUMN_NAME, DATA_TYPE
         FROM INFORMATION_SCHEMA.COLUMNS
