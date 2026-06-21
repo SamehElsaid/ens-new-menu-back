@@ -7,6 +7,8 @@ import {
   getMenuActivityLogById,
   listMenuAuditLogs,
   applyMenuOrderAction,
+  parseMenuOrderDateParam,
+  parseMenuOrderStatusParam,
   type MenuOrderChannel,
   type MenuOrderActionType,
 } from "../services/menuActivityLog.service";
@@ -78,12 +80,22 @@ export async function listMenuActivityLogsHandler(
     const channelRaw = String(req.query.channel ?? "").trim().toLowerCase();
     const channel: MenuOrderChannel | null =
       channelRaw === "delivery" || channelRaw === "table" ? channelRaw : null;
+    const dateFrom = parseMenuOrderDateParam(req.query.dateFrom);
+    const dateTo = parseMenuOrderDateParam(req.query.dateTo);
+    const status = parseMenuOrderStatusParam(req.query.status);
+
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      sendApiError(res, req, 400, ApiErrors.validationFailed);
+      return;
+    }
+
     const result = await listMenuActivityLogs(
       mid,
       page,
       limit,
       actorNameSearch.length > 0 ? actorNameSearch : null,
       channel,
+      { dateFrom, dateTo, status },
     );
 
     res.json({

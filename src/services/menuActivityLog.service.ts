@@ -349,6 +349,47 @@ function sanitizeActorNameSearch(
   return t.replace(/[%_\[\]]/g, "");
 }
 
+async function buildMenuOrderSearchCondition(
+  pool: Awaited<ReturnType<typeof getPool>>,
+  nameFilter: string | null,
+  rowsReq: ReturnType<Awaited<ReturnType<typeof getPool>>["request"]>,
+  countReq: ReturnType<Awaited<ReturnType<typeof getPool>>["request"]>,
+): Promise<string> {
+  if (nameFilter == null) return "";
+
+  rowsReq.input("nameFilter", sql.NVarChar, nameFilter);
+  countReq.input("nameFilter", sql.NVarChar, nameFilter);
+
+  const stcOid = await pool.request().query(`
+    SELECT OBJECT_ID(N'dbo.StaffTableCalls', N'U') AS oid
+  `);
+  const hasStaffTableCalls = Boolean(stcOid.recordset[0]?.oid);
+
+  const staffSearch = hasStaffTableCalls
+    ? `
+      OR EXISTS (
+        SELECT 1
+        FROM dbo.StaffTableCalls stc_search
+        WHERE stc_search.menuId = mo.menuId
+          AND stc_search.id = mo.orderId
+          AND (
+            ISNULL(stc_search.customerAddress, N'') LIKE N'%' + @nameFilter + N'%'
+            OR ISNULL(stc_search.customerPhone, N'') LIKE N'%' + @nameFilter + N'%'
+            OR ISNULL(stc_search.customerName, N'') LIKE N'%' + @nameFilter + N'%'
+            OR ISNULL(stc_search.tableNumber, N'') LIKE N'%' + @nameFilter + N'%'
+            OR CAST(stc_search.id AS NVARCHAR(20)) LIKE N'%' + @nameFilter + N'%'
+          )
+      )`
+    : "";
+
+  return `
+    AND (
+      mo.actionsJson LIKE N'%' + @nameFilter + N'%'
+      OR mo.orderJson LIKE N'%' + @nameFilter + N'%'
+      ${staffSearch}
+    )`;
+}
+
 /**
  * Activity history is for table orders only: `MenuOrders.orderId` must match
  * `StaffTableCalls.id`. Other features incorrectly reused `targetId` as `orderId`
@@ -356,8 +397,62 @@ function sanitizeActorNameSearch(
  */
 export type MenuOrderChannel = "delivery" | "table";
 
+export type MenuOrderListFilters = {
+  channel?: MenuOrderChannel | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  status?: string | null;
+};
+
+const MENU_ORDER_STATUSES = new Set([
+  "pending",
+  "confirmed",
+  "cancelled",
+  "prepared",
+  "delivered",
+]);
+
+export function parseMenuOrderDateParam(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  const parsed = new Date(`${trimmed}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return trimmed;
+}
+
+export function parseMenuOrderStatusParam(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const status = raw.trim().toLowerCase();
+  if (!status || status === "all") return null;
+  if (!MENU_ORDER_STATUSES.has(status)) return null;
+  return status;
+}
+
+function bindMenuOrderListFilterParams(
+  req: ReturnType<Awaited<ReturnType<typeof getPool>>["request"]>,
+  filters: MenuOrderListFilters,
+): string {
+  let extra = "";
+  if (filters.dateFrom) {
+    req.input("dateFrom", sql.Date, filters.dateFrom);
+    extra += " AND CAST(stc.createdAt AS DATE) >= @dateFrom";
+  }
+  if (filters.dateTo) {
+    req.input("dateTo", sql.Date, filters.dateTo);
+    extra += " AND CAST(stc.createdAt AS DATE) <= @dateTo";
+  }
+  if (filters.status) {
+    req.input("orderStatus", sql.NVarChar, filters.status);
+    extra +=
+      " AND LOWER(LTRIM(RTRIM(ISNULL(stc.status, N'pending')))) = @orderStatus";
+  }
+  return extra;
+}
+
 async function menuOrdersTableCallExistsSql(
-  channel?: MenuOrderChannel | null,
+  filters: MenuOrderListFilters,
+  bindTo?: ReturnType<Awaited<ReturnType<typeof getPool>>["request"]>,
 ): Promise<string> {
   await ensureStaffTableCallsOrderTypeSchema();
   const pool = await getPool();
@@ -366,6 +461,7 @@ async function menuOrdersTableCallExistsSql(
   `);
   if (!oid.recordset?.[0]?.oid) return "";
 
+  const channel = filters.channel ?? null;
   let channelFilter = "";
   if (channel === "delivery") {
     channelFilter = `
@@ -384,12 +480,16 @@ async function menuOrdersTableCallExistsSql(
       )`;
   }
 
+  const listFilter =
+    bindTo != null ? bindMenuOrderListFilterParams(bindTo, filters) : "";
+
   return `
     AND EXISTS (
       SELECT 1
       FROM dbo.StaffTableCalls stc
       WHERE stc.menuId = mo.menuId AND stc.id = mo.orderId
       ${channelFilter}
+      ${listFilter}
     )`;
 }
 
@@ -420,7 +520,7 @@ export async function getMenuActivityLogById(
     `);
     if (!tableCheck.recordset[0]?.oid) return null;
 
-    const tableCallOnly = await menuOrdersTableCallExistsSql();
+    const tableCallOnly = await menuOrdersTableCallExistsSql({});
 
     const result = await pool
       .request()
@@ -514,6 +614,10 @@ export async function listMenuActivityLogs(
   limit: number,
   actorNameSearch?: string | null,
   channel?: MenuOrderChannel | null,
+  listFilters?: Pick<
+    MenuOrderListFilters,
+    "dateFrom" | "dateTo" | "status"
+  > | null,
 ): Promise<{
   rows: any[];
   total: number;
@@ -534,7 +638,12 @@ export async function listMenuActivityLogs(
       return { rows: [], total: 0, page: safePage, limit: safeLimit };
     }
 
-    const tableCallOnly = await menuOrdersTableCallExistsSql(channel ?? null);
+    const orderListFilters: MenuOrderListFilters = {
+      channel: channel ?? null,
+      dateFrom: listFilters?.dateFrom ?? null,
+      dateTo: listFilters?.dateTo ?? null,
+      status: listFilters?.status ?? null,
+    };
 
     const countReq = pool.request().input("menuId", sql.Int, menuId);
     const rowsReq = pool
@@ -543,16 +652,18 @@ export async function listMenuActivityLogs(
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, safeLimit);
 
-    let nameCondition = "";
-    if (nameFilter != null) {
-      rowsReq.input("nameFilter", sql.NVarChar, nameFilter);
-      countReq.input("nameFilter", sql.NVarChar, nameFilter);
-      nameCondition = `
-        AND (
-          mo.actionsJson LIKE N'%' + @nameFilter + N'%'
-          OR mo.orderJson LIKE N'%' + @nameFilter + N'%'
-        )`;
-    }
+    const tableCallOnly = await menuOrdersTableCallExistsSql(
+      orderListFilters,
+      countReq,
+    );
+    await menuOrdersTableCallExistsSql(orderListFilters, rowsReq);
+
+    let nameCondition = await buildMenuOrderSearchCondition(
+      pool,
+      nameFilter,
+      rowsReq,
+      countReq,
+    );
 
     const countR = await countReq.query(`
       SELECT COUNT(*) AS c
