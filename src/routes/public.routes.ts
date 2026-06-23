@@ -12,6 +12,7 @@ import {
   postMenuItemView,
   postAdClick,
   getHomepageFeaturedLogos,
+  getPublicMenuCatalog,
 } from "../controllers/public.controller";
 import {
   postAppVersion,
@@ -66,6 +67,30 @@ router.post(
   postMenuBrandingEvent,
 );
 
+// GET /api/public/menu/:slug/catalog — categories + paginated products
+router.get(
+  "/menu/:slug/catalog",
+  [
+    query("locale")
+      .optional()
+      .isIn(["ar", "en"])
+      .withMessage("Locale must be ar or en"),
+    query("page")
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage("page must be a positive integer"),
+    query("limit")
+      .optional()
+      .isInt({ min: 1, max: 100 })
+      .withMessage("limit must be between 1 and 100"),
+    query("categoryId")
+      .optional()
+      .isInt({ min: 1 })
+      .withMessage("categoryId must be a positive integer"),
+  ],
+  getPublicMenuCatalog,
+);
+
 // GET /api/public/menu/:slug - Get menu by slug
 router.get(
   "/menu/:slug",
@@ -95,7 +120,7 @@ router.get(
       .isIn(["qr"])
       .withMessage("src must be qr when provided"),
   ],
-  getPublicMenu
+  getPublicMenu,
 );
 
 // GET /api/public/menu/:slug/view — page view (+1 qr scan when ?qr or ?src=qr)
@@ -112,10 +137,7 @@ router.get(
 );
 
 // POST /api/public/menu/:slug/items/:itemId/view — product card click
-router.post(
-  "/menu/:slug/items/:itemId/view",
-  postMenuItemView,
-);
+router.post("/menu/:slug/items/:itemId/view", postMenuItemView);
 
 // GET /api/public/menu/:slug/ratings - Get recent ratings
 router.get("/menu/:slug/ratings", getRecentRatings);
@@ -130,7 +152,7 @@ router.post(
     body("comment").optional().isString().trim().isLength({ max: 1000 }),
     body("customerName").optional().isString().trim().isLength({ max: 255 }),
   ]),
-  submitRating
+  submitRating,
 );
 
 // POST /api/public/ads/:id/click — track ad click (public menu)
@@ -149,7 +171,7 @@ router.get(
     query("position").optional().isString(),
     query("limit").optional().isInt({ min: 1, max: 20 }),
   ],
-  getActiveAds
+  getActiveAds,
 );
 
 // GET /api/public/menu/:menuId/ads - Get menu custom ads
@@ -159,7 +181,7 @@ router.get(
     query("position").optional().isString(),
     query("limit").optional().isInt({ min: 1, max: 20 }),
   ],
-  getMenuCustomAds
+  getMenuCustomAds,
 );
 
 // GET /api/public/plans - Get all active plans
