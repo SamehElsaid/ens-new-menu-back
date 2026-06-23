@@ -402,6 +402,18 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           LEFT JOIN CategoryTranslations ctEn ON c.id = ctEn.categoryId AND ctEn.locale = 'en'`;
     }
 
+    let itemsOrderClause = "mi.sortOrder ASC, mi.createdAt DESC";
+    if (hasCategoriesTable && hasCategoryId) {
+      itemsOrderClause =
+        "CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN 1 ELSE 0 END ASC, c.sortOrder ASC, c.createdAt DESC, mi.sortOrder ASC, mi.createdAt DESC";
+    } else if (hasCategoryId) {
+      itemsOrderClause =
+        "mi.categoryId ASC, mi.sortOrder ASC, mi.createdAt DESC";
+    } else {
+      itemsOrderClause =
+        "mi.category ASC, mi.sortOrder ASC, mi.createdAt DESC";
+    }
+
     // Get first page of menu items with translations
     const itemsQuery = `
       SELECT 
@@ -409,7 +421,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       FROM MenuItems mi
       ${joinClause}
       WHERE mi.menuId = @menuId AND mi.available = 1
-      ORDER BY mi.sortOrder ASC, mi.createdAt DESC
+      ORDER BY ${itemsOrderClause}
       OFFSET 0 ROWS
       FETCH NEXT @limit ROWS ONLY
     `;
