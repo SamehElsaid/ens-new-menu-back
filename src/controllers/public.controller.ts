@@ -282,6 +282,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
             tables,
           },
           items: [],
+          totalItems: 0,
           branches: [],
           rating: {
             average: 0,
@@ -419,6 +420,15 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       .input("locale", sql.NVarChar, locale)
       .input("limit", sql.Int, PUBLIC_MENU_INITIAL_ITEMS_LIMIT)
       .query(itemsQuery);
+
+    const countResult = await pool
+      .request()
+      .input("menuId", sql.Int, menu.id).query(`
+        SELECT COUNT(*) as total
+        FROM MenuItems mi
+        WHERE mi.menuId = @menuId AND mi.available = 1
+      `);
+    const totalItems = Number(countResult.recordset[0]?.total ?? 0);
 
     // Get branches with translations
     const branchesResult = await pool
@@ -563,6 +573,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         customizations,
         categories: normalizedCategories,
         items: normalizedItems,
+        totalItems,
         branches: branchesResult.recordset,
         rating: {
           average: rating.averageRating
