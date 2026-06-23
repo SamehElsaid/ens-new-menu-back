@@ -177,6 +177,8 @@ export const getAllPublicMenus = async (req: Request, res: Response) => {
   }
 };
 
+const PUBLIC_MENU_INITIAL_ITEMS_LIMIT = 30;
+
 // Get public menu by slug
 export const getPublicMenu = async (req: Request, res: Response) => {
   try {
@@ -280,7 +282,6 @@ export const getPublicMenu = async (req: Request, res: Response) => {
             tables,
           },
           items: [],
-          itemsByCategory: {},
           branches: [],
           rating: {
             average: 0,
@@ -400,7 +401,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           LEFT JOIN CategoryTranslations ctEn ON c.id = ctEn.categoryId AND ctEn.locale = 'en'`;
     }
 
-    // Get menu items with translations
+    // Get first page of menu items with translations
     const itemsQuery = `
       SELECT 
         ${selectFields.join(",\n        ")}
@@ -408,12 +409,15 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       ${joinClause}
       WHERE mi.menuId = @menuId AND mi.available = 1
       ORDER BY mi.sortOrder ASC, mi.createdAt DESC
+      OFFSET 0 ROWS
+      FETCH NEXT @limit ROWS ONLY
     `;
 
     const itemsResult = await pool
       .request()
       .input("menuId", sql.Int, menu.id)
       .input("locale", sql.NVarChar, locale)
+      .input("limit", sql.Int, PUBLIC_MENU_INITIAL_ITEMS_LIMIT)
       .query(itemsQuery);
 
     // Get branches with translations
@@ -452,34 +456,6 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         image: getImageUrl(item.image),
       })),
     );
-
-    // Group items by category
-    // If using Categories table, group by categoryId and category name
-    // Otherwise, use the old category string field
-    const itemsByCategory: Record<string, any[]> = {};
-
-    if (hasCategoriesTable && hasCategoryId) {
-      // Group by category ID and name
-      normalizedItems.forEach((item: any) => {
-        const categoryKey = item.categoryId
-          ? `category_${item.categoryId}`
-          : item.category || "other";
-
-        if (!itemsByCategory[categoryKey]) {
-          itemsByCategory[categoryKey] = [];
-        }
-        itemsByCategory[categoryKey].push(item);
-      });
-    } else {
-      // Fallback to old category string grouping
-      normalizedItems.forEach((item: any) => {
-        const categoryKey = item.category || "other";
-        if (!itemsByCategory[categoryKey]) {
-          itemsByCategory[categoryKey] = [];
-        }
-        itemsByCategory[categoryKey].push(item);
-      });
-    }
 
     // Get menu customizations if available
     const customizationsResult = await pool
@@ -587,7 +563,6 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         customizations,
         categories: normalizedCategories,
         items: normalizedItems,
-        itemsByCategory,
         branches: branchesResult.recordset,
         rating: {
           average: rating.averageRating
@@ -1042,7 +1017,6 @@ export const getHomepageFeaturedLogos = async (
     });
   }
 };
-
 const DEFAULT_CATALOG_PAGE_LIMIT = 30;
 const MAX_CATALOG_PAGE_LIMIT = 100;
 
@@ -1068,7 +1042,10 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
           ? "en"
           : getLocaleFromAcceptLanguage(req, "ar");
 
-    const pageNum = Math.max(1, parseInt(String(req.query.page ?? "1"), 10) || 1);
+    const pageNum = Math.max(
+      1,
+      parseInt(String(req.query.page ?? "1"), 10) || 1,
+    );
     const limitNum = Math.min(
       MAX_CATALOG_PAGE_LIMIT,
       Math.max(
@@ -1089,15 +1066,17 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
 
     const pool = await getPool();
 
-    const menuResult = await pool
-      .request()
-      .input("slug", sql.NVarChar, slug).query(`
+    const menuResult = await pool.request().input("slug", sql.NVarChar, slug)
+      .query(`
         SELECT id, ISNULL(currency, 'SAR') as currency, isActive
         FROM Menus
         WHERE slug = @slug
       `);
 
-    if (menuResult.recordset.length === 0 || !menuResult.recordset[0].isActive) {
+    if (
+      menuResult.recordset.length === 0 ||
+      !menuResult.recordset[0].isActive
+    ) {
       return res.status(404).json({
         success: false,
         message: "Menu not found",
