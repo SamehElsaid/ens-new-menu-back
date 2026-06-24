@@ -15,6 +15,7 @@ export const ALLOWED_MENU_THEMES = [
   "retro",
   "onecard",
   "waffle",
+  "vanilla",
 ] as const;
 
 export type MenuThemeId = (typeof ALLOWED_MENU_THEMES)[number];
@@ -98,8 +99,8 @@ export const THEME_CUSTOMIZATION_DEFAULTS: Record<
     textColor: "#0f172a",
   },
   onecard: {
-    primaryColor: "#9333EA",
-    secondaryColor: "#7C3AED",
+    primaryColor: "#7B2CBF",
+    secondaryColor: "#5A189A",
     backgroundColor: "#ffffff",
     textColor: "#0f172a",
   },
@@ -108,6 +109,12 @@ export const THEME_CUSTOMIZATION_DEFAULTS: Record<
     secondaryColor: "#5A189A",
     backgroundColor: "#240046",
     textColor: "#ffffff",
+  },
+  vanilla: {
+    primaryColor: "#7B2CBF",
+    secondaryColor: "#5A189A",
+    backgroundColor: "#efe6f8",
+    textColor: "#0f172a",
   },
 };
 
