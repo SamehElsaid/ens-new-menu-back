@@ -981,6 +981,77 @@ function actionToStatus(action: MenuOrderActionType): string {
   return "delivered";
 }
 
+/** Resolve delivery vs table from a dashboard `MenuOrders` row id. */
+export async function getMenuOrderChannelFromLogId(
+  menuId: number,
+  menuOrderLogId: number,
+): Promise<MenuOrderChannel | null> {
+  try {
+    const pool = await getPool();
+    await ensureStaffTableCallsOrderTypeSchema();
+    const logRow = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("logId", sql.Int, menuOrderLogId).query(`
+        SELECT mo.orderId, mo.orderJson, stc.orderType, stc.tableNumber
+        FROM dbo.MenuOrders mo
+        LEFT JOIN dbo.StaffTableCalls stc
+          ON stc.menuId = mo.menuId AND stc.id = mo.orderId
+        WHERE mo.menuId = @menuId AND mo.id = @logId
+      `);
+
+    const row = logRow.recordset[0] as
+      | {
+          orderId?: number;
+          orderJson?: string | null;
+          orderType?: string | null;
+          tableNumber?: string | null;
+        }
+      | undefined;
+    if (!row?.orderId) return null;
+
+    let order: Record<string, unknown> = {};
+    try {
+      order = row.orderJson
+        ? (JSON.parse(String(row.orderJson)) as Record<string, unknown>)
+        : {};
+    } catch {
+      order = {};
+    }
+
+    const fromJson = String(order.type ?? order.orderChannel ?? "")
+      .trim()
+      .toLowerCase();
+    if (fromJson === "delivery" || fromJson === "table") {
+      return fromJson;
+    }
+
+    const fromStc = String(row.orderType ?? "")
+      .trim()
+      .toLowerCase();
+    if (fromStc === "delivery" || fromStc === "table") {
+      return fromStc;
+    }
+
+    const tableNumber =
+      order.tableNumber != null && String(order.tableNumber).trim() !== ""
+        ? String(order.tableNumber).trim()
+        : String(row.tableNumber ?? "").trim();
+    if (tableNumber.toLowerCase() === "delivery") return "delivery";
+
+    const hasDeliveryFields =
+      (order.customerAddress != null &&
+        String(order.customerAddress).trim() !== "") ||
+      order.governorateId != null;
+    if (!tableNumber && hasDeliveryFields) return "delivery";
+
+    return "table";
+  } catch (error) {
+    logger.error("getMenuOrderChannelFromLogId error:", error);
+    return null;
+  }
+}
+
 /**
  * Dashboard order action: `MenuOrders.id` (activity log row) + lifecycle action.
  */

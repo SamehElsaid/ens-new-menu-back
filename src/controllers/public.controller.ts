@@ -17,6 +17,7 @@ import { attachParsedMenuItemOptionsList } from "../utils/menuItemVariants";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
 import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
+import { normalizeMenuTheme } from "../constants/menuThemes";
 
 const DELIVERY_GOVERNORATE_COLUMNS =
   "id, nameAr, nameEn, price, lat, lan, createdAt, updatedAt";
@@ -264,7 +265,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
             name: menu.name,
             description: menu.description,
             logo: getImageUrl(menu.logo),
-            theme: menu.theme,
+            theme: normalizeMenuTheme(menu.theme),
             currency: menu.currency || "SAR",
             slug: menu.slug,
             isActive: menu.isActive,
@@ -557,7 +558,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           name: menu.name,
           description: menu.description,
           logo: getImageUrl(menu.logo),
-          theme: menu.theme,
+          theme: normalizeMenuTheme(menu.theme),
           currency: menu.currency || "SAR",
           slug: menu.slug,
           isActive: menu.isActive,

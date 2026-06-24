@@ -19,6 +19,7 @@ import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 import { generateMenuUuid } from "../utils/menuIdentifier";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
 import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
+import { normalizeMenuTheme } from "../constants/menuThemes";
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
@@ -47,6 +48,7 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
       menus: result.recordset.map((row: Record<string, unknown>) => ({
         ...row,
         chatbotEnabled: normalizeChatbotEnabled(row.chatbotEnabled),
+        theme: normalizeMenuTheme(row.theme as string | null),
       })),
     });
   } catch (error) {
@@ -297,6 +299,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
     menu = {
       ...menu,
       chatbotEnabled: normalizeChatbotEnabled(menu.chatbotEnabled),
+      theme: normalizeMenuTheme(menu.theme),
     };
 
     // Parse workingHours if it's a JSON string
