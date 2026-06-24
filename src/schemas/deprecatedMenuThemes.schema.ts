@@ -4,10 +4,6 @@ import { logger } from "../utils/logger";
 
 /** One-time idempotent data fix: retired themes → default. */
 export async function migrateDeprecatedMenuThemes(): Promise<void> {
-  if (DEPRECATED_MENU_THEMES.length === 0) {
-    return;
-  }
-
   const pool = await getPool();
   const request = pool.request();
 
