@@ -18,6 +18,7 @@ import { ensureDeliverySchema } from "./delivery.schema";
 import { ensureStaffTableCallsOrderTypeSchema } from "./staffTableCallsOrderType.schema";
 import { ensureSearchInformationSchema } from "./searchInformation.schema";
 import { ensureVoucherSchema } from "./voucher.schema";
+import { migrateDeprecatedMenuThemes } from "./deprecatedMenuThemes.schema";
 
 export { ensureAdminActivityLogSchema } from "./adminActivityLog.schema";
 export { ensureAdminCustomerSchema } from "./adminCustomer.schema";
@@ -38,6 +39,7 @@ export { ensureDeliverySchema } from "./delivery.schema";
 export { ensureStaffTableCallsOrderTypeSchema } from "./staffTableCallsOrderType.schema";
 export { ensureSearchInformationSchema } from "./searchInformation.schema";
 export { ensureVoucherSchema } from "./voucher.schema";
+export { migrateDeprecatedMenuThemes } from "./deprecatedMenuThemes.schema";
 
 /** Runs all idempotent DB schema migrations on startup (after pool is connected). */
 export async function ensureDatabaseSchemas(): Promise<void> {
@@ -61,6 +63,7 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "menuItemVariants", run: ensureMenuItemVariantsSchema },
     { name: "menuAuditLog", run: ensureMenuAuditLogSchema },
     { name: "menuChatbot", run: ensureMenuChatbotSchema },
+    { name: "deprecatedMenuThemes", run: migrateDeprecatedMenuThemes },
   ];
 
   for (const step of steps) {

@@ -7,6 +7,7 @@ import {
   getMenuActivityLogById,
   listMenuAuditLogs,
   applyMenuOrderAction,
+  getMenuOrderChannelFromLogId,
   parseMenuOrderDateParam,
   parseMenuOrderStatusParam,
   type MenuOrderChannel,
@@ -190,7 +191,8 @@ export async function postMenuOrderActionHandler(
       return;
     }
 
-    if (!(await menuOwnerHasProPlan(mid))) {
+    const orderChannel = await getMenuOrderChannelFromLogId(mid, logId);
+    if (orderChannel === "table" && !(await menuOwnerHasProPlan(mid))) {
       sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
         code: "PRO_REQUIRED",
       });

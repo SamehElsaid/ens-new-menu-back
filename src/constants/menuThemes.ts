@@ -6,6 +6,13 @@ export const ALLOWED_MENU_THEMES = [
   "neon",
   "coffee",
   "sky",
+  "onecard",
+  "waffle",
+  "vanilla",
+] as const;
+
+/** Retired templates — migrated to `default` on startup. */
+export const DEPRECATED_MENU_THEMES = [
   "emerald",
   "noir",
   "oceanic",
@@ -13,12 +20,18 @@ export const ALLOWED_MENU_THEMES = [
   "arcane",
   "music",
   "retro",
-  "onecard",
-  "waffle",
-  "vanilla",
 ] as const;
 
 export type MenuThemeId = (typeof ALLOWED_MENU_THEMES)[number];
+
+const ALLOWED_THEME_SET = new Set<string>(ALLOWED_MENU_THEMES);
+
+export function normalizeMenuTheme(theme?: string | null): MenuThemeId {
+  if (theme && ALLOWED_THEME_SET.has(theme)) {
+    return theme as MenuThemeId;
+  }
+  return "default";
+}
 
 export type ThemeCustomizationDefaults = {
   primaryColor: string;
@@ -53,48 +66,6 @@ export const THEME_CUSTOMIZATION_DEFAULTS: Record<
   sky: {
     primaryColor: "#3b82f6",
     secondaryColor: "#2563eb",
-    backgroundColor: "#ffffff",
-    textColor: "#0f172a",
-  },
-  emerald: {
-    primaryColor: "#4c1121",
-    secondaryColor: "#9b2545",
-    backgroundColor: "#ffffff",
-    textColor: "#0f172a",
-  },
-  noir: {
-    primaryColor: "#7c3aed",
-    secondaryColor: "#06b6d4",
-    backgroundColor: "#ffffff",
-    textColor: "#0f172a",
-  },
-  oceanic: {
-    primaryColor: "#0ea5e9",
-    secondaryColor: "#0891b2",
-    backgroundColor: "#ffffff",
-    textColor: "#0f172a",
-  },
-  pharaonic: {
-    primaryColor: "#C9A227",
-    secondaryColor: "#0E7C86",
-    backgroundColor: "#ffffff",
-    textColor: "#0f172a",
-  },
-  arcane: {
-    primaryColor: "#D1282A",
-    secondaryColor: "#991B1B",
-    backgroundColor: "#ffffff",
-    textColor: "#111111",
-  },
-  music: {
-    primaryColor: "#4338CA",
-    secondaryColor: "#06B6D4",
-    backgroundColor: "#ffffff",
-    textColor: "#0f172a",
-  },
-  retro: {
-    primaryColor: "#C67115",
-    secondaryColor: "#84623E",
     backgroundColor: "#ffffff",
     textColor: "#0f172a",
   },
