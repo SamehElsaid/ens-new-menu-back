@@ -14,6 +14,7 @@ export const ALLOWED_MENU_THEMES = [
   "music",
   "retro",
   "onecard",
+  "waffle",
 ] as const;
 
 export type MenuThemeId = (typeof ALLOWED_MENU_THEMES)[number];
@@ -101,6 +102,12 @@ export const THEME_CUSTOMIZATION_DEFAULTS: Record<
     secondaryColor: "#7C3AED",
     backgroundColor: "#ffffff",
     textColor: "#0f172a",
+  },
+  waffle: {
+    primaryColor: "#7B2CBF",
+    secondaryColor: "#5A189A",
+    backgroundColor: "#240046",
+    textColor: "#ffffff",
   },
 };
 

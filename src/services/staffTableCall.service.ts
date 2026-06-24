@@ -619,7 +619,7 @@ export async function processGuestStaffCall(
     }
 
     const ownerId = m.userId as number;
-    if (await isUserOnFreePlan(ownerId)) {
+    if (await isUserOnFreePlan(ownerId) && !isDeliveryOrder) {
       return { ok: false, error: "FEATURE_REQUIRES_PRO" };
     }
 
