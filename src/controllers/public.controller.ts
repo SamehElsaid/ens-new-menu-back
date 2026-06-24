@@ -35,7 +35,8 @@ async function fetchPublicDeliveryForUser(
 ): Promise<PublicDeliverySettings> {
   await ensureDeliverySchema();
 
-  const userResult = await pool.request().input("userId", sql.Int, userId).query(`
+  const userResult = await pool.request().input("userId", sql.Int, userId)
+    .query(`
       SELECT deliveryOn, deliveryPhone, phoneNumber, deliveryWhatsAppOn
       FROM Users
       WHERE id = @userId
@@ -72,9 +73,7 @@ async function fetchPublicDeliveryForUser(
     deliveryPhone: user.deliveryPhone ?? null,
     phoneNumber: user.phoneNumber ?? null,
     deliveryWhatsAppOn:
-      user.deliveryWhatsAppOn == null
-        ? true
-        : Boolean(user.deliveryWhatsAppOn),
+      user.deliveryWhatsAppOn == null ? true : Boolean(user.deliveryWhatsAppOn),
     governorates: governoratesResult.recordset as Record<string, unknown>[],
   };
 }
@@ -177,6 +176,8 @@ export const getAllPublicMenus = async (req: Request, res: Response) => {
     sendApiError(res, req, 500, ApiErrors.failedGetMenus);
   }
 };
+
+const PUBLIC_MENU_INITIAL_ITEMS_LIMIT = 30;
 
 // Get public menu by slug
 export const getPublicMenu = async (req: Request, res: Response) => {
@@ -281,7 +282,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
             tables,
           },
           items: [],
-          itemsByCategory: {},
+          totalItems: 0,
           branches: [],
           rating: {
             average: 0,
@@ -401,21 +402,45 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           LEFT JOIN CategoryTranslations ctEn ON c.id = ctEn.categoryId AND ctEn.locale = 'en'`;
     }
 
-    // Get menu items with translations
+    let itemsOrderClause = "mi.sortOrder ASC, mi.createdAt DESC";
+    if (hasCategoriesTable && hasCategoryId) {
+      itemsOrderClause =
+        "CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN 1 ELSE 0 END ASC, c.sortOrder ASC, c.createdAt DESC, mi.sortOrder ASC, mi.createdAt DESC";
+    } else if (hasCategoryId) {
+      itemsOrderClause =
+        "mi.categoryId ASC, mi.sortOrder ASC, mi.createdAt DESC";
+    } else {
+      itemsOrderClause =
+        "mi.category ASC, mi.sortOrder ASC, mi.createdAt DESC";
+    }
+
+    // Get first page of menu items with translations
     const itemsQuery = `
       SELECT 
         ${selectFields.join(",\n        ")}
       FROM MenuItems mi
       ${joinClause}
       WHERE mi.menuId = @menuId AND mi.available = 1
-      ORDER BY mi.sortOrder ASC, mi.createdAt DESC
+      ORDER BY ${itemsOrderClause}
+      OFFSET 0 ROWS
+      FETCH NEXT @limit ROWS ONLY
     `;
 
     const itemsResult = await pool
       .request()
       .input("menuId", sql.Int, menu.id)
       .input("locale", sql.NVarChar, locale)
+      .input("limit", sql.Int, PUBLIC_MENU_INITIAL_ITEMS_LIMIT)
       .query(itemsQuery);
+
+    const countResult = await pool
+      .request()
+      .input("menuId", sql.Int, menu.id).query(`
+        SELECT COUNT(*) as total
+        FROM MenuItems mi
+        WHERE mi.menuId = @menuId AND mi.available = 1
+      `);
+    const totalItems = Number(countResult.recordset[0]?.total ?? 0);
 
     // Get branches with translations
     const branchesResult = await pool
@@ -453,34 +478,6 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         image: getImageUrl(item.image),
       })),
     );
-
-    // Group items by category
-    // If using Categories table, group by categoryId and category name
-    // Otherwise, use the old category string field
-    const itemsByCategory: Record<string, any[]> = {};
-
-    if (hasCategoriesTable && hasCategoryId) {
-      // Group by category ID and name
-      normalizedItems.forEach((item: any) => {
-        const categoryKey = item.categoryId
-          ? `category_${item.categoryId}`
-          : item.category || "other";
-
-        if (!itemsByCategory[categoryKey]) {
-          itemsByCategory[categoryKey] = [];
-        }
-        itemsByCategory[categoryKey].push(item);
-      });
-    } else {
-      // Fallback to old category string grouping
-      normalizedItems.forEach((item: any) => {
-        const categoryKey = item.category || "other";
-        if (!itemsByCategory[categoryKey]) {
-          itemsByCategory[categoryKey] = [];
-        }
-        itemsByCategory[categoryKey].push(item);
-      });
-    }
 
     // Get menu customizations if available
     const customizationsResult = await pool
@@ -588,7 +585,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
         customizations,
         categories: normalizedCategories,
         items: normalizedItems,
-        itemsByCategory,
+        totalItems,
         branches: branchesResult.recordset,
         rating: {
           average: rating.averageRating
@@ -1040,6 +1037,232 @@ export const getHomepageFeaturedLogos = async (
     res.status(500).json({
       success: false,
       message: "Failed to fetch homepage featured logos",
+    });
+  }
+};
+const DEFAULT_CATALOG_PAGE_LIMIT = 30;
+const MAX_CATALOG_PAGE_LIMIT = 100;
+
+/**
+ * GET /api/public/menu/:slug/catalog
+ * All active categories + paginated products for a menu (public).
+ * Query: page, limit, categoryId (optional filter), locale.
+ */
+export const getPublicMenuCatalog = async (req: Request, res: Response) => {
+  try {
+    const slug = decodeURIComponent(String(req.params.slug ?? "")).trim();
+    if (!slug) {
+      return res.status(400).json({
+        success: false,
+        message: "Menu slug is required",
+      });
+    }
+
+    const locale =
+      (req.query.locale as string) === "ar"
+        ? "ar"
+        : (req.query.locale as string) === "en"
+          ? "en"
+          : getLocaleFromAcceptLanguage(req, "ar");
+
+    const pageNum = Math.max(
+      1,
+      parseInt(String(req.query.page ?? "1"), 10) || 1,
+    );
+    const limitNum = Math.min(
+      MAX_CATALOG_PAGE_LIMIT,
+      Math.max(
+        1,
+        parseInt(String(req.query.limit ?? DEFAULT_CATALOG_PAGE_LIMIT), 10) ||
+          DEFAULT_CATALOG_PAGE_LIMIT,
+      ),
+    );
+    const offset = (pageNum - 1) * limitNum;
+
+    const categoryIdRaw = req.query.categoryId;
+    const categoryId =
+      categoryIdRaw !== undefined && categoryIdRaw !== ""
+        ? parseInt(String(categoryIdRaw), 10)
+        : undefined;
+    const hasCategoryFilter =
+      categoryId !== undefined && Number.isFinite(categoryId) && categoryId > 0;
+
+    const pool = await getPool();
+
+    const menuResult = await pool.request().input("slug", sql.NVarChar, slug)
+      .query(`
+        SELECT id, ISNULL(currency, 'SAR') as currency, isActive
+        FROM Menus
+        WHERE slug = @slug
+      `);
+
+    if (
+      menuResult.recordset.length === 0 ||
+      !menuResult.recordset[0].isActive
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Menu not found",
+      });
+    }
+
+    const menu = menuResult.recordset[0] as {
+      id: number;
+      currency: string;
+      isActive: boolean;
+    };
+    const menuId = menu.id;
+
+    const categoriesResult = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("locale", sql.NVarChar, locale).query(`
+        SELECT
+          c.id,
+          c.image,
+          c.sortOrder,
+          ct.name,
+          ctAr.name as nameAr,
+          ctEn.name as nameEn,
+          (SELECT COUNT(*) FROM MenuItems mi WHERE mi.categoryId = c.id AND mi.available = 1) as itemsCount
+        FROM Categories c
+        LEFT JOIN CategoryTranslations ct ON c.id = ct.categoryId AND ct.locale = @locale
+        LEFT JOIN CategoryTranslations ctAr ON c.id = ctAr.categoryId AND ctAr.locale = 'ar'
+        LEFT JOIN CategoryTranslations ctEn ON c.id = ctEn.categoryId AND ctEn.locale = 'en'
+        WHERE c.menuId = @menuId AND c.isActive = 1
+        ORDER BY c.sortOrder ASC, c.createdAt DESC
+      `);
+
+    const columnCheck = await pool.request().query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = 'MenuItems'
+        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent', 'sizes', 'variants')
+      `);
+    const existingColumns = columnCheck.recordset.map(
+      (r: { COLUMN_NAME: string }) => r.COLUMN_NAME,
+    );
+    const hasCategoryId = existingColumns.includes("categoryId");
+    const hasOriginalPrice = existingColumns.includes("originalPrice");
+    const hasDiscountPercent = existingColumns.includes("discountPercent");
+    const hasSizes = existingColumns.includes("sizes");
+    const hasVariants = existingColumns.includes("variants");
+
+    const productWhereParts = ["mi.menuId = @menuId", "mi.available = 1"];
+    if (hasCategoryFilter && hasCategoryId) {
+      productWhereParts.push("mi.categoryId = @categoryId");
+    }
+    const productWhereClause = `WHERE ${productWhereParts.join(" AND ")}`;
+
+    const categoryJoin = hasCategoryId
+      ? `
+          LEFT JOIN Categories c ON mi.categoryId = c.id AND c.isActive = 1
+          LEFT JOIN CategoryTranslations ct ON c.id = ct.categoryId AND ct.locale = @locale
+          LEFT JOIN CategoryTranslations ctAr ON c.id = ctAr.categoryId AND ctAr.locale = 'ar'
+          LEFT JOIN CategoryTranslations ctEn ON c.id = ctEn.categoryId AND ctEn.locale = 'en'`
+      : "";
+
+    const categorySelect = hasCategoryId
+      ? `,
+          mi.categoryId,
+          ct.name as categoryName,
+          ctAr.name as categoryNameAr,
+          ctEn.name as categoryNameEn`
+      : "";
+
+    const optionSelectParts: string[] = [];
+    if (hasOriginalPrice) optionSelectParts.push("mi.originalPrice");
+    if (hasDiscountPercent) optionSelectParts.push("mi.discountPercent");
+    if (hasSizes) optionSelectParts.push("mi.sizes");
+    if (hasVariants) optionSelectParts.push("mi.variants");
+    const optionSelect =
+      optionSelectParts.length > 0 ? `,\n          ${optionSelectParts.join(",\n          ")}` : "";
+
+    const countRequest = pool.request().input("menuId", sql.Int, menuId);
+    if (hasCategoryFilter && hasCategoryId) {
+      countRequest.input("categoryId", sql.Int, categoryId);
+    }
+    const countResult = await countRequest.query(`
+        SELECT COUNT(*) as total
+        FROM MenuItems mi
+        ${productWhereClause}
+      `);
+    const totalProducts = Number(countResult.recordset[0]?.total ?? 0);
+
+    const productsRequest = pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("locale", sql.NVarChar, locale)
+      .input("offset", sql.Int, offset)
+      .input("limit", sql.Int, limitNum);
+    if (hasCategoryFilter && hasCategoryId) {
+      productsRequest.input("categoryId", sql.Int, categoryId);
+    }
+
+    const productsResult = await productsRequest.query(`
+        SELECT
+          mi.id,
+          mi.price,
+          mi.image,
+          mi.sortOrder,
+          mit.name,
+          mitAr.name as nameAr,
+          mitEn.name as nameEn,
+          mit.description,
+          mitAr.description as descriptionAr,
+          mitEn.description as descriptionEn
+          ${categorySelect}${optionSelect}
+        FROM MenuItems mi
+        LEFT JOIN MenuItemTranslations mit ON mi.id = mit.menuItemId AND mit.locale = @locale
+        LEFT JOIN MenuItemTranslations mitAr ON mi.id = mitAr.menuItemId AND mitAr.locale = 'ar'
+        LEFT JOIN MenuItemTranslations mitEn ON mi.id = mitEn.menuItemId AND mitEn.locale = 'en'
+        ${categoryJoin}
+        ${productWhereClause}
+        ORDER BY mi.sortOrder ASC, mi.createdAt DESC
+        OFFSET @offset ROWS
+        FETCH NEXT @limit ROWS ONLY
+      `);
+
+    const categories = categoriesResult.recordset.map(
+      (category: { image?: string | null }) => ({
+        ...category,
+        image: getImageUrl(category.image),
+      }),
+    );
+
+    const products = attachParsedMenuItemOptionsList(
+      productsResult.recordset.map((item: { image?: string | null }) => ({
+        ...item,
+        image: getImageUrl(item.image),
+      })),
+    );
+
+    res.setHeader("Content-Language", locale);
+    res.json({
+      success: true,
+      data: {
+        menuId,
+        slug,
+        locale,
+        currency: menu.currency || "SAR",
+        categories,
+        products,
+        filters: {
+          categoryId: hasCategoryFilter ? categoryId : null,
+        },
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total: totalProducts,
+          totalPages: Math.ceil(totalProducts / limitNum) || 0,
+        },
+      },
+    });
+  } catch (error: unknown) {
+    console.error("Error fetching public menu catalog:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch menu catalog",
     });
   }
 };

@@ -703,7 +703,7 @@ export async function processGuestStaffCall(
       return { ok: false, error: "SERVER_ERROR" };
     }
 
-    void logMenuOrderEventSafe(
+    await logMenuOrderEventSafe(
       menuId,
       persisted.id,
       {

@@ -232,7 +232,8 @@ export async function getCategories(
           c.createdAt,
           ct.name,
           ar.name as nameAr,
-          en.name as nameEn
+          en.name as nameEn,
+          (SELECT COUNT(*) FROM MenuItems mi WHERE mi.categoryId = c.id) as itemsCount
         ${categoryDataJoins}
         ${whereClause}
         ORDER BY c.sortOrder ASC, c.createdAt DESC
@@ -519,26 +520,13 @@ export async function deleteCategory(
 
     if (!(await requireMenuAccess(req, res, menuId))) return;
 
-    // Check if category has items
-    const itemsCheck = await pool
-      .request()
-      .input("categoryId", sql.Int, parseInt(categoryId))
-      .query(
-        "SELECT COUNT(*) as count FROM MenuItems WHERE categoryId = @categoryId"
-      );
-
-    if (itemsCheck.recordset[0].count > 0) {
-      res.status(400).json({
-        error:
-          "Cannot delete category with items. Please delete or move items first.",
-      });
-      return;
-    }
+    const categoryIdNum = parseInt(categoryId, 10);
+    const menuIdNum = parseInt(menuId, 10);
 
     const namesBefore = await pool
       .request()
-      .input("categoryId", sql.Int, parseInt(categoryId, 10))
-      .input("menuId", sql.Int, parseInt(menuId, 10))
+      .input("categoryId", sql.Int, categoryIdNum)
+      .input("menuId", sql.Int, menuIdNum)
       .query(`
         SELECT ar.name AS nameAr, en.name AS nameEn
         FROM Categories c
@@ -559,26 +547,71 @@ export async function deleteCategory(
     const labelAr = String(cn?.nameAr ?? "").trim() || "تصنيف";
     const labelEn = String(cn?.nameEn ?? "").trim() || "Category";
 
-    const result = await pool
-      .request()
-      .input("categoryId", sql.Int, parseInt(categoryId))
-      .input("menuId", sql.Int, parseInt(menuId))
-      .query(
-        "DELETE FROM Categories WHERE id = @categoryId AND menuId = @menuId"
-      );
+    const deletedItemsCount = await executeTransaction(async (transaction) => {
+      const itemsCountResult = await transaction
+        .request()
+        .input("categoryId", sql.Int, categoryIdNum)
+        .input("menuId", sql.Int, menuIdNum)
+        .query(`
+          SELECT COUNT(*) as count
+          FROM MenuItems
+          WHERE categoryId = @categoryId AND menuId = @menuId
+        `);
+      const itemsCount = Number(itemsCountResult.recordset[0]?.count ?? 0);
 
-    if (result.rowsAffected[0] === 0) {
+      if (itemsCount > 0) {
+        await transaction
+          .request()
+          .input("categoryId", sql.Int, categoryIdNum)
+          .input("menuId", sql.Int, menuIdNum)
+          .query(`
+            DELETE FROM MenuItems
+            WHERE categoryId = @categoryId AND menuId = @menuId
+          `);
+      }
+
+      const result = await transaction
+        .request()
+        .input("categoryId", sql.Int, categoryIdNum)
+        .input("menuId", sql.Int, menuIdNum)
+        .query(
+          "DELETE FROM Categories WHERE id = @categoryId AND menuId = @menuId",
+        );
+
+      if (result.rowsAffected[0] === 0) {
+        throw new Error("CATEGORY_NOT_FOUND");
+      }
+
+      return itemsCount;
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.message === "CATEGORY_NOT_FOUND") {
+        return null;
+      }
+      throw error;
+    });
+
+    if (deletedItemsCount === null) {
       sendApiError(res, req, 404, ApiErrors.categoryNotFound);
       return;
     }
 
-    res.json({ message: "Category deleted successfully" });
-    void logMenuActivitySafe(req, parseInt(menuId, 10), {
+    const itemsSuffixAr =
+      deletedItemsCount > 0 ? ` (مع ${deletedItemsCount} منتج)` : "";
+    const itemsSuffixEn =
+      deletedItemsCount > 0
+        ? ` (with ${deletedItemsCount} item${deletedItemsCount === 1 ? "" : "s"})`
+        : "";
+
+    res.json({
+      message: "Category deleted successfully",
+      deletedItemsCount,
+    });
+    void logMenuActivitySafe(req, menuIdNum, {
       action: "CATEGORY_DELETED",
       targetType: "category",
-      targetId: parseInt(categoryId, 10),
-      summaryAr: `حذف تصنيف: ${labelAr}`,
-      summaryEn: `Deleted category: ${labelEn}`,
+      targetId: categoryIdNum,
+      summaryAr: `حذف تصنيف: ${labelAr}${itemsSuffixAr}`,
+      summaryEn: `Deleted category: ${labelEn}${itemsSuffixEn}`,
     });
   } catch (error) {
     logger.error("Delete category error:", error);

@@ -31,8 +31,8 @@ export const THEME_CUSTOMIZATION_DEFAULTS: Record<
   ThemeCustomizationDefaults
 > = {
   default: {
-    primaryColor: "#0ea5e9",
-    secondaryColor: "#6366f1",
+    primaryColor: "#9333EA",
+    secondaryColor: "#7C3AED",
     backgroundColor: "#ffffff",
     textColor: "#0f172a",
   },
