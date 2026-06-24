@@ -1137,9 +1137,16 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
         SELECT COLUMN_NAME
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_NAME = 'MenuItems'
-        AND COLUMN_NAME = 'categoryId'
+        AND COLUMN_NAME IN ('categoryId', 'originalPrice', 'discountPercent', 'sizes', 'variants')
       `);
-    const hasCategoryId = columnCheck.recordset.length > 0;
+    const existingColumns = columnCheck.recordset.map(
+      (r: { COLUMN_NAME: string }) => r.COLUMN_NAME,
+    );
+    const hasCategoryId = existingColumns.includes("categoryId");
+    const hasOriginalPrice = existingColumns.includes("originalPrice");
+    const hasDiscountPercent = existingColumns.includes("discountPercent");
+    const hasSizes = existingColumns.includes("sizes");
+    const hasVariants = existingColumns.includes("variants");
 
     const productWhereParts = ["mi.menuId = @menuId", "mi.available = 1"];
     if (hasCategoryFilter && hasCategoryId) {
@@ -1162,6 +1169,14 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
           ctAr.name as categoryNameAr,
           ctEn.name as categoryNameEn`
       : "";
+
+    const optionSelectParts: string[] = [];
+    if (hasOriginalPrice) optionSelectParts.push("mi.originalPrice");
+    if (hasDiscountPercent) optionSelectParts.push("mi.discountPercent");
+    if (hasSizes) optionSelectParts.push("mi.sizes");
+    if (hasVariants) optionSelectParts.push("mi.variants");
+    const optionSelect =
+      optionSelectParts.length > 0 ? `,\n          ${optionSelectParts.join(",\n          ")}` : "";
 
     const countRequest = pool.request().input("menuId", sql.Int, menuId);
     if (hasCategoryFilter && hasCategoryId) {
@@ -1196,7 +1211,7 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
           mit.description,
           mitAr.description as descriptionAr,
           mitEn.description as descriptionEn
-          ${categorySelect}
+          ${categorySelect}${optionSelect}
         FROM MenuItems mi
         LEFT JOIN MenuItemTranslations mit ON mi.id = mit.menuItemId AND mit.locale = @locale
         LEFT JOIN MenuItemTranslations mitAr ON mi.id = mitAr.menuItemId AND mitAr.locale = 'ar'
@@ -1215,11 +1230,11 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
       }),
     );
 
-    const products = productsResult.recordset.map(
-      (item: { image?: string | null }) => ({
+    const products = attachParsedMenuItemOptionsList(
+      productsResult.recordset.map((item: { image?: string | null }) => ({
         ...item,
         image: getImageUrl(item.image),
-      }),
+      })),
     );
 
     res.setHeader("Content-Language", locale);
