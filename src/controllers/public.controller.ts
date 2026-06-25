@@ -178,7 +178,61 @@ export const getAllPublicMenus = async (req: Request, res: Response) => {
   }
 };
 
-const PUBLIC_MENU_INITIAL_ITEMS_LIMIT = 30;
+const PUBLIC_MENU_INITIAL_ITEMS_PER_CATEGORY = 30;
+
+function sqlSelectOutputColumns(selectFields: string[]): string {
+  return selectFields
+    .map((field) => {
+      const asMatch = field.match(/\s+as\s+(\w+)\s*$/i);
+      if (asMatch) return asMatch[1];
+      const trimmed = field.trim();
+      const dotIndex = trimmed.lastIndexOf(".");
+      if (dotIndex >= 0) return trimmed.slice(dotIndex + 1).trim();
+      return trimmed;
+    })
+    .join(",\n        ");
+}
+
+function buildMenuItemsPartitionExpr(
+  hasCategoriesTable: boolean,
+  hasCategoryId: boolean,
+): string {
+  if (hasCategoriesTable && hasCategoryId) {
+    return "CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN -1 ELSE mi.categoryId END";
+  }
+  if (hasCategoryId) {
+    return "ISNULL(mi.categoryId, -1)";
+  }
+  return "ISNULL(NULLIF(LTRIM(RTRIM(mi.category)), ''), N'__uncategorized__')";
+}
+
+function buildMenuItemsCategoryOrderClause(
+  hasCategoriesTable: boolean,
+  hasCategoryId: boolean,
+): string {
+  if (hasCategoriesTable && hasCategoryId) {
+    return "uncategorizedFlag ASC, categorySortOrder ASC, categoryCreatedAt DESC, sortOrder ASC, itemCreatedAt DESC, id ASC";
+  }
+  if (hasCategoryId) {
+    return "categoryId ASC, sortOrder ASC, itemCreatedAt DESC, id ASC";
+  }
+  return "category ASC, sortOrder ASC, itemCreatedAt DESC, id ASC";
+}
+
+function buildCatalogProductsOrderClause(
+  hasCategoryFilter: boolean,
+  hasCategoryId: boolean,
+  hasCategoriesTable: boolean,
+): string {
+  const itemOrder = "mi.sortOrder ASC, mi.createdAt DESC, mi.id ASC";
+  if (hasCategoryFilter || !hasCategoryId) {
+    return itemOrder;
+  }
+  if (hasCategoriesTable) {
+    return `CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN 1 ELSE 0 END ASC, c.sortOrder ASC, c.createdAt DESC, ${itemOrder}`;
+  }
+  return `mi.categoryId ASC, ${itemOrder}`;
+}
 
 // Get public menu by slug
 export const getPublicMenu = async (req: Request, res: Response) => {
@@ -403,35 +457,49 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           LEFT JOIN CategoryTranslations ctEn ON c.id = ctEn.categoryId AND ctEn.locale = 'en'`;
     }
 
-    let itemsOrderClause = "mi.sortOrder ASC, mi.createdAt DESC";
-    if (hasCategoriesTable && hasCategoryId) {
-      itemsOrderClause =
-        "CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN 1 ELSE 0 END ASC, c.sortOrder ASC, c.createdAt DESC, mi.sortOrder ASC, mi.createdAt DESC";
-    } else if (hasCategoryId) {
-      itemsOrderClause =
-        "mi.categoryId ASC, mi.sortOrder ASC, mi.createdAt DESC";
-    } else {
-      itemsOrderClause =
-        "mi.category ASC, mi.sortOrder ASC, mi.createdAt DESC";
-    }
+    const itemsOrderClause = buildMenuItemsCategoryOrderClause(
+      hasCategoriesTable,
+      hasCategoryId,
+    );
+    const partitionExpr = buildMenuItemsPartitionExpr(
+      hasCategoriesTable,
+      hasCategoryId,
+    );
+    const rankHelperFields =
+      hasCategoriesTable && hasCategoryId
+        ? `CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN 1 ELSE 0 END AS uncategorizedFlag,
+        ISNULL(c.sortOrder, 2147483647) AS categorySortOrder,
+        c.createdAt AS categoryCreatedAt,
+        mi.createdAt AS itemCreatedAt,`
+        : "mi.createdAt AS itemCreatedAt,";
+    const itemOutputColumns = sqlSelectOutputColumns(selectFields);
 
-    // Get first page of menu items with translations
+    // First N products per category (ordered by sortOrder, then createdAt/id)
     const itemsQuery = `
-      SELECT 
-        ${selectFields.join(",\n        ")}
-      FROM MenuItems mi
-      ${joinClause}
-      WHERE mi.menuId = @menuId AND mi.available = 1
+      WITH RankedMenuItems AS (
+        SELECT
+          ${selectFields.join(",\n          ")},
+          ${rankHelperFields}
+          ROW_NUMBER() OVER (
+            PARTITION BY ${partitionExpr}
+            ORDER BY mi.sortOrder ASC, mi.createdAt DESC, mi.id ASC
+          ) AS categoryItemRank
+        FROM MenuItems mi
+        ${joinClause}
+        WHERE mi.menuId = @menuId AND mi.available = 1
+      )
+      SELECT
+        ${itemOutputColumns}
+      FROM RankedMenuItems
+      WHERE categoryItemRank <= @limit
       ORDER BY ${itemsOrderClause}
-      OFFSET 0 ROWS
-      FETCH NEXT @limit ROWS ONLY
     `;
 
     const itemsResult = await pool
       .request()
       .input("menuId", sql.Int, menu.id)
       .input("locale", sql.NVarChar, locale)
-      .input("limit", sql.Int, PUBLIC_MENU_INITIAL_ITEMS_LIMIT)
+      .input("limit", sql.Int, PUBLIC_MENU_INITIAL_ITEMS_PER_CATEGORY)
       .query(itemsQuery);
 
     const countResult = await pool
@@ -1114,8 +1182,12 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
       MAX_CATALOG_PAGE_LIMIT,
       Math.max(
         1,
-        parseInt(String(req.query.limit ?? DEFAULT_CATALOG_PAGE_LIMIT), 10) ||
-          DEFAULT_CATALOG_PAGE_LIMIT,
+        parseInt(
+          String(
+            req.query.limit ?? req.query.pageSize ?? DEFAULT_CATALOG_PAGE_LIMIT,
+          ),
+          10,
+        ) || DEFAULT_CATALOG_PAGE_LIMIT,
       ),
     );
     const offset = (pageNum - 1) * limitNum;
@@ -1240,6 +1312,12 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
       productsRequest.input("categoryId", sql.Int, categoryId);
     }
 
+    const productsOrderClause = buildCatalogProductsOrderClause(
+      hasCategoryFilter,
+      hasCategoryId,
+      hasCategoryId,
+    );
+
     const productsResult = await productsRequest.query(`
         SELECT
           mi.id,
@@ -1259,7 +1337,7 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
         LEFT JOIN MenuItemTranslations mitEn ON mi.id = mitEn.menuItemId AND mitEn.locale = 'en'
         ${categoryJoin}
         ${productWhereClause}
-        ORDER BY mi.sortOrder ASC, mi.createdAt DESC
+        ORDER BY ${productsOrderClause}
         OFFSET @offset ROWS
         FETCH NEXT @limit ROWS ONLY
       `);

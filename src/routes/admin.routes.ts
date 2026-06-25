@@ -73,6 +73,13 @@ import {
   getBroadcastPreview,
   postBroadcastSend,
 } from "../controllers/adminBroadcast.controller";
+import {
+  getAdminDomainTransfers,
+  getAdminDomainTransferById,
+  postAdminDomainTransferMessage,
+  postAdminDomainTransferComplete,
+  postAdminDomainTransferCancel,
+} from "../controllers/domainTransfer.controller";
 
 const router = Router();
 
@@ -83,6 +90,13 @@ router.use(requireAdmin);
 router.get("/stats", getAdminStats);
 router.get("/analytics", getAdminAnalytics);
 router.get("/payments", getAdminPayments);
+
+// Domain transfer requests
+router.get("/domain-transfers", getAdminDomainTransfers);
+router.get("/domain-transfers/:id", getAdminDomainTransferById);
+router.post("/domain-transfers/:id/message", postAdminDomainTransferMessage);
+router.post("/domain-transfers/:id/complete", postAdminDomainTransferComplete);
+router.post("/domain-transfers/:id/cancel", postAdminDomainTransferCancel);
 
 // Customer follow-ups
 router.get("/follow-ups/queue", getFollowUpQueue);
