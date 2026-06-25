@@ -4,10 +4,31 @@ import { getResendClient, isEmailConfigured } from "../config/email";
 import { logger } from "../utils/logger";
 import { getImageUrl } from "../utils/urlHelper";
 
-const FROM_EMAIL = process.env.EMAIL_FROM?.trim() || "";
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 const EMAIL_LOGO_CID = "ensmenu-logo";
 const EMAIL_LOGO_PATH = path.join(process.cwd(), "uploads", "mail.png");
+const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function getEmailFromAddress(): string {
+  const raw = (process.env.EMAIL_FROM || "")
+    .trim()
+    .replace(/^["']|["']$/g, "");
+  if (!raw) return "";
+
+  const namedMatch = raw.match(/^(.+?)\s*<([^>]+)>$/);
+  if (namedMatch) {
+    const name = namedMatch[1].trim();
+    const email = namedMatch[2].trim();
+    if (!EMAIL_ADDRESS_RE.test(email)) return "";
+    return `${name} <${email}>`;
+  }
+
+  if (EMAIL_ADDRESS_RE.test(raw)) {
+    return `ENSMENU <${raw}>`;
+  }
+
+  return "";
+}
 
 function getEmailLogoSrc(): string {
   const custom = process.env.EMAIL_LOGO_URL?.trim();
@@ -20,9 +41,7 @@ function getEmailLogoSrc(): string {
 
 function emailBrandHeader(isArabic: boolean): string {
   const logoSrc = getEmailLogoSrc();
-  const logoAttr = logoSrc.startsWith("cid:")
-    ? logoSrc
-    : escapeHtml(logoSrc);
+  const logoAttr = logoSrc.startsWith("cid:") ? logoSrc : escapeHtml(logoSrc);
   const homeUrl = escapeHtml(FRONTEND_URL.replace(/\/$/, ""));
 
   return `
@@ -161,6 +180,14 @@ async function sendEmail(options: EmailOptions): Promise<boolean> {
     return false;
   }
 
+  const from = getEmailFromAddress();
+  if (!from) {
+    logger.error(
+      "EMAIL_FROM is missing or invalid. Set EMAIL_FROM=noreply@yourdomain.com in .env",
+    );
+    return false;
+  }
+
   try {
     const attachments: Array<{
       content: Buffer;
@@ -179,7 +206,7 @@ async function sendEmail(options: EmailOptions): Promise<boolean> {
     }
 
     const { data, error } = await resend.emails.send({
-      from: `ensmenu <${FROM_EMAIL}>`,
+      from,
       to: [options.to],
       subject: options.subject,
       html: options.html,
