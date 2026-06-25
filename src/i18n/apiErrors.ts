@@ -794,6 +794,34 @@ export const ApiErrors = {
     en: "Failed to get admins",
     ar: "فشل جلب المسؤولين",
   },
+  invalidBroadcastAudience: {
+    en: "Invalid recipient group",
+    ar: "مجموعة المستلمين غير صالحة",
+  },
+  broadcastRecipientsRequired: {
+    en: "Select at least one customer",
+    ar: "اختر عميلاً واحداً على الأقل",
+  },
+  broadcastSubjectRequired: {
+    en: "Email subject is required",
+    ar: "عنوان الرسالة مطلوب",
+  },
+  broadcastMessageRequired: {
+    en: "Email message is required",
+    ar: "نص الرسالة مطلوب",
+  },
+  broadcastNoRecipients: {
+    en: "No recipients match this selection",
+    ar: "لا يوجد مستلمون مطابقون لهذا الاختيار",
+  },
+  failedBroadcastPreview: {
+    en: "Failed to preview recipients",
+    ar: "فشل معاينة المستلمين",
+  },
+  failedBroadcastSend: {
+    en: "Failed to send broadcast email",
+    ar: "فشل إرسال الرسالة الجماعية",
+  },
   failedGetAdAnalytics: {
     en: "Failed to get ad analytics",
     ar: "فشل جلب تحليلات الإعلان",

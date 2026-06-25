@@ -69,6 +69,10 @@ import {
   postAdminUserSupport,
   patchAdminUserSupportStatus,
 } from "../controllers/adminCustomer.controller";
+import {
+  getBroadcastPreview,
+  postBroadcastSend,
+} from "../controllers/adminBroadcast.controller";
 
 const router = Router();
 
@@ -90,6 +94,10 @@ router.get("/follow-ups/report", getFollowUpReport);
 
 // Users Management
 router.get("/users", getAllUsers);
+
+// Customer email broadcast
+router.get("/broadcast/preview", getBroadcastPreview);
+router.post("/broadcast/send", postBroadcastSend);
 router.get("/users/:id", getUserDetails);
 router.put("/users/:id/suspend", toggleUserSuspension);
 router.put("/users/:id/password", adminSetUserPassword);
