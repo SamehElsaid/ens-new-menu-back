@@ -17,3 +17,8 @@ export function isApiKeyValidationSkipped(): boolean {
     process.env.SKIP_API_KEY_CHECK === "true"
   );
 }
+
+/** Email verification on signup/login. Set EMAIL_VERIFICATION_ENABLED=false to disable temporarily. */
+export function isEmailVerificationEnabled(): boolean {
+  return process.env.EMAIL_VERIFICATION_ENABLED !== "false";
+}
