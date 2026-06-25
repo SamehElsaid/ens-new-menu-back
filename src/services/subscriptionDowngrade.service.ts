@@ -65,19 +65,24 @@ export class SubscriptionDowngradeService {
 
       // Products/items are kept on downgrade — free plan limits only block new additions (see checkProductLimit)
 
-      // Delete all ads from user's menus (free plan doesn't support ads)
+      // Keep only the oldest ad per menu (free plan allows 1 ad per menu)
       const adsResult = await pool.request()
         .input('userId', sql.Int, userId)
         .query(`
+          WITH RankedAds AS (
+            SELECT a.id,
+              ROW_NUMBER() OVER (PARTITION BY a.menuId ORDER BY a.createdAt ASC) AS rn
+            FROM Ads a
+            INNER JOIN Menus m ON a.menuId = m.id
+            WHERE m.userId = @userId AND a.adType = 'menu'
+          )
           DELETE FROM Ads
           OUTPUT DELETED.id
-          WHERE menuId IN (
-            SELECT id FROM Menus WHERE userId = @userId
-          )
+          WHERE id IN (SELECT id FROM RankedAds WHERE rn > 1)
         `);
 
       if (adsResult.recordset.length > 0) {
-        logger.info(`Deleted ${adsResult.recordset.length} ads for user ${userId} (free plan doesn't support ads)`);
+        logger.info(`Deleted ${adsResult.recordset.length} excess ads for user ${userId} (free plan allows 1 ad per menu)`);
       }
 
       // Delete all branches (free plan doesn't support branches)

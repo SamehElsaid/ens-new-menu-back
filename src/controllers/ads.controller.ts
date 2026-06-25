@@ -1,6 +1,10 @@
 import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
+import { FREE_MAX_ADS_PER_MENU } from "../config/constants";
+import { sendApiError } from "../utils/apiErrorResponse";
+import { ApiErrors } from "../i18n/apiErrors";
 
 // Create menu ad
 export const createMenuAd = async (req: Request, res: Response) => {
@@ -25,6 +29,28 @@ export const createMenuAd = async (req: Request, res: Response) => {
         success: false,
         message: "Menu not found or you don't have permission",
       });
+    }
+
+    const countResult = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .query(`
+        SELECT COUNT(*) as total
+        FROM Ads
+        WHERE menuId = @menuId AND adType = 'menu'
+      `);
+
+    const currentCount = countResult.recordset[0]?.total ?? 0;
+    const onFreePlan = await isUserOnFreePlan(userId);
+    const maxAds = onFreePlan ? FREE_MAX_ADS_PER_MENU : -1;
+
+    if (maxAds !== -1 && currentCount >= maxAds) {
+      sendApiError(res, req, 403, ApiErrors.adLimitExceeded, {
+        code: "AD_LIMIT",
+        currentCount,
+        maxAds,
+      });
+      return;
     }
 
     // Create ad

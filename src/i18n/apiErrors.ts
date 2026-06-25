@@ -74,6 +74,10 @@ export const ApiErrors = {
     en: "This feature is available on Pro plans only. Please upgrade.",
     ar: "هذه الميزة متاحة لخطط Pro فقط. يرجى الترقية.",
   },
+  adLimitExceeded: {
+    en: "You have reached the maximum number of ads (1) for the Free plan. Upgrade to add more.",
+    ar: "لقد وصلت للحد الأقصى من الإعلانات (1) في الخطة المجانية. قم بالترقية لإضافة المزيد.",
+  },
   menuNotFound: {
     en: "Menu not found",
     ar: "المنيو غير موجود",

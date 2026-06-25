@@ -28,6 +28,9 @@ export const PLANS = {
 /** Free plan: max bulk menu imports per user (disabled — unlimited for all). */
 export const FREE_BULK_IMPORT_MAX = -1;
 
+/** Free plan: max custom menu ads per menu. Paid plans: unlimited (-1). */
+export const FREE_MAX_ADS_PER_MENU = 1;
+
 export const RATE_LIMITS = {
   AUTH: {
     windowMs: 3 * 60 * 1000, // 3 minutes

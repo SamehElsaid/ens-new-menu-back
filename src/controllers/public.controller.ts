@@ -501,16 +501,29 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     let ads: any[] = [];
 
     if (planType === "free") {
-      // If free plan, show global ads
-      const globalAdsResult = await pool.request().query(`
-        SELECT TOP (10)
-          id, title, titleAr, content, contentAr, imageUrl, linkUrl,
-          position, displayOrder
-        FROM Ads
-        WHERE adType = 'global' AND isActive = 1
-        ORDER BY displayOrder ASC, createdAt DESC
-      `);
-      ads = globalAdsResult.recordset;
+      const menuAdsResult = await pool
+        .request()
+        .input("menuId", sql.Int, menu.id).query(`
+          SELECT TOP (1)
+            id, title, titleAr, content, contentAr, imageUrl, linkUrl,
+            position, displayOrder
+          FROM Ads
+          WHERE menuId = @menuId AND adType = 'menu' AND isActive = 1
+          ORDER BY displayOrder ASC, createdAt DESC
+        `);
+      ads = menuAdsResult.recordset;
+
+      if (ads.length === 0) {
+        const globalAdsResult = await pool.request().query(`
+          SELECT TOP (10)
+            id, title, titleAr, content, contentAr, imageUrl, linkUrl,
+            position, displayOrder
+          FROM Ads
+          WHERE adType = 'global' AND isActive = 1
+          ORDER BY displayOrder ASC, createdAt DESC
+        `);
+        ads = globalAdsResult.recordset;
+      }
     } else {
       // If paid plan, show custom menu ads
       const menuAdsResult = await pool
@@ -937,15 +950,17 @@ export const getMenuCustomAds = async (req: Request, res: Response) => {
     let query = "";
     let request = pool.request().input("limit", sql.Int, limit);
 
-    // If free plan, show global ads instead of custom ads
+    // If free plan, show custom menu ad (max 1) or fall back to global ads
     if (planType === "free") {
       query = `
         SELECT TOP (@limit)
           id, title, titleAr, content, contentAr, imageUrl, linkUrl,
           position, displayOrder
         FROM Ads
-        WHERE adType = 'global' AND isActive = 1
+        WHERE menuId = @menuId AND adType = 'menu' AND isActive = 1
       `;
+
+      request.input("menuId", sql.Int, menuId);
 
       if (position) {
         query += ` AND position = @position`;
@@ -955,6 +970,28 @@ export const getMenuCustomAds = async (req: Request, res: Response) => {
       query += `
         ORDER BY displayOrder ASC, createdAt DESC
       `;
+
+      const menuAdsResult = await request.query(query);
+
+      if (menuAdsResult.recordset.length === 0) {
+        query = `
+          SELECT TOP (@limit)
+            id, title, titleAr, content, contentAr, imageUrl, linkUrl,
+            position, displayOrder
+          FROM Ads
+          WHERE adType = 'global' AND isActive = 1
+        `;
+        request = pool.request().input("limit", sql.Int, limit);
+
+        if (position) {
+          query += ` AND position = @position`;
+          request.input("position", sql.NVarChar, position);
+        }
+
+        query += `
+          ORDER BY displayOrder ASC, createdAt DESC
+        `;
+      }
     }
     // If paid plan, show custom menu ads
     else {
@@ -993,8 +1030,11 @@ export const getMenuCustomAds = async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        ads: result.recordset,
-        planType: planType, // Return plan type for frontend reference
+        ads: result.recordset.map((ad: { imageUrl?: string | null }) => ({
+          ...ad,
+          imageUrl: getImageUrl(ad.imageUrl),
+        })),
+        planType: planType,
       },
     });
   } catch (error: any) {
