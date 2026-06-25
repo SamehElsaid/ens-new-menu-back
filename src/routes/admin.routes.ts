@@ -69,6 +69,17 @@ import {
   postAdminUserSupport,
   patchAdminUserSupportStatus,
 } from "../controllers/adminCustomer.controller";
+import {
+  getBroadcastPreview,
+  postBroadcastSend,
+} from "../controllers/adminBroadcast.controller";
+import {
+  getAdminDomainTransfers,
+  getAdminDomainTransferById,
+  postAdminDomainTransferMessage,
+  postAdminDomainTransferComplete,
+  postAdminDomainTransferCancel,
+} from "../controllers/domainTransfer.controller";
 
 const router = Router();
 
@@ -80,6 +91,13 @@ router.get("/stats", getAdminStats);
 router.get("/analytics", getAdminAnalytics);
 router.get("/payments", getAdminPayments);
 
+// Domain transfer requests
+router.get("/domain-transfers", getAdminDomainTransfers);
+router.get("/domain-transfers/:id", getAdminDomainTransferById);
+router.post("/domain-transfers/:id/message", postAdminDomainTransferMessage);
+router.post("/domain-transfers/:id/complete", postAdminDomainTransferComplete);
+router.post("/domain-transfers/:id/cancel", postAdminDomainTransferCancel);
+
 // Customer follow-ups
 router.get("/follow-ups/queue", getFollowUpQueue);
 router.get("/follow-ups/calls", getFollowUpCalls);
@@ -90,6 +108,10 @@ router.get("/follow-ups/report", getFollowUpReport);
 
 // Users Management
 router.get("/users", getAllUsers);
+
+// Customer email broadcast
+router.get("/broadcast/preview", getBroadcastPreview);
+router.post("/broadcast/send", postBroadcastSend);
 router.get("/users/:id", getUserDetails);
 router.put("/users/:id/suspend", toggleUserSuspension);
 router.put("/users/:id/password", adminSetUserPassword);

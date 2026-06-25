@@ -74,6 +74,10 @@ export const ApiErrors = {
     en: "This feature is available on Pro plans only. Please upgrade.",
     ar: "هذه الميزة متاحة لخطط Pro فقط. يرجى الترقية.",
   },
+  adLimitExceeded: {
+    en: "You have reached the maximum number of ads (1) for the Free plan. Upgrade to add more.",
+    ar: "لقد وصلت للحد الأقصى من الإعلانات (1) في الخطة المجانية. قم بالترقية لإضافة المزيد.",
+  },
   menuNotFound: {
     en: "Menu not found",
     ar: "المنيو غير موجود",
@@ -554,6 +558,10 @@ export const ApiErrors = {
     en: "Email is already verified",
     ar: "البريد الإلكتروني مفعّل مسبقًا",
   },
+  emailVerificationRequired: {
+    en: "Please verify your email before logging in. Check your inbox for the verification link.",
+    ar: "يرجى تأكيد بريدك الإلكتروني قبل تسجيل الدخول. تحقق من صندوق الوارد لرابط التأكيد.",
+  },
   failedResendVerification: {
     en: "Failed to resend verification email",
     ar: "فشل إعادة إرسال بريد التحقق",
@@ -785,6 +793,34 @@ export const ApiErrors = {
   failedGetAdmins: {
     en: "Failed to get admins",
     ar: "فشل جلب المسؤولين",
+  },
+  invalidBroadcastAudience: {
+    en: "Invalid recipient group",
+    ar: "مجموعة المستلمين غير صالحة",
+  },
+  broadcastRecipientsRequired: {
+    en: "Select at least one customer",
+    ar: "اختر عميلاً واحداً على الأقل",
+  },
+  broadcastSubjectRequired: {
+    en: "Email subject is required",
+    ar: "عنوان الرسالة مطلوب",
+  },
+  broadcastMessageRequired: {
+    en: "Email message is required",
+    ar: "نص الرسالة مطلوب",
+  },
+  broadcastNoRecipients: {
+    en: "No recipients match this selection",
+    ar: "لا يوجد مستلمون مطابقون لهذا الاختيار",
+  },
+  failedBroadcastPreview: {
+    en: "Failed to preview recipients",
+    ar: "فشل معاينة المستلمين",
+  },
+  failedBroadcastSend: {
+    en: "Failed to send broadcast email",
+    ar: "فشل إرسال الرسالة الجماعية",
   },
   failedGetAdAnalytics: {
     en: "Failed to get ad analytics",

@@ -7,7 +7,6 @@ import {
   generateRefreshToken,
 } from "../utils/tokenHelper";
 import {
-  sendWelcomeEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendPasswordChangedEmail,
@@ -127,9 +126,12 @@ export async function signup(req: Request, res: Response): Promise<void> {
     }
     const freePlanId = freePlanResult.recordset[0].id;
 
-    // Create user with email already verified (no email confirmation required)
+    const verificationToken = uuidv4();
+    const verificationExpiresAt = new Date(
+      Date.now() + TOKEN_EXPIRY.EMAIL_VERIFICATION,
+    );
+
     await executeTransaction(async (transaction) => {
-      // Insert user with isEmailVerified = true
       const userResult = await transaction
         .request()
         .input("email", sql.NVarChar, email.toLowerCase())
@@ -140,12 +142,11 @@ export async function signup(req: Request, res: Response): Promise<void> {
         .input("role", sql.NVarChar, ROLES.USER).query(`
           INSERT INTO Users (email, password, name, phoneNumber, restaurantName, role, isEmailVerified)
           OUTPUT INSERTED.id
-          VALUES (@email, @password, @name, @phoneNumber, @restaurantName, @role, 1)
+          VALUES (@email, @password, @name, @phoneNumber, @restaurantName, @role, 0)
         `);
 
       const userId = userResult.recordset[0].id;
 
-      // Create free subscription (use Free plan ID from DB)
       await transaction
         .request()
         .input("userId", sql.Int, userId)
@@ -155,21 +156,35 @@ export async function signup(req: Request, res: Response): Promise<void> {
           VALUES (@userId, @planId, @billingCycle, 'active', 'completed', GETDATE(), 0)
         `);
 
-      // Note: Email verification is disabled for now
-      // TODO: Re-enable email verification when email service is configured
-
-      // Optionally send welcome email (non-blocking)
-      try {
-        sendWelcomeEmail(email, name, locale as "ar" | "en").catch(() => {
-          logger.warn("Welcome email failed to send (non-critical)");
-        });
-      } catch (error) {
-        // Ignore email errors - account is created successfully
-      }
+      await transaction
+        .request()
+        .input("userId", sql.Int, userId)
+        .input("token", sql.NVarChar, verificationToken)
+        .input("expiresAt", sql.DateTime2, verificationExpiresAt).query(`
+          INSERT INTO EmailVerifications (userId, token, expiresAt)
+          VALUES (@userId, @token, @expiresAt)
+        `);
     });
 
+    try {
+      sendVerificationEmail(
+        email,
+        name,
+        verificationToken,
+        locale as "ar" | "en",
+      ).catch(() => {
+        logger.warn("Verification email failed to send (non-critical)");
+      });
+    } catch {
+      // Account is created; user can request a new verification email
+    }
+
     res.status(201).json({
-      message: "Account created successfully! You can now login.",
+      message:
+        locale === "en"
+          ? "Account created! Please check your email to verify your account."
+          : "تم إنشاء الحساب! يرجى التحقق من بريدك الإلكتروني لتأكيد حسابك.",
+      emailVerificationRequired: true,
     });
   } catch (error) {
     logger.error("Signup error:", error);
@@ -278,15 +293,12 @@ export async function login(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Note: Email verification check is disabled
-    // TODO: Re-enable when email verification is required
-    // if (!user.isEmailVerified) {
-    //   res.status(403).json({
-    //     error: 'Please verify your email before logging in',
-    //     emailVerificationRequired: true,
-    //   });
-    //   return;
-    // }
+    if (!user.isEmailVerified) {
+      sendApiError(res, req, 403, ApiErrors.emailVerificationRequired, {
+        emailVerificationRequired: true,
+      });
+      return;
+    }
 
     // Update last login and reset failed attempts
     await pool

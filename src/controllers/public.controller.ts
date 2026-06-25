@@ -178,7 +178,61 @@ export const getAllPublicMenus = async (req: Request, res: Response) => {
   }
 };
 
-const PUBLIC_MENU_INITIAL_ITEMS_LIMIT = 30;
+const PUBLIC_MENU_INITIAL_ITEMS_PER_CATEGORY = 30;
+
+function sqlSelectOutputColumns(selectFields: string[]): string {
+  return selectFields
+    .map((field) => {
+      const asMatch = field.match(/\s+as\s+(\w+)\s*$/i);
+      if (asMatch) return asMatch[1];
+      const trimmed = field.trim();
+      const dotIndex = trimmed.lastIndexOf(".");
+      if (dotIndex >= 0) return trimmed.slice(dotIndex + 1).trim();
+      return trimmed;
+    })
+    .join(",\n        ");
+}
+
+function buildMenuItemsPartitionExpr(
+  hasCategoriesTable: boolean,
+  hasCategoryId: boolean,
+): string {
+  if (hasCategoriesTable && hasCategoryId) {
+    return "CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN -1 ELSE mi.categoryId END";
+  }
+  if (hasCategoryId) {
+    return "ISNULL(mi.categoryId, -1)";
+  }
+  return "ISNULL(NULLIF(LTRIM(RTRIM(mi.category)), ''), N'__uncategorized__')";
+}
+
+function buildMenuItemsCategoryOrderClause(
+  hasCategoriesTable: boolean,
+  hasCategoryId: boolean,
+): string {
+  if (hasCategoriesTable && hasCategoryId) {
+    return "uncategorizedFlag ASC, categorySortOrder ASC, categoryCreatedAt DESC, sortOrder ASC, itemCreatedAt DESC, id ASC";
+  }
+  if (hasCategoryId) {
+    return "categoryId ASC, sortOrder ASC, itemCreatedAt DESC, id ASC";
+  }
+  return "category ASC, sortOrder ASC, itemCreatedAt DESC, id ASC";
+}
+
+function buildCatalogProductsOrderClause(
+  hasCategoryFilter: boolean,
+  hasCategoryId: boolean,
+  hasCategoriesTable: boolean,
+): string {
+  const itemOrder = "mi.sortOrder ASC, mi.createdAt DESC, mi.id ASC";
+  if (hasCategoryFilter || !hasCategoryId) {
+    return itemOrder;
+  }
+  if (hasCategoriesTable) {
+    return `CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN 1 ELSE 0 END ASC, c.sortOrder ASC, c.createdAt DESC, ${itemOrder}`;
+  }
+  return `mi.categoryId ASC, ${itemOrder}`;
+}
 
 // Get public menu by slug
 export const getPublicMenu = async (req: Request, res: Response) => {
@@ -403,35 +457,49 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           LEFT JOIN CategoryTranslations ctEn ON c.id = ctEn.categoryId AND ctEn.locale = 'en'`;
     }
 
-    let itemsOrderClause = "mi.sortOrder ASC, mi.createdAt DESC";
-    if (hasCategoriesTable && hasCategoryId) {
-      itemsOrderClause =
-        "CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN 1 ELSE 0 END ASC, c.sortOrder ASC, c.createdAt DESC, mi.sortOrder ASC, mi.createdAt DESC";
-    } else if (hasCategoryId) {
-      itemsOrderClause =
-        "mi.categoryId ASC, mi.sortOrder ASC, mi.createdAt DESC";
-    } else {
-      itemsOrderClause =
-        "mi.category ASC, mi.sortOrder ASC, mi.createdAt DESC";
-    }
+    const itemsOrderClause = buildMenuItemsCategoryOrderClause(
+      hasCategoriesTable,
+      hasCategoryId,
+    );
+    const partitionExpr = buildMenuItemsPartitionExpr(
+      hasCategoriesTable,
+      hasCategoryId,
+    );
+    const rankHelperFields =
+      hasCategoriesTable && hasCategoryId
+        ? `CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN 1 ELSE 0 END AS uncategorizedFlag,
+        ISNULL(c.sortOrder, 2147483647) AS categorySortOrder,
+        c.createdAt AS categoryCreatedAt,
+        mi.createdAt AS itemCreatedAt,`
+        : "mi.createdAt AS itemCreatedAt,";
+    const itemOutputColumns = sqlSelectOutputColumns(selectFields);
 
-    // Get first page of menu items with translations
+    // First N products per category (ordered by sortOrder, then createdAt/id)
     const itemsQuery = `
-      SELECT 
-        ${selectFields.join(",\n        ")}
-      FROM MenuItems mi
-      ${joinClause}
-      WHERE mi.menuId = @menuId AND mi.available = 1
+      WITH RankedMenuItems AS (
+        SELECT
+          ${selectFields.join(",\n          ")},
+          ${rankHelperFields}
+          ROW_NUMBER() OVER (
+            PARTITION BY ${partitionExpr}
+            ORDER BY mi.sortOrder ASC, mi.createdAt DESC, mi.id ASC
+          ) AS categoryItemRank
+        FROM MenuItems mi
+        ${joinClause}
+        WHERE mi.menuId = @menuId AND mi.available = 1
+      )
+      SELECT
+        ${itemOutputColumns}
+      FROM RankedMenuItems
+      WHERE categoryItemRank <= @limit
       ORDER BY ${itemsOrderClause}
-      OFFSET 0 ROWS
-      FETCH NEXT @limit ROWS ONLY
     `;
 
     const itemsResult = await pool
       .request()
       .input("menuId", sql.Int, menu.id)
       .input("locale", sql.NVarChar, locale)
-      .input("limit", sql.Int, PUBLIC_MENU_INITIAL_ITEMS_LIMIT)
+      .input("limit", sql.Int, PUBLIC_MENU_INITIAL_ITEMS_PER_CATEGORY)
       .query(itemsQuery);
 
     const countResult = await pool
@@ -501,16 +569,29 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     let ads: any[] = [];
 
     if (planType === "free") {
-      // If free plan, show global ads
-      const globalAdsResult = await pool.request().query(`
-        SELECT TOP (10)
-          id, title, titleAr, content, contentAr, imageUrl, linkUrl,
-          position, displayOrder
-        FROM Ads
-        WHERE adType = 'global' AND isActive = 1
-        ORDER BY displayOrder ASC, createdAt DESC
-      `);
-      ads = globalAdsResult.recordset;
+      const menuAdsResult = await pool
+        .request()
+        .input("menuId", sql.Int, menu.id).query(`
+          SELECT TOP (1)
+            id, title, titleAr, content, contentAr, imageUrl, linkUrl,
+            position, displayOrder
+          FROM Ads
+          WHERE menuId = @menuId AND adType = 'menu' AND isActive = 1
+          ORDER BY displayOrder ASC, createdAt DESC
+        `);
+      ads = menuAdsResult.recordset;
+
+      if (ads.length === 0) {
+        const globalAdsResult = await pool.request().query(`
+          SELECT TOP (10)
+            id, title, titleAr, content, contentAr, imageUrl, linkUrl,
+            position, displayOrder
+          FROM Ads
+          WHERE adType = 'global' AND isActive = 1
+          ORDER BY displayOrder ASC, createdAt DESC
+        `);
+        ads = globalAdsResult.recordset;
+      }
     } else {
       // If paid plan, show custom menu ads
       const menuAdsResult = await pool
@@ -937,15 +1018,17 @@ export const getMenuCustomAds = async (req: Request, res: Response) => {
     let query = "";
     let request = pool.request().input("limit", sql.Int, limit);
 
-    // If free plan, show global ads instead of custom ads
+    // If free plan, show custom menu ad (max 1) or fall back to global ads
     if (planType === "free") {
       query = `
         SELECT TOP (@limit)
           id, title, titleAr, content, contentAr, imageUrl, linkUrl,
           position, displayOrder
         FROM Ads
-        WHERE adType = 'global' AND isActive = 1
+        WHERE menuId = @menuId AND adType = 'menu' AND isActive = 1
       `;
+
+      request.input("menuId", sql.Int, menuId);
 
       if (position) {
         query += ` AND position = @position`;
@@ -955,6 +1038,28 @@ export const getMenuCustomAds = async (req: Request, res: Response) => {
       query += `
         ORDER BY displayOrder ASC, createdAt DESC
       `;
+
+      const menuAdsResult = await request.query(query);
+
+      if (menuAdsResult.recordset.length === 0) {
+        query = `
+          SELECT TOP (@limit)
+            id, title, titleAr, content, contentAr, imageUrl, linkUrl,
+            position, displayOrder
+          FROM Ads
+          WHERE adType = 'global' AND isActive = 1
+        `;
+        request = pool.request().input("limit", sql.Int, limit);
+
+        if (position) {
+          query += ` AND position = @position`;
+          request.input("position", sql.NVarChar, position);
+        }
+
+        query += `
+          ORDER BY displayOrder ASC, createdAt DESC
+        `;
+      }
     }
     // If paid plan, show custom menu ads
     else {
@@ -993,8 +1098,11 @@ export const getMenuCustomAds = async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        ads: result.recordset,
-        planType: planType, // Return plan type for frontend reference
+        ads: result.recordset.map((ad: { imageUrl?: string | null }) => ({
+          ...ad,
+          imageUrl: getImageUrl(ad.imageUrl),
+        })),
+        planType: planType,
       },
     });
   } catch (error: any) {
@@ -1074,8 +1182,12 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
       MAX_CATALOG_PAGE_LIMIT,
       Math.max(
         1,
-        parseInt(String(req.query.limit ?? DEFAULT_CATALOG_PAGE_LIMIT), 10) ||
-          DEFAULT_CATALOG_PAGE_LIMIT,
+        parseInt(
+          String(
+            req.query.limit ?? req.query.pageSize ?? DEFAULT_CATALOG_PAGE_LIMIT,
+          ),
+          10,
+        ) || DEFAULT_CATALOG_PAGE_LIMIT,
       ),
     );
     const offset = (pageNum - 1) * limitNum;
@@ -1200,6 +1312,12 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
       productsRequest.input("categoryId", sql.Int, categoryId);
     }
 
+    const productsOrderClause = buildCatalogProductsOrderClause(
+      hasCategoryFilter,
+      hasCategoryId,
+      hasCategoryId,
+    );
+
     const productsResult = await productsRequest.query(`
         SELECT
           mi.id,
@@ -1219,7 +1337,7 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
         LEFT JOIN MenuItemTranslations mitEn ON mi.id = mitEn.menuItemId AND mitEn.locale = 'en'
         ${categoryJoin}
         ${productWhereClause}
-        ORDER BY mi.sortOrder ASC, mi.createdAt DESC
+        ORDER BY ${productsOrderClause}
         OFFSET @offset ROWS
         FETCH NEXT @limit ROWS ONLY
       `);

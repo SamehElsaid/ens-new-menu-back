@@ -1,6 +1,12 @@
 import { Router } from "express";
 import { body, param } from "express-validator";
 import * as userController from "../controllers/user.controller";
+import {
+  getUserDomainTransfer,
+  postUserDomainTransfer,
+  postUserDomainTransferConfirm,
+  postUserDomainTransferCancel,
+} from "../controllers/domainTransfer.controller";
 import * as pushTokenController from "../controllers/pushToken.controller";
 import * as deliveryController from "../controllers/delivery.controller";
 import { validate } from "../middleware/validation";
@@ -149,6 +155,27 @@ router.post(
   "/upgrade-plan",
   validate([body("planType").isIn(["free", "monthly", "yearly"])]),
   userController.upgradePlan,
+);
+
+// Domain transfer requests
+router.get("/domain-transfer", getUserDomainTransfer);
+router.post(
+  "/domain-transfer",
+  validate([
+    body("domainUrl").notEmpty().trim().isLength({ max: 500 }),
+  ]),
+  postUserDomainTransfer,
+);
+router.post(
+  "/domain-transfer/:id/confirm",
+  validate([param("id").isInt()]),
+  postUserDomainTransferConfirm,
+);
+
+router.post(
+  "/domain-transfer/:id/cancel",
+  validate([param("id").isInt()]),
+  postUserDomainTransferCancel,
 );
 
 // DELETE /api/user/account - Delete user account
