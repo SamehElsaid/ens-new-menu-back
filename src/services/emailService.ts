@@ -1,18 +1,28 @@
+import fs from "fs";
+import path from "path";
 import { getResendClient, isEmailConfigured } from "../config/email";
 import { logger } from "../utils/logger";
 import { getImageUrl } from "../utils/urlHelper";
 
 const FROM_EMAIL = process.env.EMAIL_FROM?.trim() || "";
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+const EMAIL_LOGO_CID = "ensmenu-logo";
+const EMAIL_LOGO_PATH = path.join(process.cwd(), "uploads", "mail.png");
 
-function getEmailLogoUrl(): string {
+function getEmailLogoSrc(): string {
   const custom = process.env.EMAIL_LOGO_URL?.trim();
   if (custom) return custom;
+  if (fs.existsSync(EMAIL_LOGO_PATH)) {
+    return `cid:${EMAIL_LOGO_CID}`;
+  }
   return getImageUrl("/uploads/mail.png") || "";
 }
 
 function emailBrandHeader(isArabic: boolean): string {
-  const logoUrl = escapeHtml(getEmailLogoUrl());
+  const logoSrc = getEmailLogoSrc();
+  const logoAttr = logoSrc.startsWith("cid:")
+    ? logoSrc
+    : escapeHtml(logoSrc);
   const homeUrl = escapeHtml(FRONTEND_URL.replace(/\/$/, ""));
 
   return `
@@ -21,7 +31,7 @@ function emailBrandHeader(isArabic: boolean): string {
         <td align="center">
           <a href="${homeUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
             <img
-              src="${logoUrl}"
+              src="${logoAttr}"
               width="180"
               height="201"
               alt="ensmenu"
@@ -35,20 +45,13 @@ function emailBrandHeader(isArabic: boolean): string {
 }
 
 const BRAND = {
-  black: "#000000",
-  bgOuter: "#0a0a0f",
-  bgCard: "#111118",
-  bgElevated: "#1a1428",
-  accent: "#9333ea",
-  accentBright: "#a855f7",
-  accentDark: "#6d28d9",
-  indigo: "#1a1a40",
-  lavender: "#c4b5fd",
-  text: "#ece8f5",
-  textSoft: "#b7adc9",
-  muted: "#8b7fa3",
-  border: "#2a2340",
-  surface: "#16131f",
+  accent: "#7c3aed",
+  accentDark: "#5b21b6",
+  royal: "#1a0b2e",
+  text: "#334155",
+  muted: "#64748b",
+  border: "#e2e8f0",
+  surface: "#f8fafc",
 };
 
 function escapeHtml(value: string): string {
@@ -76,7 +79,7 @@ function emailButton(href: string, label: string, isArabic: boolean): string {
           </v:roundrect>
           <![endif]-->
           <!--[if !mso]><!-->
-          <a href="${href}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,${BRAND.accent} 0%,${BRAND.accentDark} 100%);color:#ffffff !important;text-decoration:none;border-radius:12px;font-size:16px;font-weight:700;line-height:1.2;box-shadow:0 10px 28px -8px rgba(147,51,234,0.65);">
+          <a href="${href}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,${BRAND.accent} 0%,${BRAND.accentDark} 100%);color:#ffffff !important;text-decoration:none;border-radius:12px;font-size:16px;font-weight:700;line-height:1.2;box-shadow:0 10px 24px -8px rgba(124,58,237,0.45);">
             ${label}
           </a>
           <!--<![endif]-->
@@ -93,18 +96,16 @@ function emailInfoBox(
 ): string {
   const borderSide = isArabic ? "border-right" : "border-left";
   const borderColor =
-    tone === "warning"
-      ? "rgba(245,158,11,0.55)"
-      : `rgba(196,181,253,0.45)`;
+    tone === "warning" ? "rgba(245,158,11,0.45)" : "rgba(124,58,237,0.35)";
   const background =
     tone === "warning"
-      ? "background-color:#1f1810;"
-      : `background-color:${BRAND.bgElevated};`;
+      ? "background-color:#fffbeb;"
+      : "background-color:#f5f3ff;";
 
   return `
     <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top:24px;">
       <tr>
-        <td style="${background} ${borderSide}:4px solid ${borderColor}; border-radius:${isArabic ? "12px 0 0 12px" : "0 12px 12px 0"}; padding:14px 16px; color:${BRAND.textSoft}; font-size:13px; line-height:1.7; text-align:${isArabic ? "right" : "left"};">
+        <td style="${background} ${borderSide}:4px solid ${borderColor}; border-radius:${isArabic ? "12px 0 0 12px" : "0 12px 12px 0"}; padding:14px 16px; color:${BRAND.text}; font-size:13px; line-height:1.7; text-align:${isArabic ? "right" : "left"};">
           ${content}
         </td>
       </tr>
@@ -128,8 +129,8 @@ function emailLinkFallback(
         <td style="padding-top:10px;">
           <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:${BRAND.surface}; border:1px solid ${BRAND.border}; border-radius:10px;">
             <tr>
-              <td dir="ltr" style="padding:12px 14px; font-family:Consolas,Monaco,monospace; font-size:12px; line-height:1.6; color:${BRAND.lavender}; word-break:break-all; text-align:left;">
-                <a href="${href}" target="_blank" rel="noopener noreferrer" style="color:${BRAND.accentBright}; text-decoration:underline;">
+              <td dir="ltr" style="padding:12px 14px; font-family:Consolas,Monaco,monospace; font-size:12px; line-height:1.6; color:${BRAND.accent}; word-break:break-all; text-align:left;">
+                <a href="${href}" target="_blank" rel="noopener noreferrer" style="color:${BRAND.accent}; text-decoration:underline;">
                   ${href}
                 </a>
               </td>
@@ -161,11 +162,28 @@ async function sendEmail(options: EmailOptions): Promise<boolean> {
   }
 
   try {
+    const attachments: Array<{
+      content: Buffer;
+      filename: string;
+      contentId: string;
+      contentType: string;
+    }> = [];
+
+    if (!process.env.EMAIL_LOGO_URL?.trim() && fs.existsSync(EMAIL_LOGO_PATH)) {
+      attachments.push({
+        content: fs.readFileSync(EMAIL_LOGO_PATH),
+        filename: "mail.png",
+        contentId: EMAIL_LOGO_CID,
+        contentType: "image/png",
+      });
+    }
+
     const { data, error } = await resend.emails.send({
       from: `ensmenu <${FROM_EMAIL}>`,
       to: [options.to],
       subject: options.subject,
       html: options.html,
+      attachments: attachments.length > 0 ? attachments : undefined,
     });
 
     if (error) {
@@ -199,8 +217,8 @@ function emailTemplate(content: string, isArabic: boolean = false): string {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="color-scheme" content="dark light">
-    <meta name="supported-color-schemes" content="dark light">
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
     <title>ensmenu</title>
     <!--[if mso]>
     <noscript>
@@ -222,10 +240,10 @@ function emailTemplate(content: string, isArabic: boolean = false): string {
             .email-body { padding: 24px 18px !important; }
             .email-header { padding: 28px 18px !important; }
         }
-        .email-body h2 { margin: 0 0 12px; font-size: 22px; font-weight: 800; color: ${BRAND.text}; line-height: 1.4; }
+        .email-body h2 { margin: 0 0 12px; font-size: 22px; font-weight: 800; color: ${BRAND.royal}; line-height: 1.4; }
         .email-body h3 { margin: 0 0 10px; font-size: 17px; font-weight: 700; color: ${BRAND.text}; }
-        .email-body p { margin: 0 0 14px; font-size: 15px; color: ${BRAND.textSoft}; line-height: 1.75; }
-        .email-body ul { margin: 0 0 14px; font-size: 15px; color: ${BRAND.textSoft}; line-height: 1.8; }
+        .email-body p { margin: 0 0 14px; font-size: 15px; color: ${BRAND.text}; line-height: 1.75; }
+        .email-body ul { margin: 0 0 14px; font-size: 15px; color: ${BRAND.text}; line-height: 1.8; }
         .email-body[dir="rtl"] ul { padding: 0 20px 0 0; }
         .email-body[dir="ltr"] ul { padding: 0 0 0 20px; }
         .email-body .button {
@@ -247,27 +265,18 @@ function emailTemplate(content: string, isArabic: boolean = false): string {
         }
     </style>
 </head>
-<body style="margin:0; padding:0; background-color:${BRAND.bgOuter}; direction:${direction};">
-    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:${BRAND.bgOuter};">
+<body style="margin:0; padding:0; background-color:#eef2f7; direction:${direction};">
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:#eef2f7;">
         <tr>
             <td align="center" style="padding:32px 16px;">
-                <table role="presentation" class="email-shell" border="0" cellpadding="0" cellspacing="0" width="600" style="max-width:600px; width:100%; background-color:${BRAND.bgCard}; border-radius:16px; overflow:hidden; box-shadow:0 16px 48px -16px rgba(0,0,0,0.65); border:1px solid ${BRAND.border};">
+                <table role="presentation" class="email-shell" border="0" cellpadding="0" cellspacing="0" width="600" style="max-width:600px; width:100%; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 12px 40px -16px rgba(26,11,46,0.12);">
                     <tr>
-                        <td class="email-header" align="center" style="padding:36px 32px 24px; background-color:${BRAND.black}; color:#ffffff;">
+                        <td class="email-header" align="center" style="padding:32px 32px 24px; background-color:#ffffff;">
                             ${emailBrandHeader(isArabic)}
                         </td>
                     </tr>
                     <tr>
-                        <td style="background-color:${BRAND.black}; padding:0 32px 20px;">
-                            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
-                                <tr>
-                                    <td style="height:2px; background:linear-gradient(90deg, transparent 0%, ${BRAND.lavender} 50%, transparent 100%); font-size:0; line-height:0;">&nbsp;</td>
-                                </tr>
-                            </table>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td class="email-body" dir="${direction}" style="padding:36px 32px; font-family:${fontFamily}; color:${BRAND.textSoft}; line-height:1.75; text-align:${textAlign}; direction:${direction}; background-color:${BRAND.bgCard};">
+                        <td class="email-body" dir="${direction}" style="padding:36px 32px; font-family:${fontFamily}; color:${BRAND.text}; line-height:1.75; text-align:${textAlign}; direction:${direction}; background-color:#ffffff;">
                             ${content}
                         </td>
                     </tr>
@@ -281,7 +290,7 @@ function emailTemplate(content: string, isArabic: boolean = false): string {
                         </td>
                     </tr>
                     <tr>
-                        <td dir="${direction}" style="padding:0 32px 28px; font-family:${fontFamily}; text-align:${textAlign}; color:${BRAND.muted}; font-size:12px; line-height:1.7; background-color:${BRAND.bgCard};">
+                        <td dir="${direction}" style="padding:0 32px 28px; font-family:${fontFamily}; text-align:${textAlign}; color:${BRAND.muted}; font-size:12px; line-height:1.7; background-color:#ffffff;">
                             <p style="margin:0 0 8px;">© ${year} ensmenu. ${isArabic ? "جميع الحقوق محفوظة." : "All rights reserved."}</p>
                             <p style="margin:0;">${isArabic ? "إذا لم تطلب هذا البريد، يمكنك تجاهله بأمان." : "If you did not request this email, you can safely ignore it."}</p>
                         </td>
@@ -357,21 +366,21 @@ export async function sendVerificationEmail(
     <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
       <tr>
         <td align="${textAlign}" style="padding-bottom:18px;">
-          <span style="display:inline-block; width:52px; height:52px; line-height:52px; border-radius:14px; background-color:${BRAND.bgElevated}; border:1px solid ${BRAND.border}; color:${BRAND.accentBright}; font-size:24px; text-align:center;">✉️</span>
+          <span style="display:inline-block; width:52px; height:52px; line-height:52px; border-radius:14px; background-color:#f5f3ff; color:${BRAND.accent}; font-size:24px; text-align:center;">✉️</span>
         </td>
       </tr>
       <tr>
-        <td align="${textAlign}" style="font-size:24px; font-weight:800; color:${BRAND.text}; line-height:1.4; padding-bottom:10px;">
+        <td align="${textAlign}" style="font-size:24px; font-weight:800; color:${BRAND.royal}; line-height:1.4; padding-bottom:10px;">
           مرحباً ${safeName}،
         </td>
       </tr>
       <tr>
-        <td align="${textAlign}" style="font-size:15px; color:${BRAND.textSoft}; line-height:1.8; padding-bottom:6px;">
-          شكراً لتسجيلك في <strong style="color:${BRAND.accentBright};">ensmenu</strong>.
+        <td align="${textAlign}" style="font-size:15px; color:${BRAND.text}; line-height:1.8; padding-bottom:6px;">
+          شكراً لتسجيلك في <strong style="color:${BRAND.accentDark};">ensmenu</strong>.
         </td>
       </tr>
       <tr>
-        <td align="${textAlign}" style="font-size:15px; color:${BRAND.textSoft}; line-height:1.8;">
+        <td align="${textAlign}" style="font-size:15px; color:${BRAND.text}; line-height:1.8;">
           لإكمال إنشاء حسابك وتفعيله، يرجى تأكيد بريدك الإلكتروني بالضغط على الزر أدناه.
         </td>
       </tr>
@@ -399,21 +408,21 @@ export async function sendVerificationEmail(
     <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
       <tr>
         <td align="${textAlign}" style="padding-bottom:18px;">
-          <span style="display:inline-block; width:52px; height:52px; line-height:52px; border-radius:14px; background-color:${BRAND.bgElevated}; border:1px solid ${BRAND.border}; color:${BRAND.accentBright}; font-size:24px; text-align:center;">✉️</span>
+          <span style="display:inline-block; width:52px; height:52px; line-height:52px; border-radius:14px; background-color:#f5f3ff; color:${BRAND.accent}; font-size:24px; text-align:center;">✉️</span>
         </td>
       </tr>
       <tr>
-        <td align="${textAlign}" style="font-size:24px; font-weight:800; color:${BRAND.text}; line-height:1.4; padding-bottom:10px;">
+        <td align="${textAlign}" style="font-size:24px; font-weight:800; color:${BRAND.royal}; line-height:1.4; padding-bottom:10px;">
           Hello ${safeName},
         </td>
       </tr>
       <tr>
-        <td align="${textAlign}" style="font-size:15px; color:${BRAND.textSoft}; line-height:1.8; padding-bottom:6px;">
-          Thank you for signing up for <strong style="color:${BRAND.accentBright};">ensmenu</strong>.
+        <td align="${textAlign}" style="font-size:15px; color:${BRAND.text}; line-height:1.8; padding-bottom:6px;">
+          Thank you for signing up for <strong style="color:${BRAND.accentDark};">ensmenu</strong>.
         </td>
       </tr>
       <tr>
-        <td align="${textAlign}" style="font-size:15px; color:${BRAND.textSoft}; line-height:1.8;">
+        <td align="${textAlign}" style="font-size:15px; color:${BRAND.text}; line-height:1.8;">
           To complete your registration and activate your account, please verify your email address using the button below.
         </td>
       </tr>
