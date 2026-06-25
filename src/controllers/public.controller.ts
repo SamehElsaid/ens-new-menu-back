@@ -178,55 +178,20 @@ export const getAllPublicMenus = async (req: Request, res: Response) => {
   }
 };
 
-const PUBLIC_MENU_INITIAL_ITEMS_PER_CATEGORY = 30;
+const PUBLIC_MENU_INITIAL_ITEMS_LIMIT = 30;
+const CATALOG_PAGE_SIZE = 30;
 
-function sqlSelectOutputColumns(selectFields: string[]): string {
-  return selectFields
-    .map((field) => {
-      const asMatch = field.match(/\s+as\s+(\w+)\s*$/i);
-      if (asMatch) return asMatch[1];
-      const trimmed = field.trim();
-      const dotIndex = trimmed.lastIndexOf(".");
-      if (dotIndex >= 0) return trimmed.slice(dotIndex + 1).trim();
-      return trimmed;
-    })
-    .join(",\n        ");
-}
-
-function buildMenuItemsPartitionExpr(
-  hasCategoriesTable: boolean,
-  hasCategoryId: boolean,
-): string {
-  if (hasCategoriesTable && hasCategoryId) {
-    return "CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN -1 ELSE mi.categoryId END";
-  }
-  if (hasCategoryId) {
-    return "ISNULL(mi.categoryId, -1)";
-  }
-  return "ISNULL(NULLIF(LTRIM(RTRIM(mi.category)), ''), N'__uncategorized__')";
-}
-
-function buildMenuItemsCategoryOrderClause(
-  hasCategoriesTable: boolean,
-  hasCategoryId: boolean,
-): string {
-  if (hasCategoriesTable && hasCategoryId) {
-    return "uncategorizedFlag ASC, categorySortOrder ASC, categoryCreatedAt DESC, sortOrder ASC, itemCreatedAt DESC, id ASC";
-  }
-  if (hasCategoryId) {
-    return "categoryId ASC, sortOrder ASC, itemCreatedAt DESC, id ASC";
-  }
-  return "category ASC, sortOrder ASC, itemCreatedAt DESC, id ASC";
-}
-
-function buildCatalogProductsOrderClause(
-  hasCategoryFilter: boolean,
+function buildMenuItemsOrderClause(
   hasCategoryId: boolean,
   hasCategoriesTable: boolean,
+  withinCategoryOnly: boolean,
 ): string {
   const itemOrder = "mi.sortOrder ASC, mi.createdAt DESC, mi.id ASC";
-  if (hasCategoryFilter || !hasCategoryId) {
+  if (withinCategoryOnly) {
     return itemOrder;
+  }
+  if (!hasCategoryId) {
+    return `mi.category ASC, ${itemOrder}`;
   }
   if (hasCategoriesTable) {
     return `CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN 1 ELSE 0 END ASC, c.sortOrder ASC, c.createdAt DESC, ${itemOrder}`;
@@ -457,49 +422,28 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           LEFT JOIN CategoryTranslations ctEn ON c.id = ctEn.categoryId AND ctEn.locale = 'en'`;
     }
 
-    const itemsOrderClause = buildMenuItemsCategoryOrderClause(
-      hasCategoriesTable,
+    const itemsOrderClause = buildMenuItemsOrderClause(
       hasCategoryId,
-    );
-    const partitionExpr = buildMenuItemsPartitionExpr(
       hasCategoriesTable,
-      hasCategoryId,
+      false,
     );
-    const rankHelperFields =
-      hasCategoriesTable && hasCategoryId
-        ? `CASE WHEN mi.categoryId IS NULL OR c.id IS NULL THEN 1 ELSE 0 END AS uncategorizedFlag,
-        ISNULL(c.sortOrder, 2147483647) AS categorySortOrder,
-        c.createdAt AS categoryCreatedAt,
-        mi.createdAt AS itemCreatedAt,`
-        : "mi.createdAt AS itemCreatedAt,";
-    const itemOutputColumns = sqlSelectOutputColumns(selectFields);
 
-    // First N products per category (ordered by sortOrder, then createdAt/id)
     const itemsQuery = `
-      WITH RankedMenuItems AS (
-        SELECT
-          ${selectFields.join(",\n          ")},
-          ${rankHelperFields}
-          ROW_NUMBER() OVER (
-            PARTITION BY ${partitionExpr}
-            ORDER BY mi.sortOrder ASC, mi.createdAt DESC, mi.id ASC
-          ) AS categoryItemRank
-        FROM MenuItems mi
-        ${joinClause}
-        WHERE mi.menuId = @menuId AND mi.available = 1
-      )
-      SELECT
-        ${itemOutputColumns}
-      FROM RankedMenuItems
-      WHERE categoryItemRank <= @limit
+      SELECT 
+        ${selectFields.join(",\n        ")}
+      FROM MenuItems mi
+      ${joinClause}
+      WHERE mi.menuId = @menuId AND mi.available = 1
       ORDER BY ${itemsOrderClause}
+      OFFSET 0 ROWS
+      FETCH NEXT @limit ROWS ONLY
     `;
 
     const itemsResult = await pool
       .request()
       .input("menuId", sql.Int, menu.id)
       .input("locale", sql.NVarChar, locale)
-      .input("limit", sql.Int, PUBLIC_MENU_INITIAL_ITEMS_PER_CATEGORY)
+      .input("limit", sql.Int, PUBLIC_MENU_INITIAL_ITEMS_LIMIT)
       .query(itemsQuery);
 
     const countResult = await pool
@@ -1149,13 +1093,14 @@ export const getHomepageFeaturedLogos = async (
     });
   }
 };
-const DEFAULT_CATALOG_PAGE_LIMIT = 30;
-const MAX_CATALOG_PAGE_LIMIT = 100;
+const DEFAULT_CATALOG_PAGE_LIMIT = CATALOG_PAGE_SIZE;
+const MAX_CATALOG_PAGE_LIMIT = CATALOG_PAGE_SIZE;
 
 /**
  * GET /api/public/menu/:slug/catalog
  * All active categories + paginated products for a menu (public).
- * Query: page, limit, categoryId (optional filter), locale.
+ * Query: page, limit|pageSize (max 30), categoryId (optional filter), locale.
+ * Products are ordered by category sortOrder, then item sortOrder.
  */
 export const getPublicMenuCatalog = async (req: Request, res: Response) => {
   try {
@@ -1246,6 +1191,13 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
         ORDER BY c.sortOrder ASC, c.createdAt DESC
       `);
 
+    const categoriesTableCheck = await pool.request().query(`
+        SELECT COUNT(*) as count
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_NAME = 'Categories'
+      `);
+    const hasCategoriesTable = categoriesTableCheck.recordset[0].count > 0;
+
     const columnCheck = await pool.request().query(`
         SELECT COLUMN_NAME
         FROM INFORMATION_SCHEMA.COLUMNS
@@ -1267,21 +1219,23 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
     }
     const productWhereClause = `WHERE ${productWhereParts.join(" AND ")}`;
 
-    const categoryJoin = hasCategoryId
-      ? `
-          LEFT JOIN Categories c ON mi.categoryId = c.id AND c.isActive = 1
+    const categoryJoin =
+      hasCategoriesTable && hasCategoryId
+        ? `
+          LEFT JOIN Categories c ON mi.categoryId = c.id
           LEFT JOIN CategoryTranslations ct ON c.id = ct.categoryId AND ct.locale = @locale
           LEFT JOIN CategoryTranslations ctAr ON c.id = ctAr.categoryId AND ctAr.locale = 'ar'
           LEFT JOIN CategoryTranslations ctEn ON c.id = ctEn.categoryId AND ctEn.locale = 'en'`
-      : "";
+        : "";
 
-    const categorySelect = hasCategoryId
-      ? `,
+    const categorySelect =
+      hasCategoriesTable && hasCategoryId
+        ? `,
           mi.categoryId,
           ct.name as categoryName,
           ctAr.name as categoryNameAr,
           ctEn.name as categoryNameEn`
-      : "";
+        : "";
 
     const optionSelectParts: string[] = [];
     if (hasOriginalPrice) optionSelectParts.push("mi.originalPrice");
@@ -1312,10 +1266,10 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
       productsRequest.input("categoryId", sql.Int, categoryId);
     }
 
-    const productsOrderClause = buildCatalogProductsOrderClause(
+    const productsOrderClause = buildMenuItemsOrderClause(
+      hasCategoryId,
+      hasCategoriesTable,
       hasCategoryFilter,
-      hasCategoryId,
-      hasCategoryId,
     );
 
     const productsResult = await productsRequest.query(`

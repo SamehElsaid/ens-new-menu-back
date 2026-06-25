@@ -81,12 +81,12 @@ router.get(
       .withMessage("page must be a positive integer"),
     query("limit")
       .optional()
-      .isInt({ min: 1, max: 100 })
-      .withMessage("limit must be between 1 and 100"),
+      .isInt({ min: 1, max: 30 })
+      .withMessage("limit must be between 1 and 30"),
     query("pageSize")
       .optional()
-      .isInt({ min: 1, max: 100 })
-      .withMessage("pageSize must be between 1 and 100"),
+      .isInt({ min: 1, max: 30 })
+      .withMessage("pageSize must be between 1 and 30"),
     query("categoryId")
       .optional()
       .isInt({ min: 1 })
