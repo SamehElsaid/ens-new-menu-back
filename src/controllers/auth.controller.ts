@@ -26,6 +26,7 @@ import {
   MAX_FCM_TOKEN_LEN,
   removeUserFcmToken,
 } from "../services/fcmPush.service";
+import { isEmailVerificationEnabled } from "../utils/devFlags";
 
 // Check Availability (Email or Phone Number)
 export async function checkAvailability(
@@ -126,10 +127,11 @@ export async function signup(req: Request, res: Response): Promise<void> {
     }
     const freePlanId = freePlanResult.recordset[0].id;
 
-    const verificationToken = uuidv4();
-    const verificationExpiresAt = new Date(
-      Date.now() + TOKEN_EXPIRY.EMAIL_VERIFICATION,
-    );
+    const emailVerificationEnabled = isEmailVerificationEnabled();
+    const verificationToken = emailVerificationEnabled ? uuidv4() : null;
+    const verificationExpiresAt = emailVerificationEnabled
+      ? new Date(Date.now() + TOKEN_EXPIRY.EMAIL_VERIFICATION)
+      : null;
 
     await executeTransaction(async (transaction) => {
       const userResult = await transaction
@@ -139,10 +141,13 @@ export async function signup(req: Request, res: Response): Promise<void> {
         .input("name", sql.NVarChar, name)
         .input("phoneNumber", sql.NVarChar, phoneNumber)
         .input("restaurantName", sql.NVarChar, restaurantName ?? null)
-        .input("role", sql.NVarChar, ROLES.USER).query(`
-          INSERT INTO Users (email, password, name, phoneNumber, restaurantName, role, isEmailVerified)
+        .input("role", sql.NVarChar, ROLES.USER)
+        .input("isEmailVerified", sql.Bit, emailVerificationEnabled ? 0 : 1)
+        .query(`
+          INSERT INTO Users (email, password, name, phoneNumber, restaurantName, role, isEmailVerified, emailVerifiedAt)
           OUTPUT INSERTED.id
-          VALUES (@email, @password, @name, @phoneNumber, @restaurantName, @role, 0)
+          VALUES (@email, @password, @name, @phoneNumber, @restaurantName, @role, @isEmailVerified,
+                  CASE WHEN @isEmailVerified = 1 THEN GETDATE() ELSE NULL END)
         `);
 
       const userId = userResult.recordset[0].id;
@@ -156,35 +161,42 @@ export async function signup(req: Request, res: Response): Promise<void> {
           VALUES (@userId, @planId, @billingCycle, 'active', 'completed', GETDATE(), 0)
         `);
 
-      await transaction
-        .request()
-        .input("userId", sql.Int, userId)
-        .input("token", sql.NVarChar, verificationToken)
-        .input("expiresAt", sql.DateTime2, verificationExpiresAt).query(`
-          INSERT INTO EmailVerifications (userId, token, expiresAt)
-          VALUES (@userId, @token, @expiresAt)
-        `);
+      if (emailVerificationEnabled && verificationToken && verificationExpiresAt) {
+        await transaction
+          .request()
+          .input("userId", sql.Int, userId)
+          .input("token", sql.NVarChar, verificationToken)
+          .input("expiresAt", sql.DateTime2, verificationExpiresAt).query(`
+            INSERT INTO EmailVerifications (userId, token, expiresAt)
+            VALUES (@userId, @token, @expiresAt)
+          `);
+      }
     });
 
-    try {
-      sendVerificationEmail(
-        email,
-        name,
-        verificationToken,
-        locale as "ar" | "en",
-      ).catch(() => {
-        logger.warn("Verification email failed to send (non-critical)");
-      });
-    } catch {
-      // Account is created; user can request a new verification email
+    if (emailVerificationEnabled && verificationToken) {
+      try {
+        sendVerificationEmail(
+          email,
+          name,
+          verificationToken,
+          locale as "ar" | "en",
+        ).catch(() => {
+          logger.warn("Verification email failed to send (non-critical)");
+        });
+      } catch {
+        // Account is created; user can request a new verification email
+      }
     }
 
     res.status(201).json({
-      message:
-        locale === "en"
+      message: emailVerificationEnabled
+        ? locale === "en"
           ? "Account created! Please check your email to verify your account."
-          : "تم إنشاء الحساب! يرجى التحقق من بريدك الإلكتروني لتأكيد حسابك.",
-      emailVerificationRequired: true,
+          : "تم إنشاء الحساب! يرجى التحقق من بريدك الإلكتروني لتأكيد حسابك."
+        : locale === "en"
+          ? "Account created successfully! You can log in now."
+          : "تم إنشاء الحساب بنجاح! يمكنك تسجيل الدخول الآن.",
+      emailVerificationRequired: emailVerificationEnabled,
     });
   } catch (error) {
     logger.error("Signup error:", error);
@@ -293,7 +305,7 @@ export async function login(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    if (!user.isEmailVerified) {
+    if (isEmailVerificationEnabled() && !user.isEmailVerified) {
       sendApiError(res, req, 403, ApiErrors.emailVerificationRequired, {
         emailVerificationRequired: true,
       });
@@ -442,6 +454,16 @@ export async function resendVerification(
 ): Promise<void> {
   try {
     const { email, locale = "ar" } = req.body;
+
+    if (!isEmailVerificationEnabled()) {
+      res.json({
+        message:
+          locale === "en"
+            ? "Email verification is currently disabled."
+            : "تأكيد البريد الإلكتروني متوقف حالياً.",
+      });
+      return;
+    }
 
     const pool = await getPool();
 
