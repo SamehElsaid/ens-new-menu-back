@@ -558,6 +558,10 @@ export const ApiErrors = {
     en: "Email is already verified",
     ar: "البريد الإلكتروني مفعّل مسبقًا",
   },
+  emailVerificationRequired: {
+    en: "Please verify your email before logging in. Check your inbox for the verification link.",
+    ar: "يرجى تأكيد بريدك الإلكتروني قبل تسجيل الدخول. تحقق من صندوق الوارد لرابط التأكيد.",
+  },
   failedResendVerification: {
     en: "Failed to resend verification email",
     ar: "فشل إعادة إرسال بريد التحقق",

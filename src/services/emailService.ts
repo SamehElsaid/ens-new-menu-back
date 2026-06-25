@@ -1,8 +1,144 @@
 import { getResendClient, isEmailConfigured } from "../config/email";
 import { logger } from "../utils/logger";
+import { getImageUrl } from "../utils/urlHelper";
 
 const FROM_EMAIL = process.env.EMAIL_FROM?.trim() || "";
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+
+function getEmailLogoUrl(): string {
+  const custom = process.env.EMAIL_LOGO_URL?.trim();
+  if (custom) return custom;
+  return getImageUrl("/uploads/logo.png") || "";
+}
+
+function emailBrandHeader(isArabic: boolean): string {
+  const logoUrl = escapeHtml(getEmailLogoUrl());
+  const homeUrl = escapeHtml(FRONTEND_URL.replace(/\/$/, ""));
+  const fontFamily = isArabic
+    ? "'Segoe UI', Tahoma, 'Noto Sans Arabic', Arial, sans-serif"
+    : "'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+
+  return `
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" dir="${isArabic ? "rtl" : "ltr"}">
+      <tr>
+        <td align="center" style="padding-bottom:14px;">
+          <a href="${homeUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+            <img
+              src="${logoUrl}"
+              width="220"
+              height="80"
+              alt="ensmenu"
+              style="display:block; width:220px; max-width:100%; height:auto; border:0;"
+            />
+          </a>
+        </td>
+      </tr>
+      <tr>
+        <td align="center" style="font-family:${fontFamily}; font-size:14px; line-height:1.6; color:rgba(255,255,255,0.88);">
+          ${isArabic ? "منصتك الرقمية لإنشاء منيو احترافي" : "Your digital platform for professional menus"}
+        </td>
+      </tr>
+    </table>
+  `;
+}
+
+const BRAND = {
+  accent: "#7c3aed",
+  accentDark: "#5b21b6",
+  royal: "#1a0b2e",
+  text: "#334155",
+  muted: "#64748b",
+  border: "#e2e8f0",
+  surface: "#f8fafc",
+};
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function emailButton(href: string, label: string, isArabic: boolean): string {
+  const align = isArabic ? "right" : "left";
+
+  return `
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin:28px 0 8px;">
+      <tr>
+        <td align="${align}">
+          <!--[if mso]>
+          <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${href}" style="height:48px;v-text-anchor:middle;width:260px;" arcsize="18%" strokecolor="${BRAND.accentDark}" fillcolor="${BRAND.accent}">
+            <w:anchorlock/>
+            <center style="color:#ffffff;font-family:Segoe UI,Tahoma,Arial,sans-serif;font-size:16px;font-weight:bold;">
+              ${label}
+            </center>
+          </v:roundrect>
+          <![endif]-->
+          <!--[if !mso]><!-->
+          <a href="${href}" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,${BRAND.accent} 0%,${BRAND.accentDark} 100%);color:#ffffff !important;text-decoration:none;border-radius:12px;font-size:16px;font-weight:700;line-height:1.2;box-shadow:0 10px 24px -8px rgba(124,58,237,0.55);">
+            ${label}
+          </a>
+          <!--<![endif]-->
+        </td>
+      </tr>
+    </table>
+  `;
+}
+
+function emailInfoBox(
+  content: string,
+  isArabic: boolean,
+  tone: "neutral" | "warning" = "neutral",
+): string {
+  const borderSide = isArabic ? "border-right" : "border-left";
+  const borderColor =
+    tone === "warning" ? "rgba(245,158,11,0.45)" : "rgba(124,58,237,0.35)";
+  const background =
+    tone === "warning"
+      ? "background-color:#fffbeb;"
+      : "background-color:#f5f3ff;";
+
+  return `
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top:24px;">
+      <tr>
+        <td style="${background} ${borderSide}:4px solid ${borderColor}; border-radius:${isArabic ? "12px 0 0 12px" : "0 12px 12px 0"}; padding:14px 16px; color:${BRAND.text}; font-size:13px; line-height:1.7; text-align:${isArabic ? "right" : "left"};">
+          ${content}
+        </td>
+      </tr>
+    </table>
+  `;
+}
+
+function emailLinkFallback(
+  href: string,
+  isArabic: boolean,
+  label: string,
+): string {
+  return `
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top:20px;">
+      <tr>
+        <td style="padding:0; color:${BRAND.muted}; font-size:13px; line-height:1.7; text-align:${isArabic ? "right" : "left"};">
+          ${label}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding-top:10px;">
+          <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:${BRAND.surface}; border:1px solid ${BRAND.border}; border-radius:10px;">
+            <tr>
+              <td dir="ltr" style="padding:12px 14px; font-family:Consolas,Monaco,monospace; font-size:12px; line-height:1.6; color:${BRAND.accent}; word-break:break-all; text-align:left;">
+                <a href="${href}" target="_blank" rel="noopener noreferrer" style="color:${BRAND.accent}; text-decoration:underline;">
+                  ${href}
+                </a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  `;
+}
 
 interface EmailOptions {
   to: string;
@@ -48,85 +184,102 @@ async function sendEmail(options: EmailOptions): Promise<boolean> {
 
 // Email Template Wrapper
 function emailTemplate(content: string, isArabic: boolean = false): string {
+  const direction = isArabic ? "rtl" : "ltr";
+  const textAlign = isArabic ? "right" : "left";
+  const fontFamily = isArabic
+    ? "'Segoe UI', Tahoma, 'Noto Sans Arabic', Arial, sans-serif"
+    : "'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+  const year = new Date().getFullYear();
+
   return `
 <!DOCTYPE html>
-<html dir="${isArabic ? "rtl" : "ltr"}" lang="${isArabic ? "ar" : "en"}">
+<html dir="${direction}" lang="${isArabic ? "ar" : "en"}" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
+    <title>ensmenu</title>
+    <!--[if mso]>
+    <noscript>
+      <xml>
+        <o:OfficeDocumentSettings>
+          <o:PixelsPerInch>96</o:PixelsPerInch>
+        </o:OfficeDocumentSettings>
+      </xml>
+    </noscript>
+    <![endif]-->
     <style>
-        body {
-            font-family: ${isArabic ? "'Segoe UI', Tahoma, Arial" : "'Segoe UI', Roboto, Arial"}, sans-serif;
-            background-color: #f5f5f5;
-            margin: 0;
-            padding: 0;
+        body, table, td, p, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+        table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; border-collapse: collapse; }
+        img { border: 0; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
+        body { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+        a[x-apple-data-detectors] { color: inherit !important; text-decoration: none !important; }
+        @media only screen and (max-width: 620px) {
+            .email-shell { width: 100% !important; }
+            .email-body { padding: 24px 18px !important; }
+            .email-header { padding: 28px 18px !important; }
         }
-        .container {
-            max-width: 600px;
-            margin: 40px auto;
-            background-color: #ffffff;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 40px 20px;
-            text-align: center;
-            color: white;
-        }
-        .header h1 {
-            margin: 0;
-            font-size: 28px;
-            font-weight: bold;
-        }
-        .content {
-            padding: 40px 30px;
-            color: #333333;
-            line-height: 1.6;
-        }
-        .button {
+        .email-body h2 { margin: 0 0 12px; font-size: 22px; font-weight: 800; color: ${BRAND.royal}; line-height: 1.4; }
+        .email-body h3 { margin: 0 0 10px; font-size: 17px; font-weight: 700; color: ${BRAND.text}; }
+        .email-body p { margin: 0 0 14px; font-size: 15px; color: ${BRAND.text}; line-height: 1.75; }
+        .email-body ul { margin: 0 0 14px; font-size: 15px; color: ${BRAND.text}; line-height: 1.8; }
+        .email-body[dir="rtl"] ul { padding: 0 20px 0 0; }
+        .email-body[dir="ltr"] ul { padding: 0 0 0 20px; }
+        .email-body .button {
             display: inline-block;
-            padding: 14px 32px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white !important;
+            padding: 14px 28px;
+            background: linear-gradient(135deg, ${BRAND.accent} 0%, ${BRAND.accentDark} 100%);
+            color: #ffffff !important;
             text-decoration: none;
-            border-radius: 6px;
-            font-weight: bold;
-            margin: 20px 0;
-            text-align: center;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 15px;
+            margin: 18px 0;
         }
-        .button:hover {
-            opacity: 0.9;
-        }
-        .footer {
-            background-color: #f8f9fa;
-            padding: 20px;
-            text-align: center;
-            color: #666666;
-            font-size: 14px;
-            border-top: 1px solid #e9ecef;
-        }
-        .divider {
+        .email-body .divider {
             height: 1px;
-            background-color: #e9ecef;
-            margin: 30px 0;
+            background-color: ${BRAND.border};
+            margin: 24px 0;
+            border: 0;
         }
     </style>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>ensmenu</h1>
-        </div>
-        <div class="content">
-            ${content}
-        </div>
-        <div class="footer">
-            <p>${isArabic ? "© 2025 ensmenu. جميع الحقوق محفوظة." : "© 2025 ensmenu. All rights reserved."}</p>
-            <p>${isArabic ? "إذا لم تطلب هذا البريد، يرجى تجاهله." : "If you didn't request this email, please ignore it."}</p>
-        </div>
-    </div>
+<body style="margin:0; padding:0; background-color:#eef2f7; direction:${direction};">
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:#eef2f7;">
+        <tr>
+            <td align="center" style="padding:32px 16px;">
+                <table role="presentation" class="email-shell" border="0" cellpadding="0" cellspacing="0" width="600" style="max-width:600px; width:100%; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 12px 40px -16px rgba(26,11,46,0.25);">
+                    <tr>
+                        <td class="email-header" align="center" style="padding:34px 32px; background:linear-gradient(135deg, ${BRAND.royal} 0%, ${BRAND.accentDark} 55%, ${BRAND.accent} 100%); color:#ffffff;">
+                            ${emailBrandHeader(isArabic)}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="email-body" dir="${direction}" style="padding:36px 32px; font-family:${fontFamily}; color:${BRAND.text}; line-height:1.75; text-align:${textAlign}; direction:${direction};">
+                            ${content}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:0 32px 28px;">
+                            <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+                                <tr>
+                                    <td style="border-top:1px solid ${BRAND.border}; font-size:0; line-height:0;">&nbsp;</td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td dir="${direction}" style="padding:0 32px 28px; font-family:${fontFamily}; text-align:${textAlign}; color:${BRAND.muted}; font-size:12px; line-height:1.7;">
+                            <p style="margin:0 0 8px;">© ${year} ensmenu. ${isArabic ? "جميع الحقوق محفوظة." : "All rights reserved."}</p>
+                            <p style="margin:0;">${isArabic ? "إذا لم تطلب هذا البريد، يمكنك تجاهله بأمان." : "If you did not request this email, you can safely ignore it."}</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
 </body>
 </html>
   `;
@@ -185,45 +338,101 @@ export async function sendVerificationEmail(
   locale: "ar" | "en" = "ar",
 ): Promise<boolean> {
   const isArabic = locale === "ar";
-  const verificationLink = `${FRONTEND_URL}/${locale}/verify-email?token=${token}`;
+  const safeName = escapeHtml(name);
+  const verificationLink = `${FRONTEND_URL}/${locale}/auth/verify-email?token=${token}`;
+  const textAlign = isArabic ? "right" : "left";
 
   const content = isArabic
     ? `
-    <h2>مرحباً ${name}،</h2>
-    <p>شكراً لتسجيلك في <strong>ensmenu</strong>!</p>
-    <p>لإكمال تسجيلك وتفعيل حسابك، يرجى تأكيد بريدك الإلكتروني بالنقر على الزر أدناه:</p>
-    <center>
-        <a href="${verificationLink}" class="button">تأكيد البريد الإلكتروني</a>
-    </center>
-    <p style="color: #666; font-size: 14px; margin-top: 30px;">
-        أو انسخ هذا الرابط والصقه في متصفحك:<br>
-        <a href="${verificationLink}" style="color: #667eea; word-break: break-all;">${verificationLink}</a>
-    </p>
-    <div class="divider"></div>
-    <p style="color: #999; font-size: 13px;">
-        <strong>ملاحظة:</strong> هذا الرابط صالح لمدة 24 ساعة فقط.
-    </p>
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+      <tr>
+        <td align="${textAlign}" style="padding-bottom:18px;">
+          <span style="display:inline-block; width:52px; height:52px; line-height:52px; border-radius:14px; background-color:#f5f3ff; color:${BRAND.accent}; font-size:24px; text-align:center;">✉️</span>
+        </td>
+      </tr>
+      <tr>
+        <td align="${textAlign}" style="font-size:24px; font-weight:800; color:${BRAND.royal}; line-height:1.4; padding-bottom:10px;">
+          مرحباً ${safeName}،
+        </td>
+      </tr>
+      <tr>
+        <td align="${textAlign}" style="font-size:15px; color:${BRAND.text}; line-height:1.8; padding-bottom:6px;">
+          شكراً لتسجيلك في <strong style="color:${BRAND.accentDark};">ensmenu</strong>.
+        </td>
+      </tr>
+      <tr>
+        <td align="${textAlign}" style="font-size:15px; color:${BRAND.text}; line-height:1.8;">
+          لإكمال إنشاء حسابك وتفعيله، يرجى تأكيد بريدك الإلكتروني بالضغط على الزر أدناه.
+        </td>
+      </tr>
+    </table>
+    ${emailButton(verificationLink, "تأكيد البريد الإلكتروني", isArabic)}
+    ${emailLinkFallback(
+      verificationLink,
+      isArabic,
+      "إذا لم يعمل الزر، انسخ الرابط التالي والصقه في متصفحك:",
+    )}
+    ${emailInfoBox(
+      "<strong>ملاحظة:</strong> هذا الرابط صالح لمدة <strong>24 ساعة</strong> فقط. بعد انتهاء المدة يمكنك طلب رابط تأكيد جديد من صفحة تسجيل الدخول.",
+      isArabic,
+      "warning",
+    )}
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top:22px;">
+      <tr>
+        <td align="${textAlign}" style="font-size:13px; color:${BRAND.muted}; line-height:1.7;">
+          إذا لم تقم بإنشاء حساب على ensmenu، يمكنك تجاهل هذه الرسالة ولن يتم تفعيل أي حساب.
+        </td>
+      </tr>
+    </table>
   `
     : `
-    <h2>Hello ${name},</h2>
-    <p>Thank you for signing up for <strong>ensmenu</strong>!</p>
-    <p>To complete your registration and activate your account, please verify your email by clicking the button below:</p>
-    <center>
-        <a href="${verificationLink}" class="button">Verify Email</a>
-    </center>
-    <p style="color: #666; font-size: 14px; margin-top: 30px;">
-        Or copy and paste this link into your browser:<br>
-        <a href="${verificationLink}" style="color: #667eea; word-break: break-all;">${verificationLink}</a>
-    </p>
-    <div class="divider"></div>
-    <p style="color: #999; font-size: 13px;">
-        <strong>Note:</strong> This link is valid for 24 hours only.
-    </p>
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+      <tr>
+        <td align="${textAlign}" style="padding-bottom:18px;">
+          <span style="display:inline-block; width:52px; height:52px; line-height:52px; border-radius:14px; background-color:#f5f3ff; color:${BRAND.accent}; font-size:24px; text-align:center;">✉️</span>
+        </td>
+      </tr>
+      <tr>
+        <td align="${textAlign}" style="font-size:24px; font-weight:800; color:${BRAND.royal}; line-height:1.4; padding-bottom:10px;">
+          Hello ${safeName},
+        </td>
+      </tr>
+      <tr>
+        <td align="${textAlign}" style="font-size:15px; color:${BRAND.text}; line-height:1.8; padding-bottom:6px;">
+          Thank you for signing up for <strong style="color:${BRAND.accentDark};">ensmenu</strong>.
+        </td>
+      </tr>
+      <tr>
+        <td align="${textAlign}" style="font-size:15px; color:${BRAND.text}; line-height:1.8;">
+          To complete your registration and activate your account, please verify your email address using the button below.
+        </td>
+      </tr>
+    </table>
+    ${emailButton(verificationLink, "Verify Email Address", isArabic)}
+    ${emailLinkFallback(
+      verificationLink,
+      isArabic,
+      "If the button does not work, copy and paste this link into your browser:",
+    )}
+    ${emailInfoBox(
+      "<strong>Note:</strong> This link is valid for <strong>24 hours</strong> only. After it expires, you can request a new verification link from the login page.",
+      isArabic,
+      "warning",
+    )}
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top:22px;">
+      <tr>
+        <td align="${textAlign}" style="font-size:13px; color:${BRAND.muted}; line-height:1.7;">
+          If you did not create an ensmenu account, you can safely ignore this email and no account will be activated.
+        </td>
+      </tr>
+    </table>
   `;
 
   return sendEmail({
     to,
-    subject: isArabic ? "تأكيد بريدك الإلكتروني" : "Verify Your Email",
+    subject: isArabic
+      ? "تأكيد بريدك الإلكتروني — ensmenu"
+      : "Verify your email — ensmenu",
     html: emailTemplate(content, isArabic),
   });
 }
