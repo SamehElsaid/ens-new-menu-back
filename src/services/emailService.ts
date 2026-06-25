@@ -6,8 +6,21 @@ import { getImageUrl } from "../utils/urlHelper";
 
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 const EMAIL_LOGO_CID = "ensmenu-logo";
-const EMAIL_LOGO_PATH = path.join(process.cwd(), "uploads", "mail.png");
+const EMAIL_LOGO_CANDIDATE_PATHS = [
+  path.join(process.cwd(), "assets", "email", "mail.png"),
+  path.join(__dirname, "..", "assets", "email", "mail.png"),
+  path.join(process.cwd(), "uploads", "mail.png"),
+];
 const EMAIL_ADDRESS_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function resolveEmailLogoPath(): string | null {
+  for (const candidate of EMAIL_LOGO_CANDIDATE_PATHS) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
 
 function getEmailFromAddress(): string {
   const raw = (process.env.EMAIL_FROM || "")
@@ -33,7 +46,7 @@ function getEmailFromAddress(): string {
 function getEmailLogoSrc(): string {
   const custom = process.env.EMAIL_LOGO_URL?.trim();
   if (custom) return custom;
-  if (fs.existsSync(EMAIL_LOGO_PATH)) {
+  if (resolveEmailLogoPath()) {
     return `cid:${EMAIL_LOGO_CID}`;
   }
   return getImageUrl("/uploads/mail.png") || "";
@@ -196,13 +209,18 @@ async function sendEmail(options: EmailOptions): Promise<boolean> {
       contentType: string;
     }> = [];
 
-    if (!process.env.EMAIL_LOGO_URL?.trim() && fs.existsSync(EMAIL_LOGO_PATH)) {
+    const logoPath = resolveEmailLogoPath();
+    if (!process.env.EMAIL_LOGO_URL?.trim() && logoPath) {
       attachments.push({
-        content: fs.readFileSync(EMAIL_LOGO_PATH),
+        content: fs.readFileSync(logoPath),
         filename: "mail.png",
         contentId: EMAIL_LOGO_CID,
         contentType: "image/png",
       });
+    } else if (!process.env.EMAIL_LOGO_URL?.trim() && !logoPath) {
+      logger.warn(
+        "Email logo not found. Expected assets/email/mail.png on the server.",
+      );
     }
 
     const { data, error } = await resend.emails.send({
