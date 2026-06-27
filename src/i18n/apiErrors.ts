@@ -206,6 +206,14 @@ export const ApiErrors = {
     en: "Failed to create table",
     ar: "فشل إنشاء الطاولة",
   },
+  tableNumberAlreadyExists: {
+    en: "A table with this number already exists",
+    ar: "يوجد طاولة بهذا الرقم بالفعل",
+  },
+  tableActiveStatusUnsupported: {
+    en: "Table active/inactive status is not available on this database",
+    ar: "حالة تفعيل الطاولة غير متاحة على قاعدة البيانات الحالية",
+  },
   noFieldsToUpdate: {
     en: "No fields to update",
     ar: "لا توجد حقول للتحديث",

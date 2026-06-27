@@ -1,4 +1,5 @@
 import { getPool } from "../config/database";
+import { resetMenuTablesColumnMetaCache } from "../config/menuTablesColumns";
 import { logger } from "../utils/logger";
 
 const NUMERIC_SQL_TYPES = new Set([
@@ -179,12 +180,40 @@ async function widenTableNumberColumn(
   }
 }
 
+async function ensureIsActiveColumn(): Promise<void> {
+  const pool = await getPool();
+  const candidates = ["isActive", "active", "available", "isAvailable"] as const;
+
+  for (const columnName of candidates) {
+    const result = await pool.request().input("columnName", columnName).query(`
+      SELECT DATA_TYPE
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = 'MenuTables' AND COLUMN_NAME = @columnName
+    `);
+    if (result.recordset.length > 0) {
+      return;
+    }
+  }
+
+  await pool.request().query(`
+    IF COL_LENGTH('MenuTables', 'isActive') IS NULL
+    BEGIN
+      ALTER TABLE dbo.MenuTables
+        ADD isActive BIT NOT NULL
+        CONSTRAINT DF_MenuTables_isActive DEFAULT 1;
+    END
+  `);
+  resetMenuTablesColumnMetaCache();
+  logger.info("MenuTables.isActive column ensured");
+}
+
 /** Menu table labels must support alphanumeric values (e.g. A1, VIP-3). */
 export async function ensureMenuTablesSchema(): Promise<void> {
   if (!(await tableExists("MenuTables"))) {
     return;
   }
 
+  await ensureIsActiveColumn();
   await widenTableNumberColumn("MenuTables", "tableNumber");
 
   if (await tableExists("StaffTableCalls")) {
