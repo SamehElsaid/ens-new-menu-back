@@ -53,7 +53,7 @@ async function requireMenuAccess(
   return true;
 }
 
-// Get menu items (with pagination, search by name, filter by category name)
+// Get menu items (with pagination, search by name in ar/en, filter by category name)
 export async function getMenuItems(req: Request, res: Response): Promise<void> {
   try {
     const { menuId } = req.params;
@@ -169,7 +169,9 @@ export async function getMenuItems(req: Request, res: Response): Promise<void> {
       }
     }
     if (search) {
-      whereParts.push('mit.name LIKE @searchPattern');
+      whereParts.push(
+        '(mit_ar.name LIKE @searchPattern OR mit_en.name LIKE @searchPattern)',
+      );
     }
     if (availableFilter !== undefined) {
       whereParts.push('mi.available = @availableFilter');

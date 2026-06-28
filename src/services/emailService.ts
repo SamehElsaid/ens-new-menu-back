@@ -4,7 +4,12 @@ import { getResendClient, isEmailConfigured } from "../config/email";
 import { logger } from "../utils/logger";
 import { getImageUrl } from "../utils/urlHelper";
 
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+function getFrontendUrl(): string {
+  return (process.env.FRONTEND_URL || "http://localhost:3000").replace(
+    /\/$/,
+    "",
+  );
+}
 const EMAIL_LOGO_CID = "ensmenu-logo";
 const EMAIL_LOGO_CANDIDATE_PATHS = [
   path.join(process.cwd(), "assets", "email", "mail.png"),
@@ -55,7 +60,7 @@ function getEmailLogoSrc(): string {
 function emailBrandHeader(isArabic: boolean): string {
   const logoSrc = getEmailLogoSrc();
   const logoAttr = logoSrc.startsWith("cid:") ? logoSrc : escapeHtml(logoSrc);
-  const homeUrl = escapeHtml(FRONTEND_URL.replace(/\/$/, ""));
+  const homeUrl = escapeHtml(getFrontendUrl());
 
   return `
     <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" dir="${isArabic ? "rtl" : "ltr"}">
@@ -403,7 +408,7 @@ export async function sendVerificationEmail(
 ): Promise<boolean> {
   const isArabic = locale === "ar";
   const safeName = escapeHtml(name);
-  const verificationLink = `${FRONTEND_URL}/${locale}/auth/verify-email?token=${token}`;
+  const verificationLink = `${getFrontendUrl()}/${locale}/auth/verify-email?token=${token}`;
   const textAlign = isArabic ? "right" : "left";
 
   const content = isArabic
@@ -509,7 +514,7 @@ export async function sendPasswordResetEmail(
   locale: "ar" | "en" = "ar",
 ): Promise<boolean> {
   const isArabic = locale === "ar";
-  const resetLink = `${FRONTEND_URL}/${locale}/auth/reset-password?token=${token}`;
+  const resetLink = `${getFrontendUrl()}/${locale}/auth/reset-password?token=${token}`;
 
   const content = isArabic
     ? `
@@ -612,7 +617,7 @@ export async function sendSubscriptionEmail(
         <li><strong>تاريخ البدء:</strong> ${new Date().toLocaleDateString("ar-EG")}</li>
     </ul>
     <center>
-        <a href="${FRONTEND_URL}/${locale}/user/dashboard" class="button">انتقل إلى لوحة التحكم</a>
+        <a href="${getFrontendUrl()}/${locale}/user/dashboard" class="button">انتقل إلى لوحة التحكم</a>
     </center>
     <p>يمكنك الآن الاستفادة من جميع ميزات خطتك!</p>
   `
@@ -626,7 +631,7 @@ export async function sendSubscriptionEmail(
         <li><strong>Start date:</strong> ${new Date().toLocaleDateString("en-US")}</li>
     </ul>
     <center>
-        <a href="${FRONTEND_URL}/${locale}/user/dashboard" class="button">Go to Dashboard</a>
+        <a href="${getFrontendUrl()}/${locale}/user/dashboard" class="button">Go to Dashboard</a>
     </center>
     <p>You can now enjoy all features of your plan!</p>
   `;
