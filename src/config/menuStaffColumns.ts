@@ -112,7 +112,10 @@ export function getStaffIsActive(
   );
   if (!key) return true;
   const v = row[key];
-  return v === true || v === 1 || v === "1";
+  if (v === true || v === 1 || v === "1") return true;
+  if (v === false || v === 0 || v === "0") return false;
+  if (Buffer.isBuffer(v) && v.length > 0) return v[0] === 1;
+  return Boolean(v);
 }
 
 /** Map DB row to stable API shape (isActive, name, role, phone, email, …). */

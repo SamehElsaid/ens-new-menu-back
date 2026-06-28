@@ -406,6 +406,7 @@ export async function getUserDetails(
           u.gender, u.address, u.profileImage, u.createdAt, u.lastLoginAt, u.updatedAt,
           u.isSuspended, u.suspendedAt, u.suspendedReason,
           u.isBlocked, u.blockedAt, u.blockedReason, u.deletedAt,
+          u.isEmailVerified, u.emailVerifiedAt,
           p.name as planName, s.status as subscriptionStatus,
           s.startDate, s.endDate, s.billingCycle, s.amount
         FROM Users u

@@ -11,6 +11,32 @@ import {
   normalizeTableNumber,
 } from "../utils/normalizeTableNumber";
 
+async function menuTableNumberExists(
+  pool: Awaited<ReturnType<typeof getPool>>,
+  menuId: number,
+  tableNumber: string,
+  excludeTableId?: number,
+): Promise<boolean> {
+  const request = pool
+    .request()
+    .input("menuId", sql.Int, menuId)
+    .input("tableNumber", sql.NVarChar, tableNumber);
+
+  let query = `
+    SELECT TOP 1 id
+    FROM MenuTables
+    WHERE menuId = @menuId AND tableNumber = @tableNumber
+  `;
+
+  if (excludeTableId !== undefined) {
+    request.input("excludeTableId", sql.Int, excludeTableId);
+    query += " AND id <> @excludeTableId";
+  }
+
+  const result = await request.query(query);
+  return result.recordset.length > 0;
+}
+
 async function requireMenuAccess(
   req: Request,
   res: Response,
@@ -117,8 +143,21 @@ export async function createTable(
 
     if (!(await requireMenuAccess(req, res, menuId))) return;
 
+    const parsedMenuId = parseInt(menuId, 10);
+    if (
+      await menuTableNumberExists(pool, parsedMenuId, tableNumber)
+    ) {
+      sendApiError(res, req, 400, ApiErrors.tableNumberAlreadyExists);
+      return;
+    }
+
     const meta = await getMenuTablesColumnMeta();
     const { activeColumnQuoted: activeQ, seatsColumnQuoted: seatsQ } = meta;
+
+    if (req.body?.isActive !== undefined && !activeQ) {
+      sendApiError(res, req, 500, ApiErrors.tableActiveStatusUnsupported);
+      return;
+    }
 
     const insertCols = ["menuId", "tableNumber"];
     const insertVals = ["@menuId", "@tableNumber"];
@@ -186,6 +225,19 @@ export async function updateTable(
       return;
     }
 
+    if (
+      tableNumber !== undefined &&
+      (await menuTableNumberExists(
+        pool,
+        parseInt(menuId, 10),
+        tableNumber,
+        parseInt(tableId, 10),
+      ))
+    ) {
+      sendApiError(res, req, 400, ApiErrors.tableNumberAlreadyExists);
+      return;
+    }
+
     const checkResult = await pool
       .request()
       .input("tableId", sql.Int, parseInt(tableId))
@@ -209,6 +261,11 @@ export async function updateTable(
       .input("tableId", sql.Int, parseInt(tableId));
 
     const meta = await getMenuTablesColumnMeta();
+
+    if (isActive !== undefined && !meta.activeColumnQuoted) {
+      sendApiError(res, req, 500, ApiErrors.tableActiveStatusUnsupported);
+      return;
+    }
 
     if (tableNumber !== undefined) {
       updates.push("tableNumber = @tableNumber");

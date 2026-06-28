@@ -15,7 +15,11 @@ const envPath = path.resolve(process.cwd(), envFile);
 
 // Try to load from file if it exists
 if (existsSync(envPath)) {
-  const result = dotenv.config({ path: envFile });
+  const result = dotenv.config({
+    path: envFile,
+    // Dev/test: .env file wins over stale shell vars
+    override: process.env.NODE_ENV !== "production",
+  });
 
   if (result.error) {
     console.error(`❌ Failed to load ${envFile}:`, result.error);
@@ -57,6 +61,9 @@ console.log(
   `   RESEND_API_KEY: ${process.env.RESEND_API_KEY?.trim() ? "✅ Set" : "⚠️ Not set"}`,
 );
 console.log(`   EMAIL_FROM: ${process.env.EMAIL_FROM?.trim() || "⚠️ Not set"}`);
+console.log(
+  `   FRONTEND_URL: ${process.env.FRONTEND_URL?.trim() || "http://localhost:3000 (default)"}`,
+);
 console.log(
   `   VERIFYKIT_SERVER_KEY: ${process.env.VERIFYKIT_SERVER_KEY?.trim() ? "✅ Set" : "⚠️ Not set"}`,
 );

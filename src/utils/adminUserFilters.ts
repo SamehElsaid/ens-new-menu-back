@@ -20,6 +20,14 @@ export const USER_PRO_PLAN_SQL = `(
   AND ISNULL(p.priceMonthly, 0) > 0
 )`;
 
+export const USER_PRODUCTS_NO_IMAGE_SQL = `EXISTS (
+  SELECT 1
+  FROM Menus m
+  INNER JOIN MenuItems mi ON mi.menuId = m.id
+  WHERE m.userId = u.id
+    AND (mi.image IS NULL OR LTRIM(RTRIM(ISNULL(mi.image, N''))) = N'')
+)`;
+
 export const BROADCAST_AUDIENCES = [
   "all",
   "selected",
@@ -27,6 +35,7 @@ export const BROADCAST_AUDIENCES = [
   "free",
   "no-menu",
   "with-menu",
+  "products-no-image",
 ] as const;
 
 export type BroadcastAudience = (typeof BROADCAST_AUDIENCES)[number];
@@ -65,6 +74,9 @@ export function applyBroadcastAudienceFilter(
       whereConditions.push(
         "(SELECT COUNT(*) FROM Menus m WHERE m.userId = u.id) > 0",
       );
+      break;
+    case "products-no-image":
+      whereConditions.push(USER_PRODUCTS_NO_IMAGE_SQL);
       break;
     case "all":
     case "selected":
