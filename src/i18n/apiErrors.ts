@@ -214,6 +214,10 @@ export const ApiErrors = {
     en: "Table active/inactive status is not available on this database",
     ar: "حالة تفعيل الطاولة غير متاحة على قاعدة البيانات الحالية",
   },
+  staffActiveStatusUnsupported: {
+    en: "Staff active/inactive status is not available on this database",
+    ar: "حالة تفعيل الموظف غير متاحة على قاعدة البيانات الحالية",
+  },
   noFieldsToUpdate: {
     en: "No fields to update",
     ar: "لا توجد حقول للتحديث",

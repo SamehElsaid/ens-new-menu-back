@@ -186,6 +186,9 @@ export async function createStaff(
       cols.push(meta.activeColumnQuoted);
       vals.push("@isActive");
       insertReq.input("isActive", sql.Bit, isActive ? 1 : 0);
+    } else if (req.body?.isActive === false) {
+      sendApiError(res, req, 500, ApiErrors.staffActiveStatusUnsupported);
+      return;
     }
 
     const insertSql = `
@@ -274,6 +277,10 @@ export async function updateStaff(
       updates.push(`${quoteMenuStaffIdent(meta.passwordKey)} = @password`);
       const hashed = await bcrypt.hash(password, 12);
       request.input("password", sql.NVarChar, hashed);
+    }
+    if (isActive !== undefined && !meta.activeColumnQuoted) {
+      sendApiError(res, req, 500, ApiErrors.staffActiveStatusUnsupported);
+      return;
     }
     if (isActive !== undefined && meta.activeColumnQuoted) {
       updates.push(`${meta.activeColumnQuoted} = @isActive`);
