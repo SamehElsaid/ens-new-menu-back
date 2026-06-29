@@ -18,6 +18,7 @@ import { ensureRestaurantNameSchema } from "./restaurantName.schema";
 import { ensureDeliverySchema } from "./delivery.schema";
 import { ensureStaffTableCallsOrderTypeSchema } from "./staffTableCallsOrderType.schema";
 import { ensureSearchInformationSchema } from "./searchInformation.schema";
+import { ensureMetaDataSchema } from "./metaData.schema";
 import { ensureVoucherSchema } from "./voucher.schema";
 import { migrateDeprecatedMenuThemes } from "./deprecatedMenuThemes.schema";
 import { ensureDomainTransferSchema } from "./domainTransfer.schema";
@@ -41,6 +42,7 @@ export { ensureRestaurantNameSchema } from "./restaurantName.schema";
 export { ensureDeliverySchema } from "./delivery.schema";
 export { ensureStaffTableCallsOrderTypeSchema } from "./staffTableCallsOrderType.schema";
 export { ensureSearchInformationSchema } from "./searchInformation.schema";
+export { ensureMetaDataSchema } from "./metaData.schema";
 export { ensureVoucherSchema } from "./voucher.schema";
 export { migrateDeprecatedMenuThemes } from "./deprecatedMenuThemes.schema";
 export { ensureDomainTransferSchema } from "./domainTransfer.schema";
@@ -56,6 +58,7 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "delivery", run: ensureDeliverySchema },
     { name: "staffTableCallsOrderType", run: ensureStaffTableCallsOrderTypeSchema },
     { name: "searchInformation", run: ensureSearchInformationSchema },
+    { name: "metaData", run: ensureMetaDataSchema },
     { name: "analytics", run: ensureAnalyticsSchema },
     { name: "menuUuid", run: ensureMenuUuidSchema },
     { name: "menuTables", run: ensureMenuTablesSchema },
