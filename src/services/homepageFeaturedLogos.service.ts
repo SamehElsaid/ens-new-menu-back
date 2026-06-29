@@ -19,7 +19,9 @@ type MenuCandidate = {
   currency: string | null;
 };
 
-export async function listHomepageFeaturedLogos(): Promise<HomepageFeaturedLogo[]> {
+export async function listHomepageFeaturedLogos(): Promise<
+  HomepageFeaturedLogo[]
+> {
   await ensureHomepageFeaturedLogosSchema();
   const pool = await getPool();
 
@@ -54,14 +56,13 @@ export async function listHomepageFeaturedLogos(): Promise<HomepageFeaturedLogo[
   }));
 }
 
-export async function isMenuFeaturedOnHomepage(menuId: number): Promise<boolean> {
+export async function isMenuFeaturedOnHomepage(
+  menuId: number,
+): Promise<boolean> {
   await ensureHomepageFeaturedLogosSchema();
   const pool = await getPool();
 
-  const result = await pool
-    .request()
-    .input("menuId", sql.Int, menuId)
-    .query(`
+  const result = await pool.request().input("menuId", sql.Int, menuId).query(`
       SELECT TOP 1 id
       FROM HomepageFeaturedLogos
       WHERE menuId = @menuId
@@ -70,14 +71,13 @@ export async function isMenuFeaturedOnHomepage(menuId: number): Promise<boolean>
   return result.recordset.length > 0;
 }
 
-export async function getUserFeaturedMenuId(userId: number): Promise<number | null> {
+export async function getUserFeaturedMenuId(
+  userId: number,
+): Promise<number | null> {
   await ensureHomepageFeaturedLogosSchema();
   const pool = await getPool();
 
-  const result = await pool
-    .request()
-    .input("userId", sql.Int, userId)
-    .query(`
+  const result = await pool.request().input("userId", sql.Int, userId).query(`
       SELECT TOP 1 menuId
       FROM HomepageFeaturedLogos
       WHERE userId = @userId
@@ -109,7 +109,8 @@ export async function addUserMenuToHomepageFeatured(
   await ensureHomepageFeaturedLogosSchema();
   const pool = await getPool();
 
-  const userResult = await pool.request().input("userId", sql.Int, userId).query(`
+  const userResult = await pool.request().input("userId", sql.Int, userId)
+    .query(`
     SELECT id, country
     FROM Users
     WHERE id = @userId AND role = 'user'
@@ -124,9 +125,7 @@ export async function addUserMenuToHomepageFeatured(
     throw new Error("NO_MENU_WITH_LOGO");
   }
 
-  const existing = await pool
-    .request()
-    .input("menuId", sql.Int, menu.id)
+  const existing = await pool.request().input("menuId", sql.Int, menu.id)
     .query(`
       SELECT TOP 1 id
       FROM HomepageFeaturedLogos
@@ -153,8 +152,7 @@ export async function addUserMenuToHomepageFeatured(
     .input("userId", sql.Int, userId)
     .input("logo", sql.NVarChar, menu.logo!.trim())
     .input("countryCode", sql.NVarChar, countryCode)
-    .input("sortOrder", sql.Int, sortOrder)
-    .query(`
+    .input("sortOrder", sql.Int, sortOrder).query(`
       INSERT INTO HomepageFeaturedLogos (menuId, userId, logo, countryCode, sortOrder)
       OUTPUT INSERTED.id, INSERTED.menuId, INSERTED.userId, INSERTED.logo,
              INSERTED.countryCode, INSERTED.sortOrder, INSERTED.createdAt
