@@ -250,6 +250,10 @@ export const ApiErrors = {
     en: "Email already exists for this menu",
     ar: "البريد الإلكتروني مسجّل مسبقًا لهذا المنيو",
   },
+  staffEmailExists: {
+    en: "This email is already used by another staff member",
+    ar: "هذا البريد الإلكتروني مستخدم بالفعل  ",
+  },
   failedUpdateStaffMember: {
     en: "Failed to update staff member",
     ar: "فشل تحديث عضو الطاقم",

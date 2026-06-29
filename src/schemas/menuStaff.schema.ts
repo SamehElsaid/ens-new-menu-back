@@ -1,5 +1,9 @@
 import { getPool } from "../config/database";
-import { resetMenuStaffColumnMetaCache } from "../config/menuStaffColumns";
+import {
+  getMenuStaffColumnMeta,
+  quoteMenuStaffIdent,
+  resetMenuStaffColumnMetaCache,
+} from "../config/menuStaffColumns";
 import { logger } from "../utils/logger";
 
 async function tableExists(tableName: string): Promise<boolean> {
@@ -42,6 +46,49 @@ async function ensureIsActiveColumn(): Promise<void> {
   logger.info("MenuStaff.isActive column ensured");
 }
 
+async function ensureStaffEmailUniqueIndex(): Promise<void> {
+  const meta = await getMenuStaffColumnMeta();
+  if (!meta.emailKey) {
+    return;
+  }
+
+  const pool = await getPool();
+  const emailCol = quoteMenuStaffIdent(meta.emailKey);
+  const indexName = "UQ_MenuStaff_email";
+
+  const indexCheck = await pool.request().input("indexName", indexName).query(`
+      SELECT 1 AS found
+      FROM sys.indexes
+      WHERE name = @indexName AND object_id = OBJECT_ID('dbo.MenuStaff')
+    `);
+  if (indexCheck.recordset.length > 0) {
+    return;
+  }
+
+  const dupes = await pool.request().query(`
+      SELECT LOWER(${emailCol}) AS emailNorm, COUNT(*) AS cnt
+      FROM MenuStaff
+      WHERE ${emailCol} IS NOT NULL AND LTRIM(RTRIM(${emailCol})) <> ''
+      GROUP BY LOWER(${emailCol})
+      HAVING COUNT(*) > 1
+    `);
+  if (dupes.recordset.length > 0) {
+    logger.warn(
+      "MenuStaff has duplicate staff emails; unique index skipped until resolved",
+      {
+        duplicateCount: dupes.recordset.length,
+      },
+    );
+    return;
+  }
+
+  await pool.request().query(`
+      CREATE UNIQUE INDEX [${indexName}] ON dbo.MenuStaff (${emailCol})
+      WHERE ${emailCol} IS NOT NULL AND LTRIM(RTRIM(${emailCol})) <> '';
+    `);
+  logger.info("MenuStaff email unique index ensured");
+}
+
 /** Ensures MenuStaff supports active/inactive status (same pattern as MenuTables). */
 export async function ensureMenuStaffSchema(): Promise<void> {
   if (!(await tableExists("MenuStaff"))) {
@@ -49,4 +96,5 @@ export async function ensureMenuStaffSchema(): Promise<void> {
   }
 
   await ensureIsActiveColumn();
+  await ensureStaffEmailUniqueIndex();
 }

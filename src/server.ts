@@ -48,6 +48,14 @@ import {
   putSearchInformationHandler,
   deleteSearchInformationHandler,
 } from "./controllers/searchInformation.controller";
+import {
+  getMetaDataHandler,
+  getMetaDataByPageNameHandler,
+  postMetaDataHandler,
+  putMetaDataHandler,
+  patchMetaDataHandler,
+  deleteMetaDataHandler,
+} from "./controllers/metaData.controller";
 import { requireAdmin } from "./middleware/auth.middleware";
 
 // ------------------------------------------------------------------
@@ -163,6 +171,10 @@ app.get("/api/promo", getPromoHandler);
 app.get("/api/searchInformation", getSearchInformationHandler);
 app.get("/api/searchInformation/:id", getSearchInformationByIdHandler);
 
+// Meta data — GET list & GET by pageName are public (no x-api-key)
+app.get("/api/metaData", getMetaDataHandler);
+app.get("/api/metaData/:pageName", getMetaDataByPageNameHandler);
+
 // Other public routes (menus, plans, …)
 app.use("/api/public", publicRoutes);
 
@@ -196,6 +208,10 @@ app.delete(
   requireAdmin,
   deleteSearchInformationHandler,
 );
+app.post("/api/metaData", requireAdmin, postMetaDataHandler);
+app.put("/api/metaData/:pageName", requireAdmin, putMetaDataHandler);
+app.patch("/api/metaData/:pageName", requireAdmin, patchMetaDataHandler);
+app.delete("/api/metaData/:pageName", requireAdmin, deleteMetaDataHandler);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/structure", structureRoutes);
 app.use("/api", adsRoutes);

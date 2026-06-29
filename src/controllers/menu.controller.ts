@@ -104,8 +104,7 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
       DATA_TYPE: string;
     }[];
     const idColumn = menuColumns.find((c) => c.COLUMN_NAME === "id");
-    const isIdString =
-      idColumn != null && idColumn.DATA_TYPE === "nvarchar";
+    const isIdString = idColumn != null && idColumn.DATA_TYPE === "nvarchar";
     const hasApprovalStatus = menuColumns.some(
       (c) => c.COLUMN_NAME === "approvalStatus",
     );

@@ -43,7 +43,7 @@ function parseMenuWorkingHours(workingHours: unknown): unknown {
 
 export async function staffLogin(req: Request, res: Response): Promise<void> {
   try {
-    const { email, password, menuSlug } = req.body;
+    const { email, password } = req.body;
     const rawExpoToken =
       typeof req.body?.expoToken === "string" ? req.body.expoToken : null;
     const expoToken =
@@ -52,73 +52,6 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
         : null;
 
     const pool = await getPool();
-
-    // Find the menu by slug
-    const menuResult = await pool
-      .request()
-      .input("slug", sql.NVarChar, menuSlug.toLowerCase().trim()).query(`
-        SELECT
-          m.id,
-          m.uuid,
-          m.userId,
-          m.slug,
-          m.logo,
-          m.theme,
-          m.isActive,
-          m.createdAt,
-          ISNULL(m.currency, 'SAR') as currency,
-          m.footerLogo,
-          m.footerDescriptionEn,
-          m.footerDescriptionAr,
-          m.socialFacebook,
-          m.socialInstagram,
-          m.socialTwitter,
-          m.socialWhatsapp,
-          m.addressEn,
-          m.addressAr,
-          m.phone,
-          m.workingHours,
-          ar.name as nameAr,
-          ar.description as descriptionAr,
-          en.name as nameEn,
-          en.description as descriptionEn
-        FROM Menus m
-        LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
-        LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
-        WHERE m.slug = @slug
-      `);
-
-    if (menuResult.recordset.length === 0) {
-      sendApiError(res, req, 404, {
-        en: "Restaurant not found",
-        ar: "المطعم غير موجود",
-      });
-      return;
-    }
-
-    const menu = menuResult.recordset[0];
-
-    if (!menu.isActive) {
-      sendApiError(res, req, 403, {
-        en: "This restaurant is currently inactive",
-        ar: "هذا المطعم غير مفعل حالياً",
-      });
-      return;
-    }
-
-    if (await isUserOnFreePlan(menu.userId as number)) {
-      sendApiError(
-        res,
-        req,
-        403,
-        {
-          en: "Staff access requires a Pro plan. Ask the owner to upgrade.",
-          ar: "دخول الطاقم يتطلب خطة Pro. اطلب من صاحب المنيو الترقية.",
-        },
-        { code: "PRO_REQUIRED" },
-      );
-      return;
-    }
 
     const staffMeta = await getMenuStaffColumnMeta();
     if (!staffMeta.emailKey) {
@@ -132,46 +65,119 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
     const emailCol = quoteMenuStaffIdent(staffMeta.emailKey);
     const staffResult = await pool
       .request()
-      .input("email", sql.NVarChar, email.toLowerCase().trim())
-      .input("menuId", sql.Int, menu.id).query(`
-        SELECT *
-        FROM MenuStaff
-        WHERE ${emailCol} = @email AND menuId = @menuId
+      .input("email", sql.NVarChar, email.toLowerCase().trim()).query(`
+        SELECT
+          s.*,
+          m.id as menuTableId,
+          m.uuid as menuUuid,
+          m.userId as menuOwnerUserId,
+          m.slug as menuSlug,
+          m.logo as menuLogo,
+          m.theme as menuTheme,
+          m.isActive as menuIsActive,
+          m.createdAt as menuCreatedAt,
+          ISNULL(m.currency, 'SAR') as menuCurrency,
+          m.footerLogo as menuFooterLogo,
+          m.footerDescriptionEn as menuFooterDescriptionEn,
+          m.footerDescriptionAr as menuFooterDescriptionAr,
+          m.socialFacebook as menuSocialFacebook,
+          m.socialInstagram as menuSocialInstagram,
+          m.socialTwitter as menuSocialTwitter,
+          m.socialWhatsapp as menuSocialWhatsapp,
+          m.addressEn as menuAddressEn,
+          m.addressAr as menuAddressAr,
+          m.phone as menuPhone,
+          m.workingHours as menuWorkingHours,
+          ar.name as menuNameAr,
+          ar.description as menuDescriptionAr,
+          en.name as menuNameEn,
+          en.description as menuDescriptionEn
+        FROM MenuStaff s
+        JOIN Menus m ON s.menuId = m.id
+        LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
+        LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
+        WHERE ${emailCol} = @email
       `);
 
     if (staffResult.recordset.length === 0) {
       sendApiError(res, req, 401, {
-        en: "Email not registered in this restaurant",
-        ar: "البريد الإلكتروني غير مسجل في هذا المطعم",
+        en: "Invalid email or password",
+        ar: "البريد الإلكتروني أو كلمة المرور غير صحيحة",
       });
       return;
     }
 
-    const staff = staffResult.recordset[0] as Record<string, unknown>;
+    let matchedRow: Record<string, unknown> | null = null;
 
-    if (!getStaffIsActive(staff, staffMeta)) {
+    for (const row of staffResult.recordset) {
+      const staff = row as Record<string, unknown>;
+      const storedHash = getStaffPasswordHash(staff, staffMeta);
+
+      if (!storedHash) {
+        continue;
+      }
+
+      const isValidPassword = await bcrypt.compare(password, storedHash);
+      if (!isValidPassword) {
+        continue;
+      }
+
+      if (!getStaffIsActive(staff, staffMeta)) {
+        sendApiError(res, req, 403, {
+          en: "Your account is deactivated. Contact the restaurant manager.",
+          ar: "تم إيقاف حسابك. تواصل مع إدارة المطعم.",
+        });
+        return;
+      }
+
+      matchedRow = staff;
+    }
+
+    if (!matchedRow) {
+      const hasStaffWithoutPassword = staffResult.recordset.some((row) => {
+        const staff = row as Record<string, unknown>;
+        return (
+          getStaffIsActive(staff, staffMeta) &&
+          !getStaffPasswordHash(staff, staffMeta)
+        );
+      });
+
+      if (hasStaffWithoutPassword) {
+        sendApiError(res, req, 401, {
+          en: "No password set for your account. Contact the restaurant manager.",
+          ar: "لم يتم تعيين كلمة مرور لحسابك. تواصل مع إدارة المطعم.",
+        });
+        return;
+      }
+
+      sendApiError(res, req, 401, {
+        en: "Invalid email or password",
+        ar: "البريد الإلكتروني أو كلمة المرور غير صحيحة",
+      });
+      return;
+    }
+
+    const staff = matchedRow;
+
+    if (!staff.menuIsActive) {
       sendApiError(res, req, 403, {
-        en: "Your account is deactivated. Contact the restaurant manager.",
-        ar: "تم إيقاف حسابك. تواصل مع إدارة المطعم.",
+        en: "This restaurant is currently inactive",
+        ar: "هذا المطعم غير مفعل حالياً",
       });
       return;
     }
 
-    const storedHash = getStaffPasswordHash(staff, staffMeta);
-    if (!storedHash) {
-      sendApiError(res, req, 401, {
-        en: "No password set for your account. Contact the restaurant manager.",
-        ar: "لم يتم تعيين كلمة مرور لحسابك. تواصل مع إدارة المطعم.",
-      });
-      return;
-    }
-
-    const isValidPassword = await bcrypt.compare(password, storedHash);
-    if (!isValidPassword) {
-      sendApiError(res, req, 401, {
-        en: "Invalid password",
-        ar: "كلمة المرور غير صحيحة",
-      });
+    if (await isUserOnFreePlan(staff.menuOwnerUserId as number)) {
+      sendApiError(
+        res,
+        req,
+        403,
+        {
+          en: "Staff access requires a Pro plan. Ask the owner to upgrade.",
+          ar: "دخول الطاقم يتطلب خطة Pro. اطلب من صاحب المنيو الترقية.",
+        },
+        { code: "PRO_REQUIRED" },
+      );
       return;
     }
 
@@ -251,7 +257,7 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
       refreshToken = null;
     }
 
-    const workingHours = parseMenuWorkingHours(menu.workingHours);
+    const workingHours = parseMenuWorkingHours(staff.menuWorkingHours);
 
     res.json({
       message: "Login successful",
@@ -264,30 +270,30 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
         menuId: norm.menuId,
       },
       menu: {
-        id: menu.id,
-        uuid: menu.uuid,
-        userId: menu.userId,
-        slug: menu.slug,
-        logo: menu.logo,
-        theme: menu.theme,
-        isActive: menu.isActive,
-        createdAt: menu.createdAt,
-        currency: menu.currency,
-        footerLogo: menu.footerLogo,
-        footerDescriptionEn: menu.footerDescriptionEn,
-        footerDescriptionAr: menu.footerDescriptionAr,
-        socialFacebook: menu.socialFacebook,
-        socialInstagram: menu.socialInstagram,
-        socialTwitter: menu.socialTwitter,
-        socialWhatsapp: menu.socialWhatsapp,
-        addressEn: menu.addressEn,
-        addressAr: menu.addressAr,
-        phone: menu.phone,
+        id: staff.menuTableId,
+        uuid: staff.menuUuid,
+        userId: staff.menuOwnerUserId,
+        slug: staff.menuSlug,
+        logo: staff.menuLogo,
+        theme: staff.menuTheme,
+        isActive: staff.menuIsActive,
+        createdAt: staff.menuCreatedAt,
+        currency: staff.menuCurrency,
+        footerLogo: staff.menuFooterLogo,
+        footerDescriptionEn: staff.menuFooterDescriptionEn,
+        footerDescriptionAr: staff.menuFooterDescriptionAr,
+        socialFacebook: staff.menuSocialFacebook,
+        socialInstagram: staff.menuSocialInstagram,
+        socialTwitter: staff.menuSocialTwitter,
+        socialWhatsapp: staff.menuSocialWhatsapp,
+        addressEn: staff.menuAddressEn,
+        addressAr: staff.menuAddressAr,
+        phone: staff.menuPhone,
         workingHours,
-        nameAr: menu.nameAr,
-        descriptionAr: menu.descriptionAr,
-        nameEn: menu.nameEn,
-        descriptionEn: menu.descriptionEn,
+        nameAr: staff.menuNameAr,
+        descriptionAr: staff.menuDescriptionAr,
+        nameEn: staff.menuNameEn,
+        descriptionEn: staff.menuDescriptionEn,
       },
       accessToken,
       refreshToken,
