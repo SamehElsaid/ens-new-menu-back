@@ -114,6 +114,8 @@ export type UpdateMetaDataInput = Partial<
   Omit<CreateMetaDataInput, "pageName">
 >;
 
+export type ReplaceMetaDataInput = Omit<CreateMetaDataInput, "pageName">;
+
 export async function createMetaData(
   input: CreateMetaDataInput,
 ): Promise<MetaData> {
@@ -200,4 +202,56 @@ export async function patchMetaData(
     `);
 
   return getMetaDataByPageName(pageName);
+}
+
+export async function updateMetaData(
+  pageName: string,
+  input: ReplaceMetaDataInput,
+): Promise<MetaData | null> {
+  const existing = await getMetaDataByPageName(pageName);
+  if (!existing) return null;
+
+  await ensureMetaDataSchema();
+  const pool = await getPool();
+
+  await pool
+    .request()
+    .input("pageName", sql.NVarChar(128), normalizePageName(pageName))
+    .input("titleAr", sql.NVarChar(512), input.titleAr)
+    .input("titleEn", sql.NVarChar(512), input.titleEn)
+    .input("descriptionAr", sql.NVarChar(sql.MAX), input.descriptionAr)
+    .input("descriptionEn", sql.NVarChar(sql.MAX), input.descriptionEn)
+    .input("keywordsAr", sql.NVarChar(sql.MAX), input.keywordsAr)
+    .input("keywordsEn", sql.NVarChar(sql.MAX), input.keywordsEn)
+    .query(`
+      UPDATE MetaData
+      SET
+        titleAr = @titleAr,
+        titleEn = @titleEn,
+        descriptionAr = @descriptionAr,
+        descriptionEn = @descriptionEn,
+        keywordsAr = @keywordsAr,
+        keywordsEn = @keywordsEn,
+        updatedAt = SYSUTCDATETIME()
+      WHERE pageName = @pageName
+    `);
+
+  return getMetaDataByPageName(pageName);
+}
+
+export async function deleteMetaDataByPageName(
+  pageName: string,
+): Promise<boolean> {
+  await ensureMetaDataSchema();
+  const pool = await getPool();
+
+  const result = await pool
+    .request()
+    .input("pageName", sql.NVarChar(128), normalizePageName(pageName))
+    .query(`
+      DELETE FROM MetaData WHERE pageName = @pageName;
+      SELECT @@ROWCOUNT AS affected;
+    `);
+
+  return Number(result.recordset[0]?.affected ?? 0) > 0;
 }

@@ -15,6 +15,39 @@ import {
 } from "../config/staffJobRoles";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 
+async function isStaffEmailTaken(
+  email: string,
+  excludeStaffId?: number,
+): Promise<boolean> {
+  const meta = await getMenuStaffColumnMeta();
+  if (!meta.emailKey) {
+    return false;
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+  if (!normalizedEmail) {
+    return false;
+  }
+
+  const pool = await getPool();
+  const request = pool
+    .request()
+    .input("email", sql.NVarChar, normalizedEmail);
+  const excludeSql =
+    excludeStaffId != null ? " AND id <> @excludeStaffId" : "";
+  if (excludeStaffId != null) {
+    request.input("excludeStaffId", sql.Int, excludeStaffId);
+  }
+
+  const dupCheck = await request.query(`
+      SELECT TOP 1 id
+      FROM MenuStaff
+      WHERE ${quoteMenuStaffIdent(meta.emailKey)} = @email${excludeSql}
+    `);
+
+  return dupCheck.recordset.length > 0;
+}
+
 export async function getStaff(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
@@ -124,15 +157,8 @@ export async function createStaff(
     }
 
     if (email && meta.emailKey) {
-      const dupCheck = await pool
-        .request()
-        .input("email", sql.NVarChar, email.toLowerCase())
-        .input("menuId", sql.Int, parseInt(menuId))
-        .query(
-          `SELECT id FROM MenuStaff WHERE ${quoteMenuStaffIdent(meta.emailKey)} = @email AND menuId = @menuId`
-        );
-      if (dupCheck.recordset.length > 0) {
-        sendApiError(res, req, 400, ApiErrors.emailExistsForMenu);
+      if (await isStaffEmailTaken(String(email))) {
+        sendApiError(res, req, 400, ApiErrors.staffEmailExists);
         return;
       }
     }
@@ -270,8 +296,16 @@ export async function updateStaff(
       request.input("phone", sql.NVarChar, phone || null);
     }
     if (email !== undefined && meta.emailKey) {
+      const normalizedEmail = email ? String(email).toLowerCase().trim() : null;
+      if (
+        normalizedEmail &&
+        (await isStaffEmailTaken(normalizedEmail, parseInt(staffId, 10)))
+      ) {
+        sendApiError(res, req, 400, ApiErrors.staffEmailExists);
+        return;
+      }
       updates.push(`${quoteMenuStaffIdent(meta.emailKey)} = @email`);
-      request.input("email", sql.NVarChar, email ? email.toLowerCase() : null);
+      request.input("email", sql.NVarChar, normalizedEmail);
     }
     if (password !== undefined && meta.passwordKey) {
       updates.push(`${quoteMenuStaffIdent(meta.passwordKey)} = @password`);

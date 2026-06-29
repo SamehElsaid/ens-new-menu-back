@@ -130,14 +130,6 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
         return;
       }
 
-      if (matchedRow) {
-        sendApiError(res, req, 409, {
-          en: "This email is linked to multiple restaurants. Contact your manager.",
-          ar: "هذا البريد مرتبط بعدة مطاعم. تواصل مع المدير.",
-        });
-        return;
-      }
-
       matchedRow = staff;
     }
 

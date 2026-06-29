@@ -12,7 +12,10 @@ import branchRoutes from "./branch.routes";
 import menuCustomizationRoutes from "./menuCustomization.routes";
 import menuStaffRoutes from "./menuStaff.routes";
 import menuTablesRoutes from "./menuTables.routes";
-import { resolveMenuParam, resolveMenuIdRouteParam } from "../middleware/resolveMenuIdentifier.middleware";
+import {
+  resolveMenuParam,
+  resolveMenuIdRouteParam,
+} from "../middleware/resolveMenuIdentifier.middleware";
 
 const router = Router();
 
@@ -80,10 +83,7 @@ router.get(
 // GET /api/menus/:menuId/activity-logs/:id — single activity log entry
 router.get(
   "/:menuId/activity-logs/:id",
-  validate([
-    param("menuId").isInt(),
-    param("id").isInt(),
-  ]),
+  validate([param("menuId").isInt(), param("id").isInt()]),
   menuActivityLogController.getMenuActivityLogByIdHandler,
 );
 

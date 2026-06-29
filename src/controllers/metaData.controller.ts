@@ -4,6 +4,8 @@ import {
   getMetaDataByPageName,
   createMetaData,
   patchMetaData,
+  updateMetaData,
+  deleteMetaDataByPageName,
 } from "../services/metaData.service";
 import { ApiError } from "../middleware/errorHandler";
 import { logger } from "../utils/logger";
@@ -48,6 +50,29 @@ function handleApiError(res: Response, error: unknown, fallbackMessage: string):
   res.status(500).json({ success: false, message: fallbackMessage });
 }
 
+function parsePageNameParam(res: Response, raw: unknown): string | null {
+  const pageName = String(raw ?? "").trim();
+  if (!pageName) {
+    res.status(400).json({ success: false, message: "pageName is required" });
+    return null;
+  }
+  return pageName;
+}
+
+function parseContentFields(
+  res: Response,
+  body: Record<string, unknown>,
+): Record<(typeof META_DATA_FIELDS)[number], string> | null {
+  const result = {} as Record<(typeof META_DATA_FIELDS)[number], string>;
+
+  for (const field of META_DATA_FIELDS) {
+    if (!requireStringField(res, body[field], field)) return null;
+    result[field] = String(body[field]).trim();
+  }
+
+  return result;
+}
+
 /** GET /api/metaData */
 export async function getMetaDataHandler(
   req: Request,
@@ -71,11 +96,8 @@ export async function getMetaDataByPageNameHandler(
   res: Response,
 ): Promise<void> {
   try {
-    const pageName = String(req.params.pageName ?? "").trim();
-    if (!pageName) {
-      res.status(400).json({ success: false, message: "pageName is required" });
-      return;
-    }
+    const pageName = parsePageNameParam(res, req.params.pageName);
+    if (!pageName) return;
 
     const data = await getMetaDataByPageName(pageName);
     if (!data) {
@@ -97,18 +119,12 @@ export async function postMetaDataHandler(
   try {
     if (!requireStringField(res, req.body.pageName, "pageName")) return;
 
-    for (const field of META_DATA_FIELDS) {
-      if (!requireStringField(res, req.body[field], field)) return;
-    }
+    const fields = parseContentFields(res, req.body);
+    if (!fields) return;
 
     const data = await createMetaData({
       pageName: String(req.body.pageName).trim(),
-      titleAr: String(req.body.titleAr).trim(),
-      titleEn: String(req.body.titleEn).trim(),
-      descriptionAr: String(req.body.descriptionAr).trim(),
-      descriptionEn: String(req.body.descriptionEn).trim(),
-      keywordsAr: String(req.body.keywordsAr).trim(),
-      keywordsEn: String(req.body.keywordsEn).trim(),
+      ...fields,
     });
 
     res
@@ -119,17 +135,43 @@ export async function postMetaDataHandler(
   }
 }
 
+/** PUT /api/metaData/:pageName */
+export async function putMetaDataHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const pageName = parsePageNameParam(res, req.params.pageName);
+    if (!pageName) return;
+
+    const fields = parseContentFields(res, req.body);
+    if (!fields) return;
+
+    const data = await updateMetaData(pageName, fields);
+
+    if (!data) {
+      res.status(404).json({ success: false, message: "Not found" });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: "Meta data updated successfully",
+      data,
+    });
+  } catch (error) {
+    handleApiError(res, error, "Failed to update meta data");
+  }
+}
+
 /** PATCH /api/metaData/:pageName */
 export async function patchMetaDataHandler(
   req: Request,
   res: Response,
 ): Promise<void> {
   try {
-    const pageName = String(req.params.pageName ?? "").trim();
-    if (!pageName) {
-      res.status(400).json({ success: false, message: "pageName is required" });
-      return;
-    }
+    const pageName = parsePageNameParam(res, req.params.pageName);
+    if (!pageName) return;
 
     const updates: Record<string, string> = {};
     for (const field of META_DATA_FIELDS) {
@@ -158,5 +200,26 @@ export async function patchMetaDataHandler(
     });
   } catch (error) {
     handleApiError(res, error, "Failed to update meta data");
+  }
+}
+
+/** DELETE /api/metaData/:pageName */
+export async function deleteMetaDataHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const pageName = parsePageNameParam(res, req.params.pageName);
+    if (!pageName) return;
+
+    const deleted = await deleteMetaDataByPageName(pageName);
+    if (!deleted) {
+      res.status(404).json({ success: false, message: "Not found" });
+      return;
+    }
+
+    res.json({ success: true, message: "Meta data deleted successfully" });
+  } catch (error) {
+    handleApiError(res, error, "Failed to delete meta data");
   }
 }

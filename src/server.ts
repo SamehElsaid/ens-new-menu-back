@@ -52,7 +52,9 @@ import {
   getMetaDataHandler,
   getMetaDataByPageNameHandler,
   postMetaDataHandler,
+  putMetaDataHandler,
   patchMetaDataHandler,
+  deleteMetaDataHandler,
 } from "./controllers/metaData.controller";
 import { requireAdmin } from "./middleware/auth.middleware";
 
@@ -207,7 +209,9 @@ app.delete(
   deleteSearchInformationHandler,
 );
 app.post("/api/metaData", requireAdmin, postMetaDataHandler);
+app.put("/api/metaData/:pageName", requireAdmin, putMetaDataHandler);
 app.patch("/api/metaData/:pageName", requireAdmin, patchMetaDataHandler);
+app.delete("/api/metaData/:pageName", requireAdmin, deleteMetaDataHandler);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/structure", structureRoutes);
 app.use("/api", adsRoutes);
