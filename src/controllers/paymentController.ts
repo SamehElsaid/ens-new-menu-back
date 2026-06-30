@@ -167,6 +167,7 @@ export const handlePaymentRedirect = asyncHandler(
     if (PaymentService.isBrowserRedirectPaid(status as string)) {
       try {
         await PaymentService.syncProYearlyFromPaymentId(payment.id);
+        await PaymentService.syncExtraMenusFromPaymentId(payment.id);
         subscriptionSynced = true;
       } catch (e) {
         console.error("syncProYearlyFromPaymentId (post-redirect):", e);
@@ -231,7 +232,8 @@ async function initiateProSubscriptionPayment(
   if (uid == null) {
     throw new ApiError(401, "Authentication required");
   }
-  const { name, email, mobile, currency, redirectUrl, voucherCode } = req.body;
+  const { name, email, mobile, currency, redirectUrl, voucherCode, renew, extraMenus } =
+    req.body;
   const nameT = String(name ?? "").trim();
   const mobileT = String(mobile ?? "").trim();
   if (!nameT || !mobileT) {
@@ -252,6 +254,10 @@ async function initiateProSubscriptionPayment(
     currency,
     redirectUrl: redirectUrl ? String(redirectUrl).trim() : undefined,
     voucherCode: voucherT,
+    renew: renew === true,
+    ...(renew === true && extraMenus !== undefined && extraMenus !== null
+      ? { extraMenus: Math.floor(Number(extraMenus)) }
+      : {}),
   };
 
   const result =
@@ -289,5 +295,55 @@ export const initiateProYearlyPayment = asyncHandler(
 export const initiateProMonthlyPayment = asyncHandler(
   async (req: AuthRequest, res: Response, next: NextFunction) => {
     await initiateProSubscriptionPayment(req, res, "monthly");
+  },
+);
+
+/** Start EasyKash checkout for extra Pro menu slots. */
+export const initiateExtraMenusPayment = asyncHandler(
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    const uid = req.user?.userId;
+    if (uid == null) {
+      throw new ApiError(401, "Authentication required");
+    }
+    const { name, email, mobile, quantity, currency, redirectUrl } = req.body;
+    const nameT = String(name ?? "").trim();
+    const mobileT = String(mobile ?? "").trim();
+    if (!nameT || !mobileT) {
+      throw new ApiError(
+        400,
+        "name and mobile are required",
+        true,
+        "الاسم والهاتف مطلوبان",
+      );
+    }
+
+    const result = await PaymentService.initiateExtraMenusPurchase(
+      uid,
+      Number(quantity),
+      {
+        customer_name: nameT,
+        customer_email: email ? String(email).trim() : undefined,
+        customer_phone: mobileT,
+        currency,
+        redirectUrl: redirectUrl ? String(redirectUrl).trim() : undefined,
+      },
+    );
+
+    res.json({
+      success: true,
+      data: {
+        redirectUrl: result.paymentUrl || null,
+        order_id: result.orderId,
+        paymentId: result.paymentId,
+        amount: result.amount,
+        quantity: result.quantity,
+        pricePerMenu: result.pricePerMenu,
+        subscriptionDaysRemaining: result.subscriptionDaysRemaining,
+        subscriptionMonthsRemaining: result.subscriptionMonthsRemaining,
+        extraMenuMonthlyPrice: result.extraMenuMonthlyPrice,
+        currency: PRO_YEARLY_CURRENCY,
+      },
+      message: "Extra menus payment initiated successfully",
+    });
   },
 );

@@ -35,6 +35,8 @@ export const subscriptionProYearlySchema: ValidationChain[] = [
   body("currency").optional().isString().trim(),
   body("redirectUrl").optional().isString().trim(),
   body("voucherCode").optional().isString().trim(),
+  body("renew").optional().isBoolean(),
+  body("extraMenus").optional().isInt({ min: 0, max: 100 }),
 ];
 
 export const voucherValidateSchema: ValidationChain[] = [
@@ -73,6 +75,22 @@ export const adminVoucherSchema: ValidationChain[] = [
   body("validFrom").optional().isISO8601(),
   body("validUntil").optional().isISO8601(),
   body("description").optional().isString().trim(),
+];
+
+/** Pro plan — purchase additional menu slots. */
+export const extraMenusPurchaseSchema: ValidationChain[] = [
+  body("name").isString().notEmpty().trim().withMessage("name is required"),
+  body("email").optional().isString().trim(),
+  body("mobile")
+    .isString()
+    .notEmpty()
+    .trim()
+    .withMessage("mobile is required"),
+  body("quantity")
+    .isInt({ min: 1, max: 50 })
+    .withMessage("quantity must be between 1 and 50"),
+  body("currency").optional().isString().trim(),
+  body("redirectUrl").optional().isString().trim(),
 ];
 
 export function validate(validations: ValidationChain[]) {

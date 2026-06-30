@@ -858,6 +858,14 @@ export const ApiErrors = {
     en: "Failed to update user subscription",
     ar: "فشل تحديث اشتراك المستخدم",
   },
+  invalidExtraMenusCount: {
+    en: "Extra menus count must be between 0 and 100",
+    ar: "عدد المنيوهات الإضافية يجب أن يكون بين 0 و 100",
+  },
+  failedUpdateExtraMenus: {
+    en: "Failed to update extra menus",
+    ar: "فشل تحديث المنيوهات الإضافية",
+  },
   failedApplyFreePlanLimits: {
     en: "Failed to apply free plan limits",
     ar: "فشل تطبيق حدود الخطة المجانية",

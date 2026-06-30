@@ -12,6 +12,10 @@ import { ApiErrors } from "../i18n/apiErrors";
 import { MAX_FCM_TOKEN_LEN, addUserFcmToken, clearUserFcmTokens } from "../services/fcmPush.service";
 import { SubscriptionDowngradeService } from "../services/subscriptionDowngrade.service";
 import { PaymentService } from "../services/paymentService";
+import { EXTRA_MENU_PRICE_EGP } from "../config/constants";
+import { ensureSubscriptionExtrasSchema } from "../schemas/subscriptionExtras.schema";
+import { getExtraMenuPricingFromEndDate } from "../services/extraMenus.service";
+import { getProRenewalInfo } from "../services/subscriptionRenewal.service";
 import { getActivePlansForDisplay } from "../services/plans.service";
 import { ensureRestaurantNameSchema } from "../schemas/restaurantName.schema";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
@@ -474,12 +478,14 @@ export async function getSubscription(
 ): Promise<void> {
   try {
     const userId = req.user!.userId;
+    await ensureSubscriptionExtrasSchema();
     const pool = await getPool();
 
     const result = await pool.request().input("userId", sql.Int, userId).query(`
         SELECT TOP 1
           s.id, s.userId, s.planId, s.status, s.startDate, s.endDate, 
           s.billingCycle, s.amount, s.createdAt,
+          ISNULL(s.extraMenus, 0) AS extraMenus,
           p.name as planName, p.maxMenus, p.maxProductsPerMenu
         FROM Subscriptions s
         LEFT JOIN Plans p ON s.planId = p.id
@@ -490,8 +496,7 @@ export async function getSubscription(
       `);
 
     if (result.recordset.length === 0) {
-      // Return default free subscription if no active subscription found
-      // Get free plan limits
+      const renewalInfo = await getProRenewalInfo(userId);
       const freePlanResult = await pool.request().query(`
         SELECT maxMenus, maxProductsPerMenu
         FROM Plans
@@ -507,11 +512,21 @@ export async function getSubscription(
           plan: "Free",
           planName: "Free",
           status: "active",
-          billingCycle: "free",
+          billingCycle: renewalInfo.billingCycle ?? "free",
           startDate: null,
-          endDate: null,
+          endDate: renewalInfo.extendFromEndDate,
           amount: 0,
           maxMenus: freePlan.maxMenus,
+          extraMenus: renewalInfo.extraMenus,
+          effectiveMaxMenus: freePlan.maxMenus,
+          extraMenuPrice: EXTRA_MENU_PRICE_EGP,
+          subscriptionDaysRemaining: renewalInfo.daysRemaining,
+          subscriptionMonthsRemaining: 0,
+          extraMenuProratedPrice: EXTRA_MENU_PRICE_EGP,
+          extraMenuShortPeriodWarning: false,
+          canRenewPro: renewalInfo.canRenew,
+          renewExtendsFromEndDate: renewalInfo.extendFromEndDate,
+          isInGracePeriod: renewalInfo.isInGracePeriod,
           maxProductsPerMenu: freePlan.maxProductsPerMenu,
         },
       });
@@ -519,10 +534,23 @@ export async function getSubscription(
     }
 
     const subscription = result.recordset[0];
+    const maxMenus = Number(subscription.maxMenus ?? 1);
+    const extraMenus = Number(subscription.extraMenus ?? 0);
+    const extraMenuPricing = getExtraMenuPricingFromEndDate(subscription.endDate);
+    const renewalInfo = await getProRenewalInfo(userId);
+    const isPro =
+      String(subscription.planName ?? "").trim().toLowerCase() === "pro";
     res.json({
       subscription: {
         ...subscription,
         plan: subscription.planName || "Free",
+        extraMenus,
+        effectiveMaxMenus: maxMenus + extraMenus,
+        extraMenuPrice: EXTRA_MENU_PRICE_EGP,
+        ...extraMenuPricing,
+        canRenewPro: isPro && renewalInfo.canRenew,
+        renewExtendsFromEndDate: renewalInfo.extendFromEndDate,
+        isInGracePeriod: renewalInfo.isInGracePeriod,
       },
     });
   } catch (error) {
@@ -560,6 +588,7 @@ export async function recoverSubscriptionPayment(
           AND (
             p.customer_reference LIKE N'%"kind":"pro_monthly"%'
             OR p.customer_reference LIKE N'%"kind":"pro_yearly"%'
+            OR p.customer_reference LIKE N'%"kind":"extra_menus"%'
           )
           ${orderFilter}
         ORDER BY p.created_at DESC
@@ -587,6 +616,7 @@ export async function recoverSubscriptionPayment(
     }
 
     await PaymentService.syncProYearlyFromPaymentId(payment.id);
+    await PaymentService.syncExtraMenusFromPaymentId(payment.id);
 
     res.json({
       message: "Subscription recovery attempted",

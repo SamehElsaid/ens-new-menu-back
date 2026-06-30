@@ -152,6 +152,74 @@ export class SubscriptionDowngradeService {
   }
 
   /**
+   * Expire paid subscriptions past end date (or legacy grace period) and move user to Free.
+   * Returns number of subscriptions processed.
+   */
+  static async expireAndDowngradePaidSubscriptionsForUser(
+    userId: number,
+  ): Promise<number> {
+    try {
+      const pool = await getPool();
+
+      const result = await pool.request().input("userId", sql.Int, userId).query(`
+        SELECT s.id as subscriptionId, p.name as planName
+        FROM Subscriptions s
+        JOIN Plans p ON s.planId = p.id
+        WHERE s.userId = @userId
+          AND p.name != 'Free'
+          AND (
+            (s.status = 'active' AND s.endDate IS NOT NULL AND s.endDate < GETDATE())
+            OR (s.status = 'expired' AND s.gracePeriodEndDate IS NOT NULL)
+          )
+      `);
+
+      if (result.recordset.length === 0) {
+        return 0;
+      }
+
+      const freePlanResult = await pool.request().query(`
+        SELECT id FROM Plans WHERE name = 'Free'
+      `);
+
+      if (freePlanResult.recordset.length === 0) {
+        logger.error("Free plan not found");
+        return 0;
+      }
+
+      const freePlanId = freePlanResult.recordset[0].id;
+
+      for (const subscription of result.recordset) {
+        await pool
+          .request()
+          .input("subscriptionId", sql.Int, subscription.subscriptionId)
+          .input("freePlanId", sql.Int, freePlanId)
+          .query(`
+            UPDATE Subscriptions
+            SET planId = @freePlanId,
+                billingCycle = 'free',
+                status = 'active',
+                startDate = GETDATE(),
+                endDate = NULL,
+                gracePeriodStartDate = NULL,
+                gracePeriodEndDate = NULL,
+                notificationSent = 0,
+                expiryNotificationSent = 0
+            WHERE id = @subscriptionId
+          `);
+      }
+
+      await this.handleDowngradeToFree(userId);
+      return result.recordset.length;
+    } catch (error) {
+      logger.error(
+        `Error expiring/downgrading subscriptions for user ${userId}:`,
+        error,
+      );
+      return 0;
+    }
+  }
+
+  /**
    * Apply downgrade immediately when subscription expires
    */
   static async onSubscriptionExpire(subscriptionId: number, userId: number): Promise<void> {

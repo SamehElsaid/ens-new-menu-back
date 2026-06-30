@@ -12,6 +12,8 @@ export interface NotificationData {
   type:
     | "subscription_created"
     | "subscription_expiring"
+    | "subscription_expiring_5d"
+    | "subscription_expiring_1d"
     | "subscription_expired"
     | "downgraded_to_free";
   title: string;
@@ -231,12 +233,13 @@ export async function notifySubscriptionCreated(
 }
 
 /**
- * Create subscription expiring notification (2 days before)
+ * Warn user N days before subscription end (5 days or 1 day).
  */
-export async function notifySubscriptionExpiring(
+export async function notifySubscriptionExpiringInDays(
   userId: number,
   planName: string,
   endDate: Date,
+  daysRemaining: number,
 ): Promise<void> {
   const formattedDate = endDate.toLocaleDateString("en-US", {
     year: "numeric",
@@ -250,48 +253,55 @@ export async function notifySubscriptionExpiring(
     day: "numeric",
   });
 
+  const isOneDay = daysRemaining <= 1;
+
   await createNotification({
     userId,
-    type: "subscription_expiring",
-    title: "Your Subscription is Expiring Soon",
-    titleAr: "اشتراكك على وشك الانتهاء",
-    message: `Your ${planName} subscription will expire on ${formattedDate}. Renew now to continue enjoying premium features without interruption.`,
-    messageAr: `سينتهي اشتراكك في خطة ${planName} في ${formattedDateAr}. جدد الآن للاستمرار في الاستفادة من المميزات المتقدمة دون انقطاع.`,
-    metadata: { planName, endDate: endDate.toISOString() },
+    type: isOneDay ? "subscription_expiring_1d" : "subscription_expiring_5d",
+    title: isOneDay
+      ? "Your Subscription Expires Tomorrow"
+      : "5 Days Left on Your Subscription",
+    titleAr: isOneDay
+      ? "اشتراكك ينتهي غداً"
+      : "تبقى 5 أيام على اشتراكك",
+    message: isOneDay
+      ? `Your ${planName} subscription expires tomorrow (${formattedDate}). Renew now to keep Pro features without interruption.`
+      : `Your ${planName} subscription expires in 5 days (${formattedDate}). Renew now to continue enjoying premium features.`,
+    messageAr: isOneDay
+      ? `ينتهي اشتراكك في خطة ${planName} غداً (${formattedDateAr}). جدّد الآن للاستمرار في مميزات Pro دون انقطاع.`
+      : `تبقى 5 أيام على انتهاء اشتراكك في خطة ${planName} (${formattedDateAr}). جدّد الآن للاستمرار في الاستفادة من المميزات المتقدمة.`,
+    metadata: {
+      planName,
+      endDate: endDate.toISOString(),
+      daysRemaining,
+    },
   });
 }
 
+/** @deprecated Use notifySubscriptionExpiringInDays */
+export async function notifySubscriptionExpiring(
+  userId: number,
+  planName: string,
+  endDate: Date,
+): Promise<void> {
+  await notifySubscriptionExpiringInDays(userId, planName, endDate, 2);
+}
+
 /**
- * Create subscription expired notification (grace period started)
+ * Create subscription expired notification
  */
 export async function notifySubscriptionExpired(
   userId: number,
   planName: string,
-  gracePeriodEndDate: Date,
 ): Promise<void> {
-  const formattedDate = gracePeriodEndDate.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
-  const formattedDateAr = gracePeriodEndDate.toLocaleDateString("ar-SA", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
   await createNotification({
     userId,
     type: "subscription_expired",
-    title: "Subscription Expired - Grace Period Active",
-    titleAr: "انتهى الاشتراك - فترة سماح نشطة",
-    message: `Your ${planName} subscription has expired. You have a 2-day grace period until ${formattedDate} to renew before being downgraded to the Free plan.`,
-    messageAr: `لقد انتهى اشتراكك في خطة ${planName}. لديك فترة سماح لمدة يومين حتى ${formattedDateAr} للتجديد قبل التحويل إلى الخطة المجانية.`,
-    metadata: {
-      planName,
-      gracePeriodEndDate: gracePeriodEndDate.toISOString(),
-    },
+    title: "Subscription Expired",
+    titleAr: "انتهى الاشتراك",
+    message: `Your ${planName} subscription has expired. Your account has been moved to the Free plan. Renew anytime to restore full access.`,
+    messageAr: `انتهى اشتراكك في خطة ${planName} وتم تحويل حسابك إلى الخطة المجانية. يمكنك التجديد في أي وقت لاستعادة الوصول الكامل.`,
+    metadata: { planName },
   });
 }
 

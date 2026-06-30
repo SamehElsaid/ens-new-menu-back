@@ -19,6 +19,7 @@ import {
   getAllAdmins,
   getAdAnalytics,
   updateUserSubscription,
+  updateUserExtraMenus,
   getPlansForSubscription,
   applyFreePlanLimits,
   patchAdminPermissions,
@@ -116,6 +117,7 @@ router.get("/users/:id", getUserDetails);
 router.put("/users/:id/suspend", toggleUserSuspension);
 router.put("/users/:id/password", adminSetUserPassword);
 router.put("/users/:id/subscription", updateUserSubscription);
+router.put("/users/:id/extra-menus", updateUserExtraMenus);
 router.post("/users/:id/apply-free-limits", applyFreePlanLimits);
 router.post("/users/:id/feature-on-homepage", featureUserOnHomepage);
 router.delete("/users/:id/feature-on-homepage", unfeatureUserOnHomepage);

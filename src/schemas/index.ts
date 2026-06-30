@@ -22,6 +22,7 @@ import { ensureMetaDataSchema } from "./metaData.schema";
 import { ensureVoucherSchema } from "./voucher.schema";
 import { migrateDeprecatedMenuThemes } from "./deprecatedMenuThemes.schema";
 import { ensureDomainTransferSchema } from "./domainTransfer.schema";
+import { ensureSubscriptionExtrasSchema } from "./subscriptionExtras.schema";
 
 export { ensureAdminActivityLogSchema } from "./adminActivityLog.schema";
 export { ensureAdminCustomerSchema } from "./adminCustomer.schema";
@@ -46,6 +47,7 @@ export { ensureMetaDataSchema } from "./metaData.schema";
 export { ensureVoucherSchema } from "./voucher.schema";
 export { migrateDeprecatedMenuThemes } from "./deprecatedMenuThemes.schema";
 export { ensureDomainTransferSchema } from "./domainTransfer.schema";
+export { ensureSubscriptionExtrasSchema } from "./subscriptionExtras.schema";
 
 /** Runs all idempotent DB schema migrations on startup (after pool is connected). */
 export async function ensureDatabaseSchemas(): Promise<void> {
@@ -73,6 +75,7 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "menuChatbot", run: ensureMenuChatbotSchema },
     { name: "deprecatedMenuThemes", run: migrateDeprecatedMenuThemes },
     { name: "domainTransfer", run: ensureDomainTransferSchema },
+    { name: "subscriptionExtras", run: ensureSubscriptionExtrasSchema },
   ];
 
   for (const step of steps) {

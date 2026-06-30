@@ -6,6 +6,7 @@ import {
   getPaymentStatus,
   initiateProMonthlyPayment,
   initiateProYearlyPayment,
+  initiateExtraMenusPayment,
 } from "../controllers/paymentController";
 
 import { getPool, sql } from "../config/database";
@@ -15,6 +16,7 @@ import {
   initiatePaymentSchema,
   paymentCallbackSchema,
   subscriptionProYearlySchema,
+  extraMenusPurchaseSchema,
 } from "../middleware/validation";
 import { PaymentService } from "../services/paymentService";
 import { isPaymentTestRoutesEnabled } from "../utils/devFlags";
@@ -52,6 +54,12 @@ router.post(
   requireAuth,
   validate(subscriptionProYearlySchema),
   initiateProMonthlyPayment,
+);
+router.post(
+  "/subscription/extra-menus/initiate",
+  requireAuth,
+  validate(extraMenusPurchaseSchema),
+  initiateExtraMenusPayment,
 );
 router.post(
   "/easykash/callback",

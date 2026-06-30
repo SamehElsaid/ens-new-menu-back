@@ -10,7 +10,8 @@ export type AdminActivityAction =
   | "user_deleted"
   | "user_soft_deleted"
   | "user_restored"
-  | "user_subscription_updated";
+  | "user_subscription_updated"
+  | "user_extra_menus_updated";
 
 export async function logAdminActivity(params: {
   actorAdminId: number | null;

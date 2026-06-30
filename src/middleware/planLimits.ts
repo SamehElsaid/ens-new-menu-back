@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { getPool, sql } from "../config/database";
 import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
 import { canUserBulkImport } from "../services/bulkImportUsage.service";
+import { getActiveSubscriptionLimits } from "../services/extraMenus.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 
@@ -12,28 +13,16 @@ export async function checkMenuLimit(
 ): Promise<void> {
   try {
     const userId = req.user!.userId;
-    const pool = await getPool();
+    const limits = await getActiveSubscriptionLimits(userId);
 
-    // Get user's subscription (get the most recent active subscription by id)
-    const subResult = await pool.request().input("userId", sql.Int, userId)
-      .query(`
-        SELECT TOP 1 s.planId, p.maxMenus, p.name as planName
-        FROM Subscriptions s
-        JOIN Plans p ON s.planId = p.id
-        WHERE s.userId = @userId 
-          AND s.status = 'active' 
-          AND (s.endDate IS NULL OR s.endDate > GETDATE())
-        ORDER BY s.id DESC
-      `);
-
-    if (subResult.recordset.length === 0) {
+    if (!limits) {
       sendApiError(res, req, 403, ApiErrors.noActiveSubscription);
       return;
     }
 
-    const { maxMenus, planName } = subResult.recordset[0];
+    const { effectiveMaxMenus, maxMenus, extraMenus, planName, isPro } = limits;
 
-    // Count user's active menus only (inactive menus don't count towards limit)
+    const pool = await getPool();
     const countResult = await pool
       .request()
       .input("userId", sql.Int, userId)
@@ -43,18 +32,22 @@ export async function checkMenuLimit(
 
     const currentCount = countResult.recordset[0].count;
 
-    if (currentCount >= maxMenus) {
-      const en = `You have reached the maximum number of menus (${maxMenus}) for your ${planName} plan.`;
-      const ar = `لقد وصلت للحد الأقصى من القوائم (${maxMenus}) لخطة ${planName}.`;
+    if (currentCount >= effectiveMaxMenus) {
+      const en = `You have reached the maximum number of menus (${effectiveMaxMenus}) for your ${planName} plan.`;
+      const ar = `لقد وصلت للحد الأقصى من القوائم (${effectiveMaxMenus}) لخطة ${planName}.`;
       sendApiError(
         res,
         req,
         403,
         { en, ar },
         {
+          code: "MENU_LIMIT_REACHED",
           currentCount,
           maxMenus,
+          extraMenus,
+          effectiveMaxMenus,
           planName,
+          canBuyExtraMenus: isPro,
         },
       );
       return;
