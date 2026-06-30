@@ -73,7 +73,7 @@ export function formatAuthUserProfile(profile: {
       planName: profile.planName ?? 'Free',
       billingCycle: profile.billingCycle ?? 'free',
       maxMenus: profile.maxMenus ?? 1,
-      maxProductsPerMenu: profile.maxProductsPerMenu ?? 50,
+      maxProductsPerMenu: profile.maxProductsPerMenu ?? -1,
     },
   };
 }

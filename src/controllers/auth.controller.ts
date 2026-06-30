@@ -330,7 +330,7 @@ export async function login(req: Request, res: Response): Promise<void> {
       planName: profile?.planName ?? "Free",
       billingCycle: profile?.billingCycle ?? "free",
       maxMenus: profile?.maxMenus ?? 1,
-      maxProductsPerMenu: profile?.maxProductsPerMenu ?? 50,
+      maxProductsPerMenu: profile?.maxProductsPerMenu ?? -1,
     };
 
     // Generate tokens

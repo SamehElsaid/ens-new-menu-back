@@ -30,6 +30,12 @@ export class SubscriptionDowngradeService {
       const freePlan = freePlanResult.recordset[0];
       const { maxMenus } = freePlan;
 
+      await pool.request().input("userId", sql.Int, userId).query(`
+        UPDATE Subscriptions
+        SET extraMenus = 0
+        WHERE userId = @userId AND status = 'active'
+      `);
+
       // Get user's current menus
       const menusResult = await pool.request()
         .input('userId', sql.Int, userId)
@@ -44,7 +50,30 @@ export class SubscriptionDowngradeService {
 
       logger.info(`User ${userId} has ${userMenus.length} menus, free plan allows ${maxMenus}`);
 
-      // If user has more menus than allowed in free plan
+      const activeMenus = userMenus.filter(
+        (menu: { isActive: boolean }) => menu.isActive,
+      );
+
+      if (activeMenus.length > maxMenus) {
+        const menusToDeactivate = activeMenus.slice(maxMenus);
+
+        for (const menu of menusToDeactivate) {
+          await pool
+            .request()
+            .input("menuId", sql.Int, menu.id)
+            .query(`
+              UPDATE Menus
+              SET isActive = 0
+              WHERE id = @menuId
+            `);
+
+          logger.info(
+            `Deactivated menu ${menu.id} for user ${userId} (exceeded free plan active limit)`,
+          );
+        }
+      }
+
+      // Deactivate menus beyond the free plan slot count (by creation order)
       if (userMenus.length > maxMenus) {
         // Keep the oldest menus active, deactivate the rest
         const menusToKeep = userMenus.slice(0, maxMenus);
@@ -200,6 +229,7 @@ export class SubscriptionDowngradeService {
                 status = 'active',
                 startDate = GETDATE(),
                 endDate = NULL,
+                extraMenus = 0,
                 gracePeriodStartDate = NULL,
                 gracePeriodEndDate = NULL,
                 notificationSent = 0,

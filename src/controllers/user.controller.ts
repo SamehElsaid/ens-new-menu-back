@@ -505,7 +505,7 @@ export async function getSubscription(
       `);
       const freePlan = freePlanResult.recordset[0] || {
         maxMenus: 1,
-        maxProductsPerMenu: 20,
+        maxProductsPerMenu: -1,
       };
 
       res.json({

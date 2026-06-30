@@ -20,6 +20,7 @@ import { generateMenuUuid } from "../utils/menuIdentifier";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
 import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
 import { normalizeMenuTheme } from "../constants/menuThemes";
+import { enforceActiveMenuLimitOnActivation } from "../middleware/planLimits";
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
@@ -428,6 +429,15 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
 
     const touched: string[] = [];
     await ensureMenuChatbotSchema();
+
+    if (
+      isActive === true &&
+      req.user!.role !== ROLES.ADMIN &&
+      !(await enforceActiveMenuLimitOnActivation(req, res, userId, menuId))
+    ) {
+      return;
+    }
+
     await executeTransaction(async (transaction) => {
       // Verify ownership
       const checkResult = await transaction
@@ -671,6 +681,16 @@ export async function toggleMenuStatus(
       return;
     }
 
+    const menuId = parseInt(id);
+
+    if (
+      isActive === true &&
+      userRole !== ROLES.ADMIN &&
+      !(await enforceActiveMenuLimitOnActivation(req, res, userId, menuId))
+    ) {
+      return;
+    }
+
     const pool = await getPool();
 
     // Admin can update any menu, regular users can only update their own
@@ -692,7 +712,7 @@ export async function toggleMenuStatus(
     // Update without OUTPUT (because of triggers)
     const result = await pool
       .request()
-      .input("id", sql.Int, parseInt(id))
+      .input("id", sql.Int, menuId)
       .input("userId", sql.Int, userId)
       .input("isActive", sql.Bit, isActive)
       .query(query);

@@ -6,6 +6,91 @@ import { getActiveSubscriptionLimits } from "../services/extraMenus.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 
+export type ActiveMenuLimitCheck = {
+  allowed: boolean;
+  effectiveMaxMenus: number;
+  activeCount: number;
+  maxMenus: number;
+  extraMenus: number;
+  planName: string;
+  isPro: boolean;
+};
+
+/** Whether activating `menuId` would exceed the user's active-menu allowance. */
+export async function checkActiveMenuLimitForActivation(
+  userId: number,
+  menuId: number,
+): Promise<ActiveMenuLimitCheck> {
+  const limits = await getActiveSubscriptionLimits(userId);
+  const pool = await getPool();
+  const countResult = await pool
+    .request()
+    .input("userId", sql.Int, userId)
+    .input("menuId", sql.Int, menuId)
+    .query(`
+      SELECT COUNT(*) AS count
+      FROM Menus
+      WHERE userId = @userId AND isActive = 1 AND id <> @menuId
+    `);
+
+  const otherActiveCount = Number(countResult.recordset[0]?.count ?? 0);
+
+  if (!limits) {
+    return {
+      allowed: false,
+      effectiveMaxMenus: 1,
+      activeCount: otherActiveCount,
+      maxMenus: 1,
+      extraMenus: 0,
+      planName: "Free",
+      isPro: false,
+    };
+  }
+
+  return {
+    allowed: otherActiveCount < limits.effectiveMaxMenus,
+    effectiveMaxMenus: limits.effectiveMaxMenus,
+    activeCount: otherActiveCount,
+    maxMenus: limits.maxMenus,
+    extraMenus: limits.extraMenus,
+    planName: limits.planName,
+    isPro: limits.isPro,
+  };
+}
+
+/** Reject menu activation when the active-menu limit is already reached. */
+export async function enforceActiveMenuLimitOnActivation(
+  req: Request,
+  res: Response,
+  userId: number,
+  menuId: number,
+): Promise<boolean> {
+  const check = await checkActiveMenuLimitForActivation(userId, menuId);
+
+  if (check.allowed) {
+    return true;
+  }
+
+  const en = `You have reached the maximum number of active menus (${check.effectiveMaxMenus}) for your ${check.planName} plan.`;
+  const ar = `لقد وصلت للحد الأقصى من القوائم النشطة (${check.effectiveMaxMenus}) لخطة ${check.planName}.`;
+  sendApiError(
+    res,
+    req,
+    403,
+    { en, ar },
+    {
+      code: "ACTIVE_MENU_LIMIT_REACHED",
+      currentCount: check.activeCount,
+      maxMenus: check.maxMenus,
+      extraMenus: check.extraMenus,
+      effectiveMaxMenus: check.effectiveMaxMenus,
+      planName: check.planName,
+      canBuyExtraMenus: check.isPro,
+    },
+  );
+  return false;
+}
+
 export async function checkMenuLimit(
   req: Request,
   res: Response,
