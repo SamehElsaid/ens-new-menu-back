@@ -4,6 +4,7 @@ import {
   EXTRA_MENU_PRICE_EGP,
 } from "../config/constants";
 import { ensureSubscriptionExtrasSchema } from "../schemas/subscriptionExtras.schema";
+import { resolveExtraMenuUnitPrice } from "./subscriptionPricing.service";
 
 export { EXTRA_MENU_PRICE_EGP, EXTRA_MENU_BILLING_DAYS };
 
@@ -50,34 +51,34 @@ export function getRemainingSubscriptionMonths(
   return Math.max(1, Math.ceil(days / EXTRA_MENU_BILLING_DAYS));
 }
 
-/** One extra menu: full month price (20 EGP), regardless of days left. */
-export function getExtraMenuPurchaseUnitPrice(): number {
-  return EXTRA_MENU_PRICE_EGP;
+/** One extra menu: full month price from plan settings. */
+export function getExtraMenuPurchaseUnitPrice(
+  unitPrice: number = EXTRA_MENU_PRICE_EGP,
+): number {
+  return unitPrice;
 }
 
-export function getExtraMenusPurchaseAmount(quantity: number): number {
-  return Math.max(0, quantity) * EXTRA_MENU_PRICE_EGP;
+export function getExtraMenusPurchaseAmount(
+  quantity: number,
+  unitPrice: number = EXTRA_MENU_PRICE_EGP,
+): number {
+  return Math.max(0, quantity) * unitPrice;
 }
 
-export function hasExtraMenuShortPeriodWarning(
-  remainingDays: number,
-): boolean {
-  return remainingDays > 0 && remainingDays < EXTRA_MENU_BILLING_DAYS;
-}
-
-/** Extra menu add-on cost added to Pro renewal checkout (full next billing period). */
 export function getExtraMenusRenewalAmount(
   extraMenus: number,
   billing: "monthly" | "yearly",
+  unitPrice: number = EXTRA_MENU_PRICE_EGP,
 ): number {
   if (extraMenus <= 0) return 0;
   const multiplier = billing === "yearly" ? 12 : 1;
-  return extraMenus * EXTRA_MENU_PRICE_EGP * multiplier;
+  return extraMenus * unitPrice * multiplier;
 }
 
 export function getExtraMenuPricingFromEndDate(
   endDate: Date | string | null | undefined,
   now: Date = new Date(),
+  unitPrice: number = EXTRA_MENU_PRICE_EGP,
 ): {
   subscriptionDaysRemaining: number;
   subscriptionMonthsRemaining: number;
@@ -88,11 +89,17 @@ export function getExtraMenuPricingFromEndDate(
   return {
     subscriptionDaysRemaining,
     subscriptionMonthsRemaining: getRemainingSubscriptionMonths(endDate, now),
-    extraMenuProratedPrice: getExtraMenuPurchaseUnitPrice(),
+    extraMenuProratedPrice: getExtraMenuPurchaseUnitPrice(unitPrice),
     extraMenuShortPeriodWarning: hasExtraMenuShortPeriodWarning(
       subscriptionDaysRemaining,
     ),
   };
+}
+
+export function hasExtraMenuShortPeriodWarning(
+  remainingDays: number,
+): boolean {
+  return remainingDays > 0 && remainingDays < EXTRA_MENU_BILLING_DAYS;
 }
 
 export async function getActiveSubscriptionLimits(
@@ -108,7 +115,8 @@ export async function getActiveSubscriptionLimits(
       s.billingCycle,
       p.name AS planName,
       p.maxMenus,
-      ISNULL(s.extraMenus, 0) AS extraMenus
+      ISNULL(s.extraMenus, 0) AS extraMenus,
+      p.extraMenuPrice
     FROM Subscriptions s
     JOIN Plans p ON s.planId = p.id
     WHERE s.userId = @userId
@@ -133,7 +141,8 @@ export async function getActiveSubscriptionLimits(
       : endDateRaw
         ? new Date(endDateRaw)
         : null;
-  const pricing = getExtraMenuPricingFromEndDate(endDate);
+  const unitPrice = resolveExtraMenuUnitPrice(row.extraMenuPrice);
+  const pricing = getExtraMenuPricingFromEndDate(endDate, new Date(), unitPrice);
 
   return {
     subscriptionId: Number(row.subscriptionId),

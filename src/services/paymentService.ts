@@ -16,8 +16,8 @@ import {
   getActiveSubscriptionLimits,
   getExtraMenusPurchaseAmount,
   getExtraMenusRenewalAmount,
-  EXTRA_MENU_PRICE_EGP,
 } from "./extraMenus.service";
+import { getProExtraMenuPriceEgp } from "./subscriptionPricing.service";
 import {
   getProRenewalInfo,
   renewProSubscriptionForUser,
@@ -811,7 +811,12 @@ export class PaymentService {
     }
 
     if (data.renew && renewalExtraMenus != null) {
-      const extraRenewal = getExtraMenusRenewalAmount(renewalExtraMenus, billing);
+      const extraMenuUnitPrice = await getProExtraMenuPriceEgp();
+      const extraRenewal = getExtraMenusRenewalAmount(
+        renewalExtraMenus,
+        billing,
+        extraMenuUnitPrice,
+      );
       if (extraRenewal > 0) {
         price += extraRenewal;
         console.log(
@@ -1021,7 +1026,8 @@ export class PaymentService {
       );
     }
 
-    const price = getExtraMenusPurchaseAmount(qty);
+    const extraMenuUnitPrice = await getProExtraMenuPriceEgp();
+    const price = getExtraMenusPurchaseAmount(qty, extraMenuUnitPrice);
     const pool = await getPool();
     const orderId = crypto.randomUUID();
 
@@ -1066,7 +1072,7 @@ export class PaymentService {
       pricePerMenu: price / qty,
       subscriptionDaysRemaining: remainingDays,
       subscriptionMonthsRemaining: limits.subscriptionMonthsRemaining,
-      extraMenuMonthlyPrice: EXTRA_MENU_PRICE_EGP,
+      extraMenuMonthlyPrice: extraMenuUnitPrice,
     };
   }
 

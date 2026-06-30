@@ -12,9 +12,9 @@ import { ApiErrors } from "../i18n/apiErrors";
 import { MAX_FCM_TOKEN_LEN, addUserFcmToken, clearUserFcmTokens } from "../services/fcmPush.service";
 import { SubscriptionDowngradeService } from "../services/subscriptionDowngrade.service";
 import { PaymentService } from "../services/paymentService";
-import { EXTRA_MENU_PRICE_EGP } from "../config/constants";
-import { ensureSubscriptionExtrasSchema } from "../schemas/subscriptionExtras.schema";
 import { getExtraMenuPricingFromEndDate } from "../services/extraMenus.service";
+import { getProExtraMenuPriceEgp } from "../services/subscriptionPricing.service";
+import { ensureSubscriptionExtrasSchema } from "../schemas/subscriptionExtras.schema";
 import { getProRenewalInfo } from "../services/subscriptionRenewal.service";
 import { getActivePlansForDisplay } from "../services/plans.service";
 import { ensureRestaurantNameSchema } from "../schemas/restaurantName.schema";
@@ -480,6 +480,7 @@ export async function getSubscription(
     const userId = req.user!.userId;
     await ensureSubscriptionExtrasSchema();
     const pool = await getPool();
+    const extraMenuUnitPrice = await getProExtraMenuPriceEgp();
 
     const result = await pool.request().input("userId", sql.Int, userId).query(`
         SELECT TOP 1
@@ -519,10 +520,10 @@ export async function getSubscription(
           maxMenus: freePlan.maxMenus,
           extraMenus: renewalInfo.extraMenus,
           effectiveMaxMenus: freePlan.maxMenus,
-          extraMenuPrice: EXTRA_MENU_PRICE_EGP,
+          extraMenuPrice: extraMenuUnitPrice,
           subscriptionDaysRemaining: renewalInfo.daysRemaining,
           subscriptionMonthsRemaining: 0,
-          extraMenuProratedPrice: EXTRA_MENU_PRICE_EGP,
+          extraMenuProratedPrice: extraMenuUnitPrice,
           extraMenuShortPeriodWarning: false,
           canRenewPro: renewalInfo.canRenew,
           renewExtendsFromEndDate: renewalInfo.extendFromEndDate,
@@ -536,7 +537,11 @@ export async function getSubscription(
     const subscription = result.recordset[0];
     const maxMenus = Number(subscription.maxMenus ?? 1);
     const extraMenus = Number(subscription.extraMenus ?? 0);
-    const extraMenuPricing = getExtraMenuPricingFromEndDate(subscription.endDate);
+    const extraMenuPricing = getExtraMenuPricingFromEndDate(
+      subscription.endDate,
+      new Date(),
+      extraMenuUnitPrice,
+    );
     const renewalInfo = await getProRenewalInfo(userId);
     const isPro =
       String(subscription.planName ?? "").trim().toLowerCase() === "pro";
@@ -546,7 +551,7 @@ export async function getSubscription(
         plan: subscription.planName || "Free",
         extraMenus,
         effectiveMaxMenus: maxMenus + extraMenus,
-        extraMenuPrice: EXTRA_MENU_PRICE_EGP,
+        extraMenuPrice: extraMenuUnitPrice,
         ...extraMenuPricing,
         canRenewPro: isPro && renewalInfo.canRenew,
         renewExtendsFromEndDate: renewalInfo.extendFromEndDate,

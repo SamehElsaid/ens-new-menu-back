@@ -27,5 +27,18 @@ export async function ensureSubscriptionExtrasSchema(): Promise<void> {
     END
   `);
 
+  // Separate batches: SQL Server cannot reference a new column in the same batch as ALTER.
+  await pool.request().query(`
+    IF COL_LENGTH(N'dbo.Plans', N'extraMenuPrice') IS NULL
+      ALTER TABLE dbo.Plans ADD extraMenuPrice DECIMAL(12, 2) NULL;
+  `);
+
+  await pool.request().query(`
+    UPDATE Plans
+    SET extraMenuPrice = 20
+    WHERE LOWER(LTRIM(RTRIM(name))) = N'pro'
+      AND (extraMenuPrice IS NULL OR extraMenuPrice <= 0);
+  `);
+
   logger.info("Subscription extras schema ensured");
 }

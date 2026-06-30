@@ -152,6 +152,7 @@ router.get("/plans/subscription", getPlansForSubscription);
 router.get("/plans", getAllPlans);
 router.post("/plans", createPlan);
 router.put("/plans/:id", updatePlan);
+router.patch("/plans/:id", updatePlan);
 
 // Ads Management
 router.get("/ads", getGlobalAds);

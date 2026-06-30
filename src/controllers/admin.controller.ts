@@ -727,6 +727,7 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
 // Get All Plans
 export async function getAllPlans(req: Request, res: Response): Promise<void> {
   try {
+    await ensureSubscriptionExtrasSchema();
     const pool = await getPool();
 
     const result = await pool.request().query(`
@@ -747,12 +748,14 @@ export async function getAllPlans(req: Request, res: Response): Promise<void> {
 // Update Plan
 export async function updatePlan(req: Request, res: Response): Promise<void> {
   try {
+    await ensureSubscriptionExtrasSchema();
     const { id } = req.params;
     const {
       name,
       description,
       priceMonthly,
       priceYearly,
+      extraMenuPrice,
       maxMenus,
       maxProductsPerMenu,
       allowCustomDomain,
@@ -793,6 +796,10 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
       updates.push("priceYearly = @priceYearly");
       inputs.priceYearly = priceYearly;
     }
+    if (extraMenuPrice !== undefined) {
+      updates.push("extraMenuPrice = @extraMenuPrice");
+      inputs.extraMenuPrice = extraMenuPrice;
+    }
     if (maxMenus !== undefined) {
       updates.push("maxMenus = @maxMenus");
       inputs.maxMenus = maxMenus;
@@ -831,7 +838,17 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
 
     const request = pool.request();
     Object.keys(inputs).forEach((key) => {
-      request.input(key, inputs[key]);
+      if (
+        key === "priceMonthly" ||
+        key === "priceYearly" ||
+        key === "extraMenuPrice"
+      ) {
+        request.input(key, sql.Decimal(12, 2), inputs[key]);
+      } else if (key === "planId" || key === "maxMenus" || key === "maxProductsPerMenu") {
+        request.input(key, sql.Int, inputs[key]);
+      } else {
+        request.input(key, inputs[key]);
+      }
     });
 
     await request.query(query);
