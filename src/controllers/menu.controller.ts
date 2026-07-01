@@ -21,6 +21,50 @@ import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
 import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
 import { normalizeMenuTheme } from "../constants/menuThemes";
 import { enforceActiveMenuLimitOnActivation } from "../middleware/planLimits";
+import { ensureMenuGroupSchema } from "../schemas/menuGroup.schema";
+import { ensureDeliverySchema } from "../schemas/delivery.schema";
+
+function attachMenuGroupFields(row: Record<string, unknown>): Record<string, unknown> {
+  const menuGroupIdRaw = row.menuGroupId;
+  const menuGroupId =
+    menuGroupIdRaw != null && menuGroupIdRaw !== ""
+      ? Number(menuGroupIdRaw)
+      : null;
+  const groupInboxMenuIdRaw = row.groupInboxMenuId;
+  const groupInboxMenuId =
+    groupInboxMenuIdRaw != null && groupInboxMenuIdRaw !== ""
+      ? Number(groupInboxMenuIdRaw)
+      : null;
+  const menuId = Number(row.id);
+
+  return {
+    ...row,
+    menuGroupId:
+      menuGroupId != null && Number.isFinite(menuGroupId) ? menuGroupId : null,
+    menuGroupName:
+      typeof row.menuGroupName === "string" ? row.menuGroupName : null,
+    menuGroupMemberCount: Number(row.menuGroupMemberCount ?? 0),
+    isGroupInbox:
+      menuGroupId != null &&
+      groupInboxMenuId != null &&
+      Number.isFinite(menuId) &&
+      menuId === groupInboxMenuId,
+  };
+}
+
+const MENU_GROUP_JOIN_SQL = `
+  LEFT JOIN MenuGroups mg ON mg.id = m.menuGroupId
+`;
+
+const MENU_GROUP_SELECT_SQL = `
+  m.menuGroupId,
+  mg.name AS menuGroupName,
+  mg.inboxMenuId AS groupInboxMenuId,
+  CASE
+    WHEN m.menuGroupId IS NULL THEN 0
+    ELSE (SELECT COUNT(*) FROM Menus gm WHERE gm.menuGroupId = m.menuGroupId)
+  END AS menuGroupMemberCount
+`;
 
 // Get user's menus
 export async function getUserMenus(req: Request, res: Response): Promise<void> {
@@ -29,6 +73,7 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
     const { locale = "ar" } = req.query;
 
     const pool = await getPool();
+    await ensureMenuGroupSchema();
 
     const result = await pool.request().input("userId", sql.Int, userId).query(`
         SELECT 
@@ -37,8 +82,10 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
           mtAr.name as nameAr, 
           mtAr.description as descriptionAr,
           mtEn.name as nameEn,
-          mtEn.description as descriptionEn
+          mtEn.description as descriptionEn,
+          ${MENU_GROUP_SELECT_SQL}
         FROM Menus m
+        ${MENU_GROUP_JOIN_SQL}
         LEFT JOIN MenuTranslations mtAr ON m.id = mtAr.menuId AND mtAr.locale = 'ar'
         LEFT JOIN MenuTranslations mtEn ON m.id = mtEn.menuId AND mtEn.locale = 'en'
         WHERE m.userId = @userId
@@ -47,7 +94,7 @@ export async function getUserMenus(req: Request, res: Response): Promise<void> {
 
     res.json({
       menus: result.recordset.map((row: Record<string, unknown>) => ({
-        ...row,
+        ...attachMenuGroupFields(row),
         chatbotEnabled: normalizeChatbotEnabled(row.chatbotEnabled),
         theme: normalizeMenuTheme(row.theme as string | null),
       })),
@@ -93,6 +140,8 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
     const pool = await getPool();
 
     await ensureMenuChatbotSchema();
+    await ensureMenuGroupSchema();
+    await ensureDeliverySchema();
 
     const columnCheck = await pool.request().query(`
         SELECT COLUMN_NAME, DATA_TYPE
@@ -119,12 +168,12 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
         // Generate unique menu ID (7+ characters)
         newMenuId = await generateUniqueMenuId(7);
 
-        const menuColumns = hasApprovalStatus
-          ? "id, uuid, userId, slug, logo, theme, currency, approvalStatus"
-          : "id, uuid, userId, slug, logo, theme, currency";
-        const menuValues = hasApprovalStatus
-          ? "@id, @uuid, @userId, @slug, @logo, @theme, @currency, @approvalStatus"
-          : "@id, @uuid, @userId, @slug, @logo, @theme, @currency";
+        const insertCols = hasApprovalStatus
+          ? `id, uuid, userId, slug, logo, theme, currency, approvalStatus`
+          : `id, uuid, userId, slug, logo, theme, currency`;
+        const insertVals = hasApprovalStatus
+          ? `@id, @uuid, @userId, @slug, @logo, @theme, @currency, @approvalStatus`
+          : `@id, @uuid, @userId, @slug, @logo, @theme, @currency`;
 
         const insertRequest = transaction
           .request()
@@ -145,17 +194,17 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
         }
 
         await insertRequest.query(`
-            INSERT INTO Menus (${menuColumns})
-            VALUES (${menuValues})
+            INSERT INTO Menus (${insertCols})
+            VALUES (${insertVals})
           `);
       } else {
         // Use IDENTITY (INT)
-        const menuColumns = hasApprovalStatus
-          ? "uuid, userId, slug, logo, theme, currency, approvalStatus"
-          : "uuid, userId, slug, logo, theme, currency";
-        const menuValues = hasApprovalStatus
-          ? "@uuid, @userId, @slug, @logo, @theme, @currency, @approvalStatus"
-          : "@uuid, @userId, @slug, @logo, @theme, @currency";
+        const insertCols = hasApprovalStatus
+          ? `uuid, userId, slug, logo, theme, currency, approvalStatus`
+          : `uuid, userId, slug, logo, theme, currency`;
+        const insertVals = hasApprovalStatus
+          ? `@uuid, @userId, @slug, @logo, @theme, @currency, @approvalStatus`
+          : `@uuid, @userId, @slug, @logo, @theme, @currency`;
 
         const insertRequest = transaction
           .request()
@@ -175,9 +224,9 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
         }
 
         const menuResult = await insertRequest.query(`
-            INSERT INTO Menus (${menuColumns})
+            INSERT INTO Menus (${insertCols})
             OUTPUT INSERTED.id
-            VALUES (${menuValues})
+            VALUES (${insertVals})
           `);
 
         newMenuId = menuResult.recordset[0].id;
@@ -215,6 +264,16 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
           VALUES (@menuId, @locale, @name, @description)
         `);
 
+      const seedRequest = transaction.request();
+      if (isIdString) {
+        seedRequest.input("menuId", sql.NVarChar, newMenuId);
+      } else {
+        seedRequest.input("menuId", sql.Int, newMenuId);
+      }
+      await seedRequest.query(`
+        UPDATE Menus SET deliveryLegacyUserSeedDone = 1 WHERE id = @menuId
+      `);
+
       return newMenuId;
     });
 
@@ -234,6 +293,7 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
 export async function getMenuById(req: Request, res: Response): Promise<void> {
   try {
     await ensureMenuChatbotSchema();
+    await ensureMenuGroupSchema();
     const auth = req.user!;
     const userId = auth.userId;
     const { id } = req.params;
@@ -256,9 +316,11 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
           m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
           m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
           m.addressEn, m.addressAr, m.phone, m.workingHours,
+          ${MENU_GROUP_SELECT_SQL},
           ar.name as nameAr, ar.description as descriptionAr,
           en.name as nameEn, en.description as descriptionEn
         FROM Menus m
+        ${MENU_GROUP_JOIN_SQL}
         INNER JOIN MenuStaff s ON s.menuId = m.id AND s.id = @staffId
         LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
         LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
@@ -277,9 +339,11 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
           m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
           m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
           m.addressEn, m.addressAr, m.phone, m.workingHours,
+          ${MENU_GROUP_SELECT_SQL},
           ar.name as nameAr, ar.description as descriptionAr,
           en.name as nameEn, en.description as descriptionEn
         FROM Menus m
+        ${MENU_GROUP_JOIN_SQL}
         LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
         LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
         WHERE m.id = @id AND m.userId = @userId
@@ -295,11 +359,11 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    let menu = result.recordset[0];
+    let menu = attachMenuGroupFields(result.recordset[0] as Record<string, unknown>);
     menu = {
       ...menu,
       chatbotEnabled: normalizeChatbotEnabled(menu.chatbotEnabled),
-      theme: normalizeMenuTheme(menu.theme),
+      theme: normalizeMenuTheme(menu.theme as string | null),
     };
 
     // Parse workingHours if it's a JSON string

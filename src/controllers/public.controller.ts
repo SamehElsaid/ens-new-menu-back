@@ -18,9 +18,11 @@ import { ensureDeliverySchema } from "../schemas/delivery.schema";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
 import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
 import { normalizeMenuTheme } from "../constants/menuThemes";
-
-const DELIVERY_GOVERNORATE_COLUMNS =
-  "id, nameAr, nameEn, price, lat, lan, createdAt, updatedAt";
+import { fetchMenuDeliverySettings } from "../services/menuDelivery.service";
+import {
+  findNearestBranchMenu,
+  MIN_BRANCH_REDIRECT_IMPROVEMENT_KM,
+} from "../services/menuGeoRedirect.service";
 
 export type PublicDeliverySettings = {
   deliveryOn: boolean;
@@ -30,53 +32,10 @@ export type PublicDeliverySettings = {
   governorates: Record<string, unknown>[];
 };
 
-async function fetchPublicDeliveryForUser(
-  pool: Awaited<ReturnType<typeof getPool>>,
-  userId: number,
+async function fetchPublicDeliveryForMenu(
+  menuId: number,
 ): Promise<PublicDeliverySettings> {
-  await ensureDeliverySchema();
-
-  const userResult = await pool.request().input("userId", sql.Int, userId)
-    .query(`
-      SELECT deliveryOn, deliveryPhone, phoneNumber, deliveryWhatsAppOn
-      FROM Users
-      WHERE id = @userId
-    `);
-
-  if (userResult.recordset.length === 0) {
-    return {
-      deliveryOn: false,
-      deliveryPhone: null,
-      phoneNumber: null,
-      deliveryWhatsAppOn: true,
-      governorates: [],
-    };
-  }
-
-  const user = userResult.recordset[0] as {
-    deliveryOn: boolean | number;
-    deliveryPhone: string | null;
-    phoneNumber: string | null;
-    deliveryWhatsAppOn?: boolean | number | null;
-  };
-
-  const governoratesResult = await pool
-    .request()
-    .input("userId", sql.Int, userId).query(`
-        SELECT ${DELIVERY_GOVERNORATE_COLUMNS}
-        FROM UserDeliveryGovernorates
-        WHERE userId = @userId
-        ORDER BY id
-      `);
-
-  return {
-    deliveryOn: Boolean(user.deliveryOn),
-    deliveryPhone: user.deliveryPhone ?? null,
-    phoneNumber: user.phoneNumber ?? null,
-    deliveryWhatsAppOn:
-      user.deliveryWhatsAppOn == null ? true : Boolean(user.deliveryWhatsAppOn),
-    governorates: governoratesResult.recordset as Record<string, unknown>[],
-  };
+  return fetchMenuDeliverySettings(menuId);
 }
 
 /** Optional table from QR: `?tableNumber=` or `?table=` (max 50 chars). */
@@ -267,7 +226,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     }
 
     const menu = menuResult.recordset[0];
-    const delivery = await fetchPublicDeliveryForUser(pool, menu.userId);
+    const delivery = await fetchPublicDeliveryForMenu(menu.id);
 
     // إذا كانت القائمة غير نشطة، أرسل بيانات محدودة لصفحة الصيانة فقط
     if (!menu.isActive) {
@@ -1336,6 +1295,57 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch menu catalog",
+    });
+  }
+};
+
+/** GET /api/public/menu/:slug/nearby-branch — closest linked branch for geo redirect. */
+export async function getNearbyBranchMenu(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const slug = String(req.params.slug ?? "").trim();
+    const { lat, lng } = req.query;
+
+    if (!slug) {
+      res.status(400).json({ success: false, message: "Invalid slug" });
+      return;
+    }
+
+    const pool = await getPool();
+    const menuResult = await pool
+      .request()
+      .input("slug", sql.NVarChar, slug)
+      .query(`SELECT id, slug FROM Menus WHERE slug = @slug`);
+
+    if (menuResult.recordset.length === 0) {
+      res.status(404).json({ success: false, message: "Menu not found" });
+      return;
+    }
+
+    const menu = menuResult.recordset[0] as { id: number; slug: string };
+    const nearest = await findNearestBranchMenu(menu.id, lat, lng);
+
+    res.json({
+      success: true,
+      data: {
+        currentSlug: menu.slug,
+        redirect: nearest
+          ? {
+              menuId: nearest.menuId,
+              slug: nearest.slug,
+              distanceKm: nearest.distanceKm,
+            }
+          : null,
+        minImprovementKm: MIN_BRANCH_REDIRECT_IMPROVEMENT_KM,
+      },
+    });
+  } catch (error) {
+    console.error("Error resolving nearby branch menu:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to resolve nearby branch",
     });
   }
 };

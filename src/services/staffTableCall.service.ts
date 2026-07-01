@@ -22,6 +22,17 @@ import { isUserOnFreePlan } from "./subscriptionPlan.service";
 import { logMenuOrderEventSafe } from "./menuActivityLog.service";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
 import { ensureStaffTableCallsOrderTypeSchema } from "../schemas/staffTableCallsOrderType.schema";
+import { ensureMenuGroupSchema } from "../schemas/menuGroup.schema";
+import {
+  fetchMenuDisplayNames,
+  getDeliveryGroupMenuIds,
+  resolveInboxMenuId,
+} from "./menuGroup.service";
+import {
+  isMenuDeliveryEnabled,
+  resolveMenuDeliveryGovernorate,
+} from "./menuDelivery.service";
+import { broadcastMenuActivityUpdated } from "../socket/staffIoBroadcast";
 
 export type StaffOrderType = "table" | "delivery";
 
@@ -164,7 +175,7 @@ function parseGovernorateId(raw: unknown): number | null {
 }
 
 async function resolveDeliveryGovernorate(
-  ownerId: number,
+  menuId: number,
   governorateId: number,
 ): Promise<
   | {
@@ -178,27 +189,9 @@ async function resolveDeliveryGovernorate(
     }
   | { ok: false }
 > {
-  await ensureDeliverySchema();
-  const pool = await getPool();
-  const result = await pool
-    .request()
-    .input("userId", sql.Int, ownerId)
-    .input("governorateId", sql.Int, governorateId).query(`
-      SELECT id, nameAr, nameEn, price
-      FROM UserDeliveryGovernorates
-      WHERE id = @governorateId AND userId = @userId
-    `);
-
-  const row = result.recordset[0] as
-    | {
-        id: number;
-        nameAr: string;
-        nameEn: string;
-        price: number;
-      }
-    | undefined;
-  if (!row) return { ok: false };
-  return { ok: true, governorate: row };
+  const result = await resolveMenuDeliveryGovernorate(menuId, governorateId);
+  if (!result.ok) return { ok: false };
+  return { ok: true, governorate: result.governorate };
 }
 
 function parseCustomerName(raw: unknown): string | null {
@@ -634,11 +627,7 @@ export async function processGuestStaffCall(
 
     if (isDeliveryOrder) {
       await ensureDeliverySchema();
-      const deliverySettings = await pool
-        .request()
-        .input("userId", sql.Int, ownerId)
-        .query(`SELECT deliveryOn FROM Users WHERE id = @userId`);
-      const deliveryOn = Boolean(deliverySettings.recordset[0]?.deliveryOn);
+      const deliveryOn = await isMenuDeliveryEnabled(menuId);
       if (!deliveryOn) {
         return { ok: false, error: "DELIVERY_DISABLED" };
       }
@@ -647,7 +636,7 @@ export async function processGuestStaffCall(
       if (!governorateId) {
         return { ok: false, error: "INVALID_PAYLOAD" };
       }
-      const govResult = await resolveDeliveryGovernorate(ownerId, governorateId);
+      const govResult = await resolveDeliveryGovernorate(menuId, governorateId);
       if (!govResult.ok) {
         return { ok: false, error: "INVALID_GOVERNORATE" };
       }
@@ -686,8 +675,26 @@ export async function processGuestStaffCall(
 
     const orderTotal = computeOrderTotalFromItems(itemsResolved);
 
+    let storageMenuId = menuId;
+    let sourceMenuId: number | null = null;
+    let sourceMenuNameAr: string | null = null;
+    let sourceMenuNameEn: string | null = null;
+
+    if (isDeliveryOrder) {
+      await ensureMenuGroupSchema();
+      const inboxId = await resolveInboxMenuId(menuId);
+      storageMenuId = inboxId;
+      if (inboxId !== menuId) {
+        sourceMenuId = menuId;
+        const names = await fetchMenuDisplayNames([menuId]);
+        const n = names.get(menuId);
+        sourceMenuNameAr = n?.nameAr ?? null;
+        sourceMenuNameEn = n?.nameEn ?? null;
+      }
+    }
+
     const persisted = await createStaffTableCall(
-      menuId,
+      storageMenuId,
       effectiveTable,
       customerName,
       itemsResolved,
@@ -697,6 +704,7 @@ export async function processGuestStaffCall(
         customerPhone,
         customerAddress,
         orderNotes,
+        sourceMenuId,
       },
     );
     if (!persisted) {
@@ -704,7 +712,7 @@ export async function processGuestStaffCall(
     }
 
     await logMenuOrderEventSafe(
-      menuId,
+      storageMenuId,
       persisted.id,
       {
         action: "TABLE_CALL_CREATED",
@@ -736,6 +744,13 @@ export async function processGuestStaffCall(
             items: itemsResolved,
             orderTotal,
             status: initialStatus,
+            ...(sourceMenuId != null
+              ? {
+                  sourceMenuId,
+                  sourceMenuNameAr,
+                  sourceMenuNameEn,
+                }
+              : {}),
             ...(deliveryGovernorate
               ? {
                   governorateId: deliveryGovernorate.id,
@@ -753,10 +768,18 @@ export async function processGuestStaffCall(
       },
     );
 
+    if (isDeliveryOrder) {
+      const groupIds = await getDeliveryGroupMenuIds(storageMenuId);
+      const extra = groupIds.filter((id) => id !== storageMenuId);
+      if (extra.length > 0) {
+        broadcastMenuActivityUpdated(storageMenuId, extra);
+      }
+    }
+
     return {
       ok: true,
       id: persisted.id,
-      menuId,
+      menuId: storageMenuId,
       type: orderType,
       tableNumber: effectiveTable,
       createdAt: persisted.createdAt,
@@ -1189,15 +1212,23 @@ export async function createStaffTableCall(
     customerPhone?: string | null;
     customerAddress?: string | null;
     orderNotes?: string | null;
+    sourceMenuId?: number | null;
   },
 ): Promise<{ id: number; createdAt: Date } | null> {
   try {
     await ensureStaffTableCallsOrderTypeSchema();
+    await ensureMenuGroupSchema();
     const pool = await getPool();
     const orderJson = items.length > 0 ? JSON.stringify(items) : null;
     const statusNorm = parseGuestInitialStaffCallStatus(initialStatus);
     const acknowledgedAt = statusNorm === "confirmed" ? new Date() : null;
     const orderType = meta?.orderType === "delivery" ? "delivery" : "table";
+    const sourceMenuId =
+      meta?.sourceMenuId != null &&
+      Number.isFinite(meta.sourceMenuId) &&
+      meta.sourceMenuId > 0
+        ? meta.sourceMenuId
+        : null;
     const result = await pool
       .request()
       .input("menuId", sql.Int, menuId)
@@ -1213,15 +1244,16 @@ export async function createStaffTableCall(
         sql.NVarChar(500),
         meta?.customerAddress ?? null,
       )
-      .input("orderNotes", sql.NVarChar(500), meta?.orderNotes ?? null).query(`
+      .input("orderNotes", sql.NVarChar(500), meta?.orderNotes ?? null)
+      .input("sourceMenuId", sql.Int, sourceMenuId).query(`
         INSERT INTO StaffTableCalls (
           menuId, tableNumber, customerName, orderItemsJson, status, acknowledgedAt,
-          orderType, customerPhone, customerAddress, orderNotes
+          orderType, customerPhone, customerAddress, orderNotes, sourceMenuId
         )
         OUTPUT INSERTED.id, INSERTED.createdAt
         VALUES (
           @menuId, @tableNumber, @customerName, @orderItemsJson, @status, @acknowledgedAt,
-          @orderType, @customerPhone, @customerAddress, @orderNotes
+          @orderType, @customerPhone, @customerAddress, @orderNotes, @sourceMenuId
         )
       `);
     const row = result.recordset[0];

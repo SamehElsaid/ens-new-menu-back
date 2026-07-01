@@ -12,6 +12,7 @@ import branchRoutes from "./branch.routes";
 import menuCustomizationRoutes from "./menuCustomization.routes";
 import menuStaffRoutes from "./menuStaff.routes";
 import menuTablesRoutes from "./menuTables.routes";
+import menuDeliveryRoutes from "./menuDelivery.routes";
 import {
   resolveMenuParam,
   resolveMenuIdRouteParam,
@@ -205,5 +206,6 @@ router.use("/:menuId/branches", branchRoutes);
 router.use("/:menuId/customizations", menuCustomizationRoutes);
 router.use("/:menuId/staff", menuStaffRoutes);
 router.use("/:menuId/tables", menuTablesRoutes);
+router.use("/:menuId/delivery", menuDeliveryRoutes);
 
 export default router;

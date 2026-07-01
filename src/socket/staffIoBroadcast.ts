@@ -48,8 +48,17 @@ export function broadcastStaffTableCallChanged(
 }
 
 /** Dashboard activity history: notify subscribers to refetch `/activity-logs`. */
-export function broadcastMenuActivityUpdated(menuId: number): void {
-  ioInstance
-    ?.to(`menu:${menuId}`)
-    .emit("menu:activity_updated", { menuId });
+export function broadcastMenuActivityUpdated(
+  menuId: number,
+  extraMenuIds?: number[],
+): void {
+  const ids = new Set<number>([menuId]);
+  for (const id of extraMenuIds ?? []) {
+    if (Number.isFinite(id) && id > 0) ids.add(id);
+  }
+  for (const id of ids) {
+    ioInstance
+      ?.to(`menu:${id}`)
+      .emit("menu:activity_updated", { menuId: id });
+  }
 }

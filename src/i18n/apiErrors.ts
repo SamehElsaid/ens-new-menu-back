@@ -98,6 +98,30 @@ export const ApiErrors = {
     en: "Failed to create menu",
     ar: "فشل إنشاء المنيو",
   },
+  invalidPrimaryMenuLink: {
+    en: "The selected primary menu is invalid or cannot be used for linking.",
+    ar: "المنيو الأساسي المحدد غير صالح أو لا يمكن ربط المنيو به.",
+  },
+  menuGroupNotFound: {
+    en: "Menu group not found.",
+    ar: "مجموعة المنيوهات غير موجودة.",
+  },
+  menuGroupMenusRequired: {
+    en: "Select at least two menus for the group.",
+    ar: "اختر منيوين على الأقل للمجموعة.",
+  },
+  menuGroupMenuNotFound: {
+    en: "One or more selected menus were not found.",
+    ar: "واحد أو أكثر من المنيوهات المحددة غير موجود.",
+  },
+  menuGroupMenuInOtherGroup: {
+    en: "One or more menus already belong to another group.",
+    ar: "واحد أو أكثر من المنيوهات ينتمي لمجموعة أخرى بالفعل.",
+  },
+  deliverySettingsPrimaryOnly: {
+    en: "Delivery settings can only be edited from the primary menu.",
+    ar: "إعدادات الدلفري تُعدَّل من المنيو الأساسي فقط.",
+  },
   failedGetMenu: {
     en: "Failed to get menu",
     ar: "فشل جلب المنيو",

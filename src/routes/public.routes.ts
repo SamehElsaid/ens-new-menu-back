@@ -13,6 +13,7 @@ import {
   postAdClick,
   getHomepageFeaturedLogos,
   getPublicMenuCatalog,
+  getNearbyBranchMenu,
 } from "../controllers/public.controller";
 import {
   postAppVersion,
@@ -93,6 +94,16 @@ router.get(
       .withMessage("categoryId must be a positive integer"),
   ],
   getPublicMenuCatalog,
+);
+
+// GET /api/public/menu/:slug/nearby-branch — geo-based linked menu redirect
+router.get(
+  "/menu/:slug/nearby-branch",
+  validate([
+    query("lat").notEmpty().isFloat({ min: -90, max: 90 }).toFloat(),
+    query("lng").notEmpty().isFloat({ min: -180, max: 180 }).toFloat(),
+  ]),
+  getNearbyBranchMenu,
 );
 
 // GET /api/public/menu/:slug - Get menu by slug
