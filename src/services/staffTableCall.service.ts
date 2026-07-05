@@ -34,7 +34,10 @@ import {
   resolveMenuDeliveryGovernorate,
   resolveBranchDeliveryQuote,
 } from "./menuDelivery.service";
-import { broadcastMenuActivityUpdated } from "../socket/staffIoBroadcast";
+import {
+  broadcastMenuActivityUpdated,
+  broadcastStaffTableCallChanged,
+} from "../socket/staffIoBroadcast";
 import { parseGeoCoord } from "../utils/geoDistance";
 
 export type StaffOrderType = "table" | "delivery";
@@ -318,6 +321,147 @@ export function computeOrderTotalFromItems(items: StaffOrderItem[]): number {
       }, 0) * 100,
     ) / 100
   );
+}
+
+export function isOpenStaffTableCallStatus(
+  status: StaffTableCallStatus,
+): boolean {
+  return status !== "cancelled" && status !== "delivered";
+}
+
+/** Append guest round items as separate lines (do not sum qty with existing rows). */
+export function mergeStaffOrderItems(
+  existing: StaffOrderItem[],
+  incoming: StaffOrderItem[],
+): StaffOrderItem[] {
+  return [...existing, ...incoming];
+}
+
+/**
+ * Latest open table order for a table (pending / confirmed / prepared).
+ * Used to append guest items instead of creating a new call until cashier finishes.
+ */
+export async function findOpenTableCallForTable(
+  menuId: number,
+  tableNumber: string,
+): Promise<StaffTableCallRow | null> {
+  const safeTable = String(tableNumber ?? "").trim();
+  if (!safeTable || !Number.isFinite(menuId) || menuId <= 0) {
+    return null;
+  }
+  try {
+    const pool = await getPool();
+    await ensureStaffTableCallsOrderTypeSchema();
+    const result = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("tableNumber", sql.NVarChar, safeTable).query(`
+        SELECT TOP 1
+          id, menuId, tableNumber, orderType, customerPhone, customerAddress,
+          orderNotes, createdAt, customerName, orderItemsJson, status, acknowledgedAt
+        FROM StaffTableCalls
+        WHERE menuId = @menuId
+          AND tableNumber = @tableNumber
+          AND (
+            orderType IS NULL
+            OR LOWER(LTRIM(RTRIM(orderType))) = N'table'
+          )
+          AND (
+            status IS NULL
+            OR LOWER(LTRIM(RTRIM(status))) NOT IN (N'cancelled', N'delivered')
+          )
+        ORDER BY createdAt DESC
+      `);
+    const row = result.recordset[0] as
+      | Parameters<typeof toStaffTableCallRow>[0]
+      | undefined;
+    if (!row) return null;
+    const parsed = toStaffTableCallRow(row, false);
+    return isOpenStaffTableCallStatus(parsed.status) ? parsed : null;
+  } catch (error) {
+    logger.error("findOpenTableCallForTable error:", error);
+    return null;
+  }
+}
+
+/** Guest or system appends lines to an open table order (no staff editor id). */
+export async function appendItemsToOpenTableCall(
+  callId: number,
+  menuId: number,
+  incomingItems: StaffOrderItem[],
+): Promise<
+  | {
+      ok: true;
+      items: StaffOrderItem[];
+      orderTotal: number;
+      status: StaffTableCallStatus;
+    }
+  | { ok: false; error: UpdateStaffCallItemsError }
+> {
+  if (incomingItems.length === 0) {
+    return { ok: false, error: "INVALID_PAYLOAD" };
+  }
+  try {
+    const snap = await getStaffTableCallSnapshot(menuId, callId);
+    if (!snap || !isOpenStaffTableCallStatus(snap.status)) {
+      return { ok: false, error: "NOT_EDITABLE" };
+    }
+    const merged = mergeStaffOrderItems(snap.items, incomingItems);
+    const orderTotal = computeOrderTotalFromItems(merged);
+    const orderJson = merged.length > 0 ? JSON.stringify(merged) : null;
+    const pool = await getPool();
+    const schema = await getStaffTableCallsSchemaFlags();
+    const upd = await pool
+      .request()
+      .input("id", sql.Int, callId)
+      .input("menuId", sql.Int, menuId)
+      .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson).query(`
+        UPDATE StaffTableCalls
+        SET orderItemsJson = @orderItemsJson
+        WHERE ${buildEditableRowWhereSql(schema)}
+      `);
+    if ((upd.rowsAffected?.[0] ?? 0) === 0) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+    return {
+      ok: true,
+      items: merged,
+      orderTotal,
+      status: snap.status,
+    };
+  } catch (error) {
+    logger.error("appendItemsToOpenTableCall error:", error);
+    return { ok: false, error: "SERVER_ERROR" };
+  }
+}
+
+/**
+ * Cashier closes an active table order (`confirmed` or `prepared` → `delivered`).
+ */
+export async function completeStaffTableCall(
+  callId: number,
+  menuId: number,
+): Promise<boolean> {
+  try {
+    const pool = await getPool();
+    const schema = await getStaffTableCallsSchemaFlags();
+    if (!schema.status) {
+      return false;
+    }
+    const result = await pool
+      .request()
+      .input("id", sql.Int, callId)
+      .input("menuId", sql.Int, menuId).query(`
+        UPDATE StaffTableCalls
+        SET status = N'delivered'
+        WHERE id = @id AND menuId = @menuId
+          AND LOWER(LTRIM(RTRIM(ISNULL(status, '')))) IN (N'confirmed', N'prepared')
+      `);
+    return (result.rowsAffected?.[0] ?? 0) > 0;
+  } catch (error) {
+    logger.error("completeStaffTableCall error:", error);
+    return false;
+  }
 }
 
 function parseOrderItemsInput(
@@ -734,6 +878,86 @@ export async function processGuestStaffCall(
         const n = names.get(menuId);
         sourceMenuNameAr = n?.nameAr ?? null;
         sourceMenuNameEn = n?.nameEn ?? null;
+      }
+    }
+
+    if (!isDeliveryOrder && itemsResolved.length > 0) {
+      const openCall = await findOpenTableCallForTable(
+        storageMenuId,
+        effectiveTable,
+      );
+      if (openCall) {
+        const appended = await appendItemsToOpenTableCall(
+          openCall.id,
+          storageMenuId,
+          itemsResolved,
+        );
+        if (!appended.ok) {
+          return { ok: false, error: "SERVER_ERROR" };
+        }
+        await logMenuOrderEventSafe(
+          storageMenuId,
+          openCall.id,
+          {
+            action: "TABLE_CALL_ITEMS_UPDATED",
+            targetType: "order",
+            targetId: openCall.id,
+            summaryAr: customerName
+              ? `إضافة أصناف لطلب ${customerName} — طاولة ${effectiveTable}`
+              : `إضافة أصناف لطلب طاولة ${effectiveTable}`,
+            summaryEn: customerName
+              ? `Items added to order — ${customerName} — table ${effectiveTable}`
+              : `Items added to table ${effectiveTable} order`,
+            detailJson: JSON.stringify({
+              status: appended.status,
+              mergedFromGuest: true,
+              order: {
+                type: orderType,
+                tableNumber: effectiveTable,
+                customerName: openCall.customerName ?? customerName,
+                items: appended.items,
+                orderTotal: appended.orderTotal,
+                status: appended.status,
+              },
+            }),
+          },
+          {
+            actorName: customerName || "Guest",
+            actorRole: "guest",
+          },
+        );
+        broadcastMenuActivityUpdated(storageMenuId);
+        const mergedSnap = await getStaffTableCallSnapshot(
+          storageMenuId,
+          openCall.id,
+        );
+        if (mergedSnap) {
+          broadcastStaffTableCallChanged(storageMenuId, {
+            id: mergedSnap.id,
+            menuId: mergedSnap.menuId,
+            tableNumber: mergedSnap.tableNumber,
+            at: mergedSnap.createdAt.toISOString(),
+            customerName: mergedSnap.customerName,
+            items: mergedSnap.items,
+            orderTotal: mergedSnap.orderTotal,
+            status: mergedSnap.status,
+          });
+        }
+        return {
+          ok: true,
+          id: openCall.id,
+          menuId: storageMenuId,
+          type: orderType,
+          tableNumber: effectiveTable,
+          createdAt: openCall.createdAt,
+          customerName: openCall.customerName ?? customerName,
+          customerPhone: openCall.customerPhone,
+          customerAddress: openCall.customerAddress,
+          orderNotes: openCall.orderNotes,
+          items: appended.items,
+          orderTotal: appended.orderTotal,
+          status: appended.status,
+        };
       }
     }
 
@@ -1724,10 +1948,10 @@ export async function updateStaffTableCallItems(
       row.status,
       row.acknowledgedAt ?? null,
     );
-    if (st === "cancelled") {
+    if (st === "cancelled" || st === "delivered") {
       return { ok: false, error: "NOT_EDITABLE" };
     }
-    if (st !== "pending" && st !== "confirmed") {
+    if (st !== "pending" && st !== "confirmed" && st !== "prepared") {
       return { ok: false, error: "NOT_EDITABLE" };
     }
 
@@ -1864,7 +2088,7 @@ export async function updateStaffTableCallItemsAndStatus(
       row.status,
       row.acknowledgedAt ?? null,
     );
-    if (st === "cancelled") {
+    if (st === "cancelled" || st === "delivered") {
       return { ok: false, error: "NOT_EDITABLE" };
     }
 
@@ -1897,13 +2121,16 @@ export async function updateStaffTableCallItemsAndStatus(
     let whereSql: string;
     let outStatus: StaffTableCallStatus;
 
-    if (st === "confirmed") {
+    if (st === "confirmed" || st === "prepared") {
       if (statusTarget === "cancelled") {
         return { ok: false, error: "NOT_PENDING" };
       }
-      setSql = buildOrderItemsSetSql(schema, { confirm: true });
+      setSql =
+        st === "confirmed"
+          ? buildOrderItemsSetSql(schema, { confirm: true })
+          : buildOrderItemsSetSql(schema);
       whereSql = buildEditableRowWhereSql(schema);
-      outStatus = "confirmed";
+      outStatus = st;
     } else if (statusTarget === "pending") {
       setSql = buildOrderItemsSetSql(schema);
       whereSql = `${staffCallRowKeyWhereSql} AND ${pendingWhere}`;

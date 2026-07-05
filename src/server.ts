@@ -58,6 +58,8 @@ import {
   deleteMetaDataHandler,
 } from "./controllers/metaData.controller";
 import { requireAdmin } from "./middleware/auth.middleware";
+import { isSwaggerEnabled } from "./utils/devFlags";
+import { getSwaggerSpec } from "./config/swagger";
 
 // ------------------------------------------------------------------
 
@@ -161,6 +163,22 @@ app.get("/health", (req, res) => {
   });
 });
 
+if (isSwaggerEnabled()) {
+  const swaggerUi = require("swagger-ui-express");
+  const swaggerSpec = getSwaggerSpec();
+  if (swaggerSpec) {
+    app.use(
+      "/api-docs",
+      swaggerUi.serve,
+      swaggerUi.setup(swaggerSpec, { customSiteTitle: "EnsMenu API Docs" }),
+    );
+    app.get("/api-docs.json", (_req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      res.send(swaggerSpec);
+    });
+  }
+}
+
 // Mobile app version — fully open (no x-api-key, no JWT, no rate limit)
 
 app.get("/api/public/app-version/latest", getPublicAppVersion);
@@ -255,6 +273,9 @@ async function startServer() {
     httpServer.listen(PORT, () => {
       logger.info(`🚀 Server running on port ${PORT}`);
       logger.info(`🌍 Environment: ${process.env.NODE_ENV}`);
+      if (isSwaggerEnabled()) {
+        logger.info(`📖 Swagger UI: http://localhost:${PORT}/api-docs`);
+      }
     });
   } catch (err) {
     logger.error("❌ Server failed to start:", err);

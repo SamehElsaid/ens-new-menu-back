@@ -88,7 +88,7 @@ router.get(
   menuActivityLogController.getMenuActivityLogByIdHandler,
 );
 
-// POST /api/menus/:menuId/activity-logs/:id/actions — accept / reject / prepare / deliver
+// POST /api/menus/:menuId/activity-logs/:id/actions — accept / reject / prepare / deliver / complete
 router.post(
   "/:menuId/activity-logs/:id/actions",
   validate([
@@ -102,9 +102,17 @@ router.post(
         "TABLE_CALL_CANCELLED",
         "TABLE_CALL_PREPARED",
         "TABLE_CALL_DELIVERED",
+        "TABLE_CALL_COMPLETED",
       ]),
   ]),
   menuActivityLogController.postMenuOrderActionHandler,
+);
+
+// PATCH /api/menus/:menuId/activity-logs/:id/items — edit order lines
+router.patch(
+  "/:menuId/activity-logs/:id/items",
+  validate([param("menuId").isInt(), param("id").isInt()]),
+  menuActivityLogController.patchMenuOrderItemsHandler,
 );
 
 // GET /api/menus/:menuId/activity-logs — audit trail (owner / authorised staff)

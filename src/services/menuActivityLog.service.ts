@@ -5,7 +5,7 @@ import {
   getMenuStaffColumnMeta,
   quoteMenuStaffIdent,
 } from "../config/menuStaffColumns";
-import { normalizeStaffJobRole } from "../config/staffJobRoles";
+import { normalizeStaffJobRole, canStaffFinishOrders } from "../config/staffJobRoles";
 import { ensureMenuAuditLogSchema } from "../schemas/menuAuditLog.schema";
 import { ensureStaffTableCallsOrderTypeSchema } from "../schemas/staffTableCallsOrderType.schema";
 import type { TokenPayload } from "../utils/tokenHelper";
@@ -17,8 +17,10 @@ import {
 } from "./menuGroup.service";
 import {
   advanceStaffTableCallStatus,
+  completeStaffTableCall,
   getStaffTableCallSnapshot,
   setStaffTableCallStatus,
+  updateStaffTableCallItems,
   type StaffTableCallRow,
 } from "./staffTableCall.service";
 
@@ -87,6 +89,7 @@ function inferStatus(action: string, detail: ParsedDetail): string {
   if (action === "TABLE_CALL_CANCELLED") return "cancelled";
   if (action === "TABLE_CALL_PREPARED") return "prepared";
   if (action === "TABLE_CALL_DELIVERED") return "delivered";
+  if (action === "TABLE_CALL_COMPLETED") return "delivered";
   if (action === "TABLE_CALL_CREATED") return "pending";
   if (
     action === "TABLE_CALL_ITEMS_UPDATED" ||
@@ -990,13 +993,29 @@ export type MenuOrderActionType =
   | "TABLE_CALL_CONFIRMED"
   | "TABLE_CALL_CANCELLED"
   | "TABLE_CALL_PREPARED"
-  | "TABLE_CALL_DELIVERED";
+  | "TABLE_CALL_DELIVERED"
+  | "TABLE_CALL_COMPLETED";
 
 export type ApplyMenuOrderActionError =
   | "NOT_FOUND"
   | "INVALID_STATE"
   | "INVALID_ACTION"
+  | "FORBIDDEN"
   | "SERVER_ERROR";
+
+export type ApplyMenuOrderItemsError =
+  | "NOT_FOUND"
+  | "NOT_EDITABLE"
+  | "INVALID_PAYLOAD"
+  | "SERVER_ERROR";
+
+function staffOnlyActionRequiresCashier(action: MenuOrderActionType): boolean {
+  return (
+    action === "TABLE_CALL_PREPARED" ||
+    action === "TABLE_CALL_DELIVERED" ||
+    action === "TABLE_CALL_COMPLETED"
+  );
+}
 
 function orderActionSummaries(
   snap: StaffTableCallRow | null,
@@ -1039,6 +1058,16 @@ function orderActionSummaries(
       ? { ar: `تم تحضير طلب ${cust} — طاولة ${tbl || "?"}`, en: `Order prepared — ${cust} — table ${tbl || "?"}` }
       : { ar: `تم تحضير طلب طاولة ${tbl || "?"}`, en: `Table ${tbl || "?"} order prepared` };
   }
+  if (action === "TABLE_CALL_COMPLETED") {
+    if (isDelivery) {
+      return cust
+        ? { ar: `إنهاء طلب توصيل ${cust}`, en: `Completed delivery order — ${cust}` }
+        : { ar: "إنهاء طلب التوصيل", en: "Completed delivery order" };
+    }
+    return cust
+      ? { ar: `إنهاء طلب ${cust} — طاولة ${tbl || "?"}`, en: `Completed order — ${cust} — table ${tbl || "?"}` }
+      : { ar: `إنهاء طلب طاولة ${tbl || "?"}`, en: `Completed table ${tbl || "?"} order` };
+  }
   if (isDelivery) {
     return cust
       ? { ar: `تم تسليم طلب توصيل ${cust}`, en: `Delivery order delivered — ${cust}` }
@@ -1073,6 +1102,7 @@ function actionToStatus(action: MenuOrderActionType): string {
   if (action === "TABLE_CALL_CONFIRMED") return "confirmed";
   if (action === "TABLE_CALL_CANCELLED") return "cancelled";
   if (action === "TABLE_CALL_PREPARED") return "prepared";
+  if (action === "TABLE_CALL_COMPLETED") return "delivered";
   return "delivered";
 }
 
@@ -1203,6 +1233,18 @@ export async function applyMenuOrderAction(
     const currentStatus = String(snapBefore.status ?? "pending").toLowerCase();
     let applied = false;
 
+    const actor = await resolveActorForLog(req);
+    if (
+      staffOnlyActionRequiresCashier(action) &&
+      !canStaffFinishOrders(actor.staffJobRole, actor.actorRole)
+    ) {
+      return { ok: false, error: "FORBIDDEN" };
+    }
+
+    const isTableOrder =
+      snapBefore.type !== "delivery" &&
+      String(snapBefore.tableNumber ?? "").trim().toLowerCase() !== "delivery";
+
     if (action === "TABLE_CALL_CONFIRMED") {
       if (currentStatus !== "pending") {
         return { ok: false, error: "INVALID_STATE" };
@@ -1218,11 +1260,26 @@ export async function applyMenuOrderAction(
         return { ok: false, error: "INVALID_STATE" };
       }
       applied = await advanceStaffTableCallStatus(callId, storageMenuId, "prepared");
-    } else if (action === "TABLE_CALL_DELIVERED") {
-      if (currentStatus !== "prepared") {
+    } else if (action === "TABLE_CALL_COMPLETED") {
+      if (!isTableOrder) {
+        return { ok: false, error: "INVALID_ACTION" };
+      }
+      if (currentStatus !== "confirmed" && currentStatus !== "prepared") {
         return { ok: false, error: "INVALID_STATE" };
       }
-      applied = await advanceStaffTableCallStatus(callId, storageMenuId, "delivered");
+      applied = await completeStaffTableCall(callId, storageMenuId);
+    } else if (action === "TABLE_CALL_DELIVERED") {
+      if (isTableOrder) {
+        if (currentStatus !== "confirmed" && currentStatus !== "prepared") {
+          return { ok: false, error: "INVALID_STATE" };
+        }
+        applied = await completeStaffTableCall(callId, storageMenuId);
+      } else {
+        if (currentStatus !== "prepared") {
+          return { ok: false, error: "INVALID_STATE" };
+        }
+        applied = await advanceStaffTableCallStatus(callId, storageMenuId, "delivered");
+      }
     } else {
       return { ok: false, error: "INVALID_ACTION" };
     }
@@ -1265,6 +1322,117 @@ export async function applyMenuOrderAction(
     return { ok: true, status: nextStatus };
   } catch (error) {
     logger.error("applyMenuOrderAction error:", error);
+    return { ok: false, error: "SERVER_ERROR" };
+  }
+}
+
+/**
+ * Dashboard / owner / cashier: replace order lines on an open call.
+ */
+export async function applyMenuOrderItemsUpdate(
+  menuId: number,
+  menuOrderLogId: number,
+  itemsRaw: unknown,
+  req: Request,
+): Promise<
+  | {
+      ok: true;
+      items: StaffTableCallRow["items"];
+      orderTotal: number;
+      status: string;
+    }
+  | { ok: false; error: ApplyMenuOrderItemsError }
+> {
+  try {
+    const pool = await getPool();
+    const deliveryGroupIds = await getDeliveryGroupMenuIds(menuId);
+    const menuFilter = menuIdWhereSql(deliveryGroupIds);
+
+    const logRow = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .input("logId", sql.Int, menuOrderLogId).query(`
+        SELECT id, menuId, orderId, orderJson
+        FROM dbo.MenuOrders mo
+        WHERE ${menuFilter} AND mo.id = @logId
+      `);
+
+    const row = logRow.recordset[0] as
+      | { menuId?: number; orderId?: number; orderJson?: string | null }
+      | undefined;
+    if (!row?.orderId) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+
+    const storageMenuId = Number(row.menuId ?? menuId);
+    const callId = Number(row.orderId);
+    if (!Number.isFinite(callId) || callId <= 0) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+
+    const actor = await resolveActorForLog(req);
+    const editorStaffId =
+      actor.actorRole === ROLES.STAFF ? (req.user as TokenPayload).userId : 0;
+
+    const result = await updateStaffTableCallItems(
+      callId,
+      storageMenuId,
+      itemsRaw,
+      editorStaffId > 0 ? editorStaffId : 1,
+    );
+
+    if (!result.ok) {
+      if (result.error === "NOT_FOUND") {
+        return { ok: false, error: "NOT_FOUND" };
+      }
+      if (result.error === "NOT_EDITABLE" || result.error === "NOT_PENDING") {
+        return { ok: false, error: "NOT_EDITABLE" };
+      }
+      if (
+        result.error === "INVALID_PAYLOAD" ||
+        result.error === "INVALID_ORDER_ITEMS"
+      ) {
+        return { ok: false, error: "INVALID_PAYLOAD" };
+      }
+      return { ok: false, error: "SERVER_ERROR" };
+    }
+
+    let existingOrder: Record<string, unknown> = {};
+    try {
+      existingOrder = row.orderJson
+        ? (JSON.parse(String(row.orderJson)) as Record<string, unknown>)
+        : {};
+    } catch {
+      existingOrder = {};
+    }
+
+    const snapAfter = await getStaffTableCallSnapshot(storageMenuId, callId);
+    const orderDetail = buildOrderDetailForLog(
+      snapAfter,
+      existingOrder,
+      result.status,
+    );
+
+    await logMenuActivitySafe(req, storageMenuId, {
+      action: "TABLE_CALL_ITEMS_UPDATED",
+      targetType: "table_call",
+      targetId: callId,
+      summaryAr: `تعديل أصناف طلب — طاولة ${String(result.tableNumber ?? "?")}`,
+      summaryEn: `Edited order lines — table ${String(result.tableNumber ?? "?")}`,
+      detailJson: JSON.stringify({
+        status: result.status,
+        order: orderDetail,
+      }),
+    });
+
+    return {
+      ok: true,
+      items: result.items,
+      orderTotal: result.orderTotal,
+      status: result.status,
+    };
+  } catch (error) {
+    logger.error("applyMenuOrderItemsUpdate error:", error);
     return { ok: false, error: "SERVER_ERROR" };
   }
 }

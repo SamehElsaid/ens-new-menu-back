@@ -75,6 +75,14 @@ router.patch(
   staffTableCallController.patchTableCallItems,
 );
 
+// PATCH /api/staff-auth/table-calls/:id/complete — cashier finishes table order
+router.patch(
+  "/table-calls/:id/complete",
+  requireStaff,
+  validate([param("id").isInt()]),
+  staffTableCallController.patchTableCallComplete,
+);
+
 // POST /api/staff-auth/logout
 router.post("/logout", requireAuth, staffAuthController.staffLogout);
 

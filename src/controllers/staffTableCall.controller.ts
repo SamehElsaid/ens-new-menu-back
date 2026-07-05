@@ -7,7 +7,10 @@ import {
   setStaffTableCallStatus,
   updateStaffTableCallItems,
   updateStaffTableCallItemsAndStatus,
+  completeStaffTableCall,
 } from "../services/staffTableCall.service";
+import { canStaffFinishOrders } from "../config/staffJobRoles";
+import { resolveActorForLog } from "../services/menuActivityLog.service";
 import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
 import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
@@ -542,5 +545,85 @@ export async function patchTableCallItems(
   } catch (error) {
     logger.error("patchTableCallItems error:", error);
     sendApiError(res, req, 500, ApiErrors.failedUpdateCallItems);
+  }
+}
+
+/**
+ * PATCH /api/staff-auth/table-calls/:id/complete — cashier finishes table order.
+ */
+export async function patchTableCallComplete(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const staffId = req.user!.userId;
+    const menuId = await getMenuIdForStaff(staffId);
+    if (menuId === null) {
+      sendApiError(res, req, 403, ApiErrors.staffMenuNotFound);
+      return;
+    }
+
+    if (!(await menuOwnerHasProPlan(menuId))) {
+      sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+        code: "PRO_REQUIRED",
+      });
+      return;
+    }
+
+    const callId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(callId) || callId <= 0) {
+      sendApiError(res, req, 400, ApiErrors.invalidCallId);
+      return;
+    }
+
+    const actor = await resolveActorForLog(req);
+    if (!canStaffFinishOrders(actor.staffJobRole, actor.actorRole)) {
+      sendApiError(res, req, 403, ApiErrors.staffCashierRequired);
+      return;
+    }
+
+    const snapBefore = await getStaffTableCallSnapshot(menuId, callId);
+    if (!snapBefore) {
+      sendApiError(res, req, 404, ApiErrors.tableCallNotFound);
+      return;
+    }
+
+    const ok = await completeStaffTableCall(callId, menuId);
+    if (!ok) {
+      sendApiError(res, req, 409, ApiErrors.callNotFoundOrNotPending);
+      return;
+    }
+
+    await emitCallChanged(menuId, callId);
+    const snapAfter = await getStaffTableCallSnapshot(menuId, callId);
+    res.json({ status: "delivered" });
+    void logMenuActivitySafe(req, menuId, {
+      action: "TABLE_CALL_COMPLETED",
+      targetType: "table_call",
+      targetId: callId,
+      summaryAr: tableCallSummaries(snapAfter, {
+        type: "status",
+        status: "delivered",
+      }).ar,
+      summaryEn: tableCallSummaries(snapAfter, {
+        type: "status",
+        status: "delivered",
+      }).en,
+      detailJson: JSON.stringify({
+        status: "delivered",
+        order: snapAfter
+          ? {
+              tableNumber: snapAfter.tableNumber,
+              customerName: snapAfter.customerName,
+              items: snapAfter.items,
+              orderTotal: snapAfter.orderTotal,
+              status: snapAfter.status,
+            }
+          : null,
+      }),
+    });
+  } catch (error) {
+    logger.error("patchTableCallComplete error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedCallStatusUpdate);
   }
 }

@@ -7,6 +7,7 @@ import {
   getMenuActivityLogById,
   listMenuAuditLogs,
   applyMenuOrderAction,
+  applyMenuOrderItemsUpdate,
   getMenuOrderChannelFromLogId,
   parseMenuOrderDateParam,
   parseMenuOrderStatusParam,
@@ -165,6 +166,7 @@ const MENU_ORDER_ACTIONS = new Set<MenuOrderActionType>([
   "TABLE_CALL_CANCELLED",
   "TABLE_CALL_PREPARED",
   "TABLE_CALL_DELIVERED",
+  "TABLE_CALL_COMPLETED",
 ]);
 
 /**
@@ -211,6 +213,10 @@ export async function postMenuOrderActionHandler(
         sendApiError(res, req, 404, ApiErrors.activityLogNotFound);
         return;
       }
+      if (result.error === "FORBIDDEN") {
+        sendApiError(res, req, 403, ApiErrors.staffCashierRequired);
+        return;
+      }
       if (result.error === "INVALID_STATE") {
         sendApiError(res, req, 409, ApiErrors.callNotFoundOrNotPending);
         return;
@@ -222,6 +228,73 @@ export async function postMenuOrderActionHandler(
     res.json({ ok: true, status: result.status });
   } catch (error) {
     logger.error("postMenuOrderActionHandler error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedUpdateCallItems);
+  }
+}
+
+/**
+ * PATCH /api/menus/:menuId/activity-logs/:id/items
+ * Body: { items: [...] } — replace lines on open orders (staff + owner).
+ */
+export async function patchMenuOrderItemsHandler(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const { menuId, id } = req.params;
+    const mid = parseInt(menuId, 10);
+    const logId = parseInt(id, 10);
+
+    if (!Number.isFinite(mid) || mid <= 0 || !Number.isFinite(logId) || logId <= 0) {
+      sendApiError(res, req, 400, ApiErrors.validationFailed);
+      return;
+    }
+
+    const access = await getMenuAccessForRequest(req, mid);
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+
+    const orderChannel = await getMenuOrderChannelFromLogId(mid, logId);
+    if (orderChannel === "table" && !(await menuOwnerHasProPlan(mid))) {
+      sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+        code: "PRO_REQUIRED",
+      });
+      return;
+    }
+
+    const result = await applyMenuOrderItemsUpdate(
+      mid,
+      logId,
+      req.body?.items,
+      req,
+    );
+    if (!result.ok) {
+      if (result.error === "NOT_FOUND") {
+        sendApiError(res, req, 404, ApiErrors.activityLogNotFound);
+        return;
+      }
+      if (result.error === "NOT_EDITABLE") {
+        sendApiError(res, req, 409, ApiErrors.tableCallNotEditable);
+        return;
+      }
+      if (result.error === "INVALID_PAYLOAD") {
+        sendApiError(res, req, 400, ApiErrors.validationFailed);
+        return;
+      }
+      sendApiError(res, req, 500, ApiErrors.failedUpdateCallItems);
+      return;
+    }
+
+    res.json({
+      ok: true,
+      items: result.items,
+      orderTotal: result.orderTotal,
+      status: result.status,
+    });
+  } catch (error) {
+    logger.error("patchMenuOrderItemsHandler error:", error);
     sendApiError(res, req, 500, ApiErrors.failedUpdateCallItems);
   }
 }

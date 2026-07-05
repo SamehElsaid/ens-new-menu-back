@@ -25,3 +25,16 @@ export function isStaffCashierDbRole(role: unknown): boolean {
   const n = normalizeStaffJobRole(role);
   return n === STAFF_JOB_CASHIER;
 }
+
+export function isStaffWaiterRole(role: unknown): boolean {
+  return normalizeStaffJobRole(role) === STAFF_JOB_WAITER;
+}
+
+/** Owner/admin (non-staff JWT) may finish orders; staff cashiers only among staff. */
+export function canStaffFinishOrders(
+  staffJobRole: string | null | undefined,
+  actorRole: string,
+): boolean {
+  if (actorRole !== "staff") return true;
+  return isStaffCashierDbRole(staffJobRole);
+}
