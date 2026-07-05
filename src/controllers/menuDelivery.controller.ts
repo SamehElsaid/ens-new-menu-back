@@ -9,6 +9,7 @@ import {
   fetchMenuDeliverySettings,
   getMenuOwnerPhone,
   MENU_DELIVERY_GOVERNORATE_COLUMNS,
+  normalizeDeliveryMode,
 } from "../services/menuDelivery.service";
 
 function parseOptionalCoord(value: unknown): number | null {
@@ -77,12 +78,13 @@ export async function updateMenuDeliverySettings(
     const menuId = await assertMenuAccess(req, res);
     if (menuId == null) return;
 
-    const { deliveryOn, deliveryPhone, deliveryWhatsAppOn } = req.body;
+    const { deliveryOn, deliveryPhone, deliveryWhatsAppOn, deliveryMode } = req.body;
 
     if (
       deliveryOn === undefined &&
       deliveryPhone === undefined &&
-      deliveryWhatsAppOn === undefined
+      deliveryWhatsAppOn === undefined &&
+      deliveryMode === undefined
     ) {
       sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
       return;
@@ -114,6 +116,12 @@ export async function updateMenuDeliverySettings(
       request.input("deliveryWhatsAppOn", sql.Bit, Boolean(deliveryWhatsAppOn));
     }
 
+    if (deliveryMode !== undefined) {
+      const mode = normalizeDeliveryMode(deliveryMode);
+      updates.push("deliveryMode = @deliveryMode");
+      request.input("deliveryMode", sql.NVarChar, mode);
+    }
+
     if (deliveryOn !== undefined) {
       const enabled = Boolean(deliveryOn);
       updates.push("deliveryOn = @deliveryOn");
@@ -122,10 +130,7 @@ export async function updateMenuDeliverySettings(
       if (enabled) {
         const current = await getMenuOwnerPhone(menuId);
         const resolvedPhone =
-          trimmedPhone ||
-          current.deliveryPhone ||
-          current.phoneNumber ||
-          "";
+          trimmedPhone || current.deliveryPhone || current.phoneNumber || "";
 
         const whatsAppEnabled =
           deliveryWhatsAppOn !== undefined
@@ -150,10 +155,7 @@ export async function updateMenuDeliverySettings(
     if (deliveryWhatsAppOn === true && deliveryOn !== false) {
       const current = await getMenuOwnerPhone(menuId);
       const resolvedPhone =
-        trimmedPhone ||
-        current.deliveryPhone ||
-        current.phoneNumber ||
-        "";
+        trimmedPhone || current.deliveryPhone || current.phoneNumber || "";
 
       if (!resolvedPhone) {
         sendApiError(res, req, 400, ApiErrors.deliveryPhoneRequired);
@@ -232,8 +234,7 @@ export async function createMenuDeliveryGovernorate(
       .input("nameEn", sql.NVarChar, nameEn)
       .input("price", sql.Decimal(10, 2), price)
       .input("lat", sql.Decimal(10, 8), lat)
-      .input("lan", sql.Decimal(11, 8), lan)
-      .query(`
+      .input("lan", sql.Decimal(11, 8), lan).query(`
         INSERT INTO MenuDeliveryGovernorates (menuId, nameAr, nameEn, price, lat, lan)
         OUTPUT INSERTED.id, INSERTED.nameAr, INSERTED.nameEn, INSERTED.price,
                INSERTED.lat, INSERTED.lan, INSERTED.createdAt, INSERTED.updatedAt
@@ -332,8 +333,7 @@ export async function deleteMenuDeliveryGovernorate(
     const result = await pool
       .request()
       .input("menuId", sql.Int, menuId)
-      .input("governorateId", sql.Int, governorateId)
-      .query(`
+      .input("governorateId", sql.Int, governorateId).query(`
         DELETE FROM MenuDeliveryGovernorates
         WHERE id = @governorateId AND menuId = @menuId
       `);

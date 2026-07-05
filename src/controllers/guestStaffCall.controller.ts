@@ -14,6 +14,8 @@ function statusForError(error: string): number {
     case "INVALID_TABLE":
     case "INVALID_ORDER_ITEMS":
     case "INVALID_GOVERNORATE":
+    case "INVALID_BRANCH":
+    case "DELIVERY_OUT_OF_RANGE":
     case "INVALID_PHONE":
     case "INVALID_ADDRESS":
     case "DELIVERY_DISABLED":
@@ -62,6 +64,9 @@ export async function postGuestStaffCall(
       items: req.body?.items,
       status: req.body?.status,
       governorateId: req.body?.governorateId,
+      branchId: req.body?.branchId,
+      customerLat: req.body?.customerLat,
+      customerLng: req.body?.customerLng,
     });
 
     if (!result.ok) {

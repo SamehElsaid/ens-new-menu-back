@@ -14,6 +14,7 @@ import {
   getHomepageFeaturedLogos,
   getPublicMenuCatalog,
   getNearbyBranchMenu,
+  getBranchDeliveryQuote,
 } from "../controllers/public.controller";
 import {
   postAppVersion,
@@ -43,6 +44,9 @@ router.post(
     body("customerAddress").optional().isString().trim().isLength({ max: 500 }),
     body("orderNotes").optional().isString().trim().isLength({ max: 500 }),
     body("governorateId").optional().isInt({ min: 1 }).toInt(),
+    body("branchId").optional().isInt({ min: 1 }).toInt(),
+    body("customerLat").optional().isFloat({ min: -90, max: 90 }),
+    body("customerLng").optional().isFloat({ min: -180, max: 180 }),
     body("status")
       .optional()
       .isIn(["pending", "confirmed", "cancelled"])
@@ -104,6 +108,18 @@ router.get(
     query("lng").notEmpty().isFloat({ min: -180, max: 180 }).toFloat(),
   ]),
   getNearbyBranchMenu,
+);
+
+// GET /api/public/menu/:slug/branches/:branchId/delivery-quote — distance-based fee
+router.get(
+  "/menu/:slug/branches/:branchId/delivery-quote",
+  validate([
+    param("slug").notEmpty().trim(),
+    param("branchId").isInt({ min: 1 }).toInt(),
+    query("lat").notEmpty().isFloat({ min: -90, max: 90 }).toFloat(),
+    query("lng").notEmpty().isFloat({ min: -180, max: 180 }).toFloat(),
+  ]),
+  getBranchDeliveryQuote,
 );
 
 // GET /api/public/menu/:slug - Get menu by slug

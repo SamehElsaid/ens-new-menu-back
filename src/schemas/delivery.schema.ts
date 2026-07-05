@@ -80,6 +80,12 @@ export async function ensureDeliverySchema(): Promise<void> {
       ALTER TABLE Menus ADD deliveryLegacyUserSeedDone BIT NOT NULL
         CONSTRAINT DF_Menus_deliveryLegacyUserSeedDone DEFAULT 0;
     END
+
+    IF COL_LENGTH('Menus', 'deliveryMode') IS NULL
+    BEGIN
+      ALTER TABLE Menus ADD deliveryMode NVARCHAR(20) NOT NULL
+        CONSTRAINT DF_Menus_deliveryMode DEFAULT N'governorates';
+    END
   `);
 
   await pool.request().query(`

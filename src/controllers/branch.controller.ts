@@ -33,6 +33,7 @@ export async function getBranches(req: Request, res: Response): Promise<void> {
       .query(`
         SELECT 
           b.id, b.phone, b.email, b.workingHours, b.latitude, b.longitude, b.isActive,
+          b.deliveryBasePrice, b.deliveryPricePerKm, b.maxDeliveryRadiusKm,
           bt.name, bt.address, bt.city, bt.country
         FROM Branches b
         LEFT JOIN BranchTranslations bt ON b.id = bt.branchId AND bt.locale = @locale
@@ -66,6 +67,9 @@ export async function createBranch(req: Request, res: Response): Promise<void> {
       workingHours,
       latitude,
       longitude,
+      deliveryBasePrice,
+      deliveryPricePerKm,
+      maxDeliveryRadiusKm,
       isActive = true,
     } = req.body;
 
@@ -93,11 +97,20 @@ export async function createBranch(req: Request, res: Response): Promise<void> {
         .input('workingHours', sql.NVarChar, workingHours || null)
         .input('latitude', sql.Decimal(10, 8), latitude || null)
         .input('longitude', sql.Decimal(11, 8), longitude || null)
+        .input('deliveryBasePrice', sql.Decimal(10, 2), deliveryBasePrice ?? null)
+        .input('deliveryPricePerKm', sql.Decimal(10, 2), deliveryPricePerKm ?? null)
+        .input('maxDeliveryRadiusKm', sql.Decimal(6, 2), maxDeliveryRadiusKm ?? null)
         .input('isActive', sql.Bit, isActive)
         .query(`
-          INSERT INTO Branches (menuId, phone, email, workingHours, latitude, longitude, isActive)
+          INSERT INTO Branches (
+            menuId, phone, email, workingHours, latitude, longitude,
+            deliveryBasePrice, deliveryPricePerKm, maxDeliveryRadiusKm, isActive
+          )
           OUTPUT INSERTED.id
-          VALUES (@menuId, @phone, @email, @workingHours, @latitude, @longitude, @isActive)
+          VALUES (
+            @menuId, @phone, @email, @workingHours, @latitude, @longitude,
+            @deliveryBasePrice, @deliveryPricePerKm, @maxDeliveryRadiusKm, @isActive
+          )
         `);
 
       const newBranchId = branchResult.recordset[0].id;
@@ -162,6 +175,9 @@ export async function updateBranch(req: Request, res: Response): Promise<void> {
       workingHours,
       latitude,
       longitude,
+      deliveryBasePrice,
+      deliveryPricePerKm,
+      maxDeliveryRadiusKm,
       isActive,
     } = req.body;
 
@@ -206,6 +222,18 @@ export async function updateBranch(req: Request, res: Response): Promise<void> {
       if (longitude !== undefined) {
         updates.push('longitude = @longitude');
         request.input('longitude', sql.Decimal(11, 8), longitude || null);
+      }
+      if (deliveryBasePrice !== undefined) {
+        updates.push('deliveryBasePrice = @deliveryBasePrice');
+        request.input('deliveryBasePrice', sql.Decimal(10, 2), deliveryBasePrice ?? null);
+      }
+      if (deliveryPricePerKm !== undefined) {
+        updates.push('deliveryPricePerKm = @deliveryPricePerKm');
+        request.input('deliveryPricePerKm', sql.Decimal(10, 2), deliveryPricePerKm ?? null);
+      }
+      if (maxDeliveryRadiusKm !== undefined) {
+        updates.push('maxDeliveryRadiusKm = @maxDeliveryRadiusKm');
+        request.input('maxDeliveryRadiusKm', sql.Decimal(6, 2), maxDeliveryRadiusKm ?? null);
       }
       if (isActive !== undefined) {
         updates.push('isActive = @isActive');

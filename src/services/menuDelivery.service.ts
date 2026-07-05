@@ -1,11 +1,28 @@
 import { getPool, sql } from "../config/database";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
+import { isUserOnFreePlan } from "./subscriptionPlan.service";
+import {
+  quoteBranchDelivery,
+  type BranchDeliveryQuote,
+} from "./branchDelivery.service";
+
+export type DeliveryMode = "governorates" | "distance";
+
+export const DELIVERY_MODES: DeliveryMode[] = ["governorates", "distance"];
+
+export function normalizeDeliveryMode(raw: unknown): DeliveryMode {
+  const value = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  return value === "distance" ? "distance" : "governorates";
+}
 
 export const MENU_DELIVERY_GOVERNORATE_COLUMNS =
   "id, nameAr, nameEn, price, lat, lan, createdAt, updatedAt";
 
 export type MenuDeliverySettings = {
   deliveryOn: boolean;
+  deliveryMode: DeliveryMode;
   deliveryPhone: string | null;
   phoneNumber: string | null;
   deliveryWhatsAppOn: boolean;
@@ -65,7 +82,7 @@ export async function fetchMenuDeliverySettings(
 
   const menuResult = await pool.request().input("menuId", sql.Int, menuId)
     .query(`
-      SELECT m.deliveryOn, m.deliveryPhone, m.deliveryWhatsAppOn, u.phoneNumber
+      SELECT m.deliveryOn, m.deliveryMode, m.deliveryPhone, m.deliveryWhatsAppOn, u.phoneNumber
       FROM Menus m
       INNER JOIN Users u ON u.id = m.userId
       WHERE m.id = @menuId
@@ -74,6 +91,7 @@ export async function fetchMenuDeliverySettings(
   if (menuResult.recordset.length === 0) {
     return {
       deliveryOn: false,
+      deliveryMode: "governorates",
       deliveryPhone: null,
       phoneNumber: null,
       deliveryWhatsAppOn: true,
@@ -83,6 +101,7 @@ export async function fetchMenuDeliverySettings(
 
   const menu = menuResult.recordset[0] as {
     deliveryOn: boolean | number;
+    deliveryMode?: string | null;
     deliveryPhone: string | null;
     phoneNumber: string | null;
     deliveryWhatsAppOn?: boolean | number | null;
@@ -90,8 +109,7 @@ export async function fetchMenuDeliverySettings(
 
   const governoratesResult = await pool
     .request()
-    .input("menuId", sql.Int, menuId)
-    .query(`
+    .input("menuId", sql.Int, menuId).query(`
       SELECT ${MENU_DELIVERY_GOVERNORATE_COLUMNS}
       FROM MenuDeliveryGovernorates
       WHERE menuId = @menuId
@@ -100,6 +118,7 @@ export async function fetchMenuDeliverySettings(
 
   return {
     deliveryOn: Boolean(menu.deliveryOn),
+    deliveryMode: normalizeDeliveryMode(menu.deliveryMode),
     deliveryPhone: menu.deliveryPhone ?? null,
     phoneNumber: menu.phoneNumber ?? null,
     deliveryWhatsAppOn:
@@ -108,20 +127,114 @@ export async function fetchMenuDeliverySettings(
   };
 }
 
+export async function getMenuDeliveryMode(menuId: number): Promise<DeliveryMode> {
+  await ensureDeliverySchema();
+  const pool = await getPool();
+  const r = await pool.request().input("menuId", sql.Int, menuId).query(`
+    SELECT deliveryMode FROM Menus WHERE id = @menuId
+  `);
+  return normalizeDeliveryMode(r.recordset[0]?.deliveryMode);
+}
+
+/** Stored mode, but Free owners always behave as governorates (Pro data kept, feature locked). */
+export async function getEffectiveMenuDeliveryMode(
+  menuId: number,
+): Promise<DeliveryMode> {
+  await ensureDeliverySchema();
+  const pool = await getPool();
+  const r = await pool.request().input("menuId", sql.Int, menuId).query(`
+    SELECT m.deliveryMode, m.userId
+    FROM Menus m
+    WHERE m.id = @menuId
+  `);
+  if (r.recordset.length === 0) {
+    return "governorates";
+  }
+  const row = r.recordset[0] as { deliveryMode?: string | null; userId: number };
+  if (await isUserOnFreePlan(row.userId)) {
+    return "governorates";
+  }
+  return normalizeDeliveryMode(row.deliveryMode);
+}
+
+export type ResolvedBranchDelivery = {
+  branchId: number;
+  quote: BranchDeliveryQuote;
+};
+
+export async function resolveBranchDeliveryQuote(
+  menuId: number,
+  branchId: number,
+  customerLat: number,
+  customerLng: number,
+): Promise<
+  | { ok: true; delivery: ResolvedBranchDelivery }
+  | {
+      ok: false;
+      reason: "branch_not_found" | "out_of_range" | "not_configured";
+      quote?: BranchDeliveryQuote;
+    }
+> {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input("menuId", sql.Int, menuId)
+    .input("branchId", sql.Int, branchId)
+    .query(`
+      SELECT
+        b.latitude,
+        b.longitude,
+        b.deliveryBasePrice,
+        b.deliveryPricePerKm,
+        b.maxDeliveryRadiusKm
+      FROM Branches b
+      WHERE b.menuId = @menuId AND b.id = @branchId AND b.isActive = 1
+    `);
+
+  if (result.recordset.length === 0) {
+    return { ok: false, reason: "branch_not_found" };
+  }
+
+  const branch = result.recordset[0];
+  if (
+    branch.latitude == null ||
+    branch.longitude == null ||
+    branch.deliveryBasePrice == null ||
+    branch.deliveryPricePerKm == null ||
+    branch.maxDeliveryRadiusKm == null
+  ) {
+    return { ok: false, reason: "not_configured" };
+  }
+
+  const quote = quoteBranchDelivery(
+    {
+      latitude: branch.latitude,
+      longitude: branch.longitude,
+      deliveryBasePrice: branch.deliveryBasePrice,
+      deliveryPricePerKm: branch.deliveryPricePerKm,
+      maxDeliveryRadiusKm: branch.maxDeliveryRadiusKm,
+    },
+    customerLat,
+    customerLng,
+  );
+
+  if (!quote.inRange) {
+    return { ok: false, reason: "out_of_range", quote };
+  }
+
+  return { ok: true, delivery: { branchId, quote } };
+}
+
 export async function resolveMenuDeliveryGovernorate(
   menuId: number,
   governorateId: number,
-): Promise<
-  | { ok: true; governorate: MenuDeliveryGovernorate }
-  | { ok: false }
-> {
+): Promise<{ ok: true; governorate: MenuDeliveryGovernorate } | { ok: false }> {
   await ensureDeliverySchema();
   const pool = await getPool();
   const result = await pool
     .request()
     .input("menuId", sql.Int, menuId)
-    .input("governorateId", sql.Int, governorateId)
-    .query(`
+    .input("governorateId", sql.Int, governorateId).query(`
       SELECT id, nameAr, nameEn, price, lat, lan
       FROM MenuDeliveryGovernorates
       WHERE id = @governorateId AND menuId = @menuId

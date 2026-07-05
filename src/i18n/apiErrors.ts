@@ -394,6 +394,22 @@ export const ApiErrors = {
     en: "Failed to delete branch",
     ar: "فشل حذف الفرع",
   },
+  failedGetBranchDeliveryQuote: {
+    en: "Failed to calculate delivery quote",
+    ar: "فشل حساب سعر التوصيل",
+  },
+  deliveryOutOfRange: {
+    en: "Out of delivery range",
+    ar: "خارج نطاق التوصيل",
+  },
+  deliveryModeNotDistance: {
+    en: "Distance-based delivery is not enabled for this menu",
+    ar: "التوصيل حسب المسافة غير مفعّل لهذه القائمة",
+  },
+  branchDeliveryNotConfigured: {
+    en: "Branch delivery settings are incomplete",
+    ar: "إعدادات توصيل الفرع غير مكتملة",
+  },
   deliveryPhoneRequired: {
     en: "Delivery phone number is required to enable delivery",
     ar: "رقم هاتف التوصيل مطلوب لتفعيل الدلفري",

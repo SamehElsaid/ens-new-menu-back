@@ -3,11 +3,13 @@ import { body, query, param } from 'express-validator';
 import * as branchController from '../controllers/branch.controller';
 import { validate } from '../middleware/validation';
 import { requireAuth } from '../middleware/auth.middleware';
+import { requireProPlan } from '../middleware/planLimits';
 
 const router = Router({ mergeParams: true }); // To access menuId from parent router
 
-// All routes require authentication
+// All routes require authentication + Pro plan
 router.use(requireAuth);
+router.use(requireProPlan);
 
 // GET /api/menus/:menuId/branches - Get branches
 router.get(
@@ -37,6 +39,9 @@ router.post(
     body('workingHours').optional().isString().trim().isLength({ max: 500 }),
     body('latitude').optional().isFloat({ min: -90, max: 90 }),
     body('longitude').optional().isFloat({ min: -180, max: 180 }),
+    body('deliveryBasePrice').optional({ nullable: true }).isFloat({ min: 0 }),
+    body('deliveryPricePerKm').optional({ nullable: true }).isFloat({ min: 0 }),
+    body('maxDeliveryRadiusKm').optional({ nullable: true }).isFloat({ min: 0.1, max: 500 }),
     body('isActive').optional().isBoolean(),
   ]),
   branchController.createBranch
@@ -61,6 +66,9 @@ router.put(
     body('workingHours').optional().isString().trim().isLength({ max: 500 }),
     body('latitude').optional().isFloat({ min: -90, max: 90 }),
     body('longitude').optional().isFloat({ min: -180, max: 180 }),
+    body('deliveryBasePrice').optional({ nullable: true }).isFloat({ min: 0 }),
+    body('deliveryPricePerKm').optional({ nullable: true }).isFloat({ min: 0 }),
+    body('maxDeliveryRadiusKm').optional({ nullable: true }).isFloat({ min: 0.1, max: 500 }),
     body('isActive').optional().isBoolean(),
   ]),
   branchController.updateBranch

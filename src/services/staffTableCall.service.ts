@@ -30,9 +30,12 @@ import {
 } from "./menuGroup.service";
 import {
   isMenuDeliveryEnabled,
+  getEffectiveMenuDeliveryMode,
   resolveMenuDeliveryGovernorate,
+  resolveBranchDeliveryQuote,
 } from "./menuDelivery.service";
 import { broadcastMenuActivityUpdated } from "../socket/staffIoBroadcast";
+import { parseGeoCoord } from "../utils/geoDistance";
 
 export type StaffOrderType = "table" | "delivery";
 
@@ -78,6 +81,8 @@ export type GuestStaffCallError =
   | "MENU_NOT_FOUND"
   | "INVALID_TABLE"
   | "INVALID_GOVERNORATE"
+  | "INVALID_BRANCH"
+  | "DELIVERY_OUT_OF_RANGE"
   | "INVALID_PHONE"
   | "INVALID_ADDRESS"
   | "DELIVERY_DISABLED"
@@ -111,6 +116,9 @@ export type GuestStaffCallOptions = {
   /** If set, stored on insert (default `pending`). */
   status?: unknown;
   governorateId?: number | null;
+  branchId?: number | null;
+  customerLat?: number | null;
+  customerLng?: number | null;
 };
 
 function parseOrderType(
@@ -124,10 +132,7 @@ function parseOrderType(
   if (normalized === "delivery" || normalized === "table") {
     return normalized;
   }
-  if (
-    governorateId != null ||
-    tableNumber.toLowerCase() === "delivery"
-  ) {
+  if (governorateId != null || tableNumber.toLowerCase() === "delivery") {
     return "delivery";
   }
   return "table";
@@ -612,16 +617,22 @@ export async function processGuestStaffCall(
     }
 
     const ownerId = m.userId as number;
-    if (await isUserOnFreePlan(ownerId) && !isDeliveryOrder) {
+    if ((await isUserOnFreePlan(ownerId)) && !isDeliveryOrder) {
       return { ok: false, error: "FEATURE_REQUIRES_PRO" };
     }
 
-    let deliveryGovernorate:
+    let deliveryGovernorate: {
+      id: number;
+      nameAr: string;
+      nameEn: string;
+      price: number;
+    } | null = null;
+    let distanceDelivery:
       | {
-          id: number;
-          nameAr: string;
-          nameEn: string;
-          price: number;
+          branchId: number;
+          distanceKm: number;
+          deliveryFee: number;
+          maxDeliveryRadiusKm: number | null;
         }
       | null = null;
 
@@ -632,15 +643,48 @@ export async function processGuestStaffCall(
         return { ok: false, error: "DELIVERY_DISABLED" };
       }
 
-      const governorateId = governorateIdFromOptions;
-      if (!governorateId) {
-        return { ok: false, error: "INVALID_PAYLOAD" };
+      const deliveryMode = await getEffectiveMenuDeliveryMode(menuId);
+
+      if (deliveryMode === "distance") {
+        const branchId = parseGovernorateId(options?.branchId);
+        const customerLat = parseGeoCoord(options?.customerLat);
+        const customerLng = parseGeoCoord(options?.customerLng);
+
+        if (branchId == null || customerLat == null || customerLng == null) {
+          return { ok: false, error: "INVALID_PAYLOAD" };
+        }
+
+        const branchResult = await resolveBranchDeliveryQuote(
+          menuId,
+          branchId,
+          customerLat,
+          customerLng,
+        );
+
+        if (!branchResult.ok) {
+          if (branchResult.reason === "out_of_range") {
+            return { ok: false, error: "DELIVERY_OUT_OF_RANGE" };
+          }
+          return { ok: false, error: "INVALID_BRANCH" };
+        }
+
+        distanceDelivery = {
+          branchId: branchResult.delivery.branchId,
+          distanceKm: branchResult.delivery.quote.distanceKm,
+          deliveryFee: branchResult.delivery.quote.deliveryFee ?? 0,
+          maxDeliveryRadiusKm: branchResult.delivery.quote.maxDeliveryRadiusKm,
+        };
+      } else {
+        const governorateId = governorateIdFromOptions;
+        if (!governorateId) {
+          return { ok: false, error: "INVALID_PAYLOAD" };
+        }
+        const govResult = await resolveDeliveryGovernorate(menuId, governorateId);
+        if (!govResult.ok) {
+          return { ok: false, error: "INVALID_GOVERNORATE" };
+        }
+        deliveryGovernorate = govResult.governorate;
       }
-      const govResult = await resolveDeliveryGovernorate(menuId, governorateId);
-      if (!govResult.ok) {
-        return { ok: false, error: "INVALID_GOVERNORATE" };
-      }
-      deliveryGovernorate = govResult.governorate;
     }
 
     const tablesCount = await pool
@@ -720,15 +764,23 @@ export async function processGuestStaffCall(
         targetId: persisted.id,
         summaryAr: isDeliveryOrder
           ? customerName
-            ? `طلب توصيل جديد من ${customerName}${deliveryGovernorate ? ` - ${deliveryGovernorate.nameAr}` : ""}`
-            : `طلب توصيل جديد${deliveryGovernorate ? ` - ${deliveryGovernorate.nameAr}` : ""}`
+            ? distanceDelivery
+              ? `طلب توصيل جديد من ${customerName} - ${distanceDelivery.distanceKm} كم`
+              : `طلب توصيل جديد من ${customerName}${deliveryGovernorate ? ` - ${deliveryGovernorate.nameAr}` : ""}`
+            : distanceDelivery
+              ? `طلب توصيل جديد - ${distanceDelivery.distanceKm} كم`
+              : `طلب توصيل جديد${deliveryGovernorate ? ` - ${deliveryGovernorate.nameAr}` : ""}`
           : customerName
             ? `طلب جديد من ${customerName} - طاولة ${effectiveTable}`
             : `طلب جديد - طاولة ${effectiveTable}`,
         summaryEn: isDeliveryOrder
           ? customerName
-            ? `New delivery order from ${customerName}${deliveryGovernorate ? ` - ${deliveryGovernorate.nameEn}` : ""}`
-            : `New delivery order${deliveryGovernorate ? ` - ${deliveryGovernorate.nameEn}` : ""}`
+            ? distanceDelivery
+              ? `New delivery order from ${customerName} - ${distanceDelivery.distanceKm} km`
+              : `New delivery order from ${customerName}${deliveryGovernorate ? ` - ${deliveryGovernorate.nameEn}` : ""}`
+            : distanceDelivery
+              ? `New delivery order - ${distanceDelivery.distanceKm} km`
+              : `New delivery order${deliveryGovernorate ? ` - ${deliveryGovernorate.nameEn}` : ""}`
           : customerName
             ? `New order from ${customerName} - table ${effectiveTable}`
             : `New order - table ${effectiveTable}`,
@@ -757,6 +809,15 @@ export async function processGuestStaffCall(
                   governorateNameAr: deliveryGovernorate.nameAr,
                   governorateNameEn: deliveryGovernorate.nameEn,
                   deliveryFee: Number(deliveryGovernorate.price) || 0,
+                }
+              : {}),
+            ...(distanceDelivery
+              ? {
+                  branchId: distanceDelivery.branchId,
+                  distanceKm: distanceDelivery.distanceKm,
+                  deliveryFee: distanceDelivery.deliveryFee,
+                  maxDeliveryRadiusKm: distanceDelivery.maxDeliveryRadiusKm,
+                  deliveryMode: "distance",
                 }
               : {}),
           },
@@ -1108,12 +1169,10 @@ function buildOrderItemsSetSql(
   return sets.join(",\n            ");
 }
 
-function resolveStaffOrderType(
-  row: {
-    orderType?: string | null;
-    tableNumber?: string | null;
-  },
-): StaffOrderType {
+function resolveStaffOrderType(row: {
+  orderType?: string | null;
+  tableNumber?: string | null;
+}): StaffOrderType {
   const raw = String(row.orderType ?? "")
     .trim()
     .toLowerCase();
@@ -1132,9 +1191,7 @@ function toStaffTableCallRow(
     orderType?: string | null;
     createdAt: Date;
     customerName: string | null;
-    customerPhone?:
-      | string
-      | null;
+    customerPhone?: string | null;
     customerAddress?: string | null;
     orderNotes?: string | null;
     orderItemsJson?: string;
@@ -1868,8 +1925,7 @@ export async function updateStaffTableCallItemsAndStatus(
       .request()
       .input("id", sql.Int, callId)
       .input("menuId", sql.Int, menuId)
-      .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson)
-      .query(`
+      .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson).query(`
         UPDATE StaffTableCalls
         SET ${setSql}
         WHERE ${whereSql}

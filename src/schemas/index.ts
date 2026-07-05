@@ -24,6 +24,7 @@ import { migrateDeprecatedMenuThemes } from "./deprecatedMenuThemes.schema";
 import { ensureDomainTransferSchema } from "./domainTransfer.schema";
 import { ensureSubscriptionExtrasSchema } from "./subscriptionExtras.schema";
 import { ensureMenuGroupSchema } from "./menuGroup.schema";
+import { ensureBranchDeliverySchema } from "./branchDelivery.schema";
 
 export { ensureAdminActivityLogSchema } from "./adminActivityLog.schema";
 export { ensureAdminCustomerSchema } from "./adminCustomer.schema";
@@ -50,6 +51,7 @@ export { migrateDeprecatedMenuThemes } from "./deprecatedMenuThemes.schema";
 export { ensureDomainTransferSchema } from "./domainTransfer.schema";
 export { ensureSubscriptionExtrasSchema } from "./subscriptionExtras.schema";
 export { ensureMenuGroupSchema } from "./menuGroup.schema";
+export { ensureBranchDeliverySchema } from "./branchDelivery.schema";
 
 /** Runs all idempotent DB schema migrations on startup (after pool is connected). */
 export async function ensureDatabaseSchemas(): Promise<void> {
@@ -79,6 +81,7 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "domainTransfer", run: ensureDomainTransferSchema },
     { name: "subscriptionExtras", run: ensureSubscriptionExtrasSchema },
     { name: "menuGroup", run: ensureMenuGroupSchema },
+    { name: "branchDelivery", run: ensureBranchDeliverySchema },
   ];
 
   for (const step of steps) {

@@ -23,6 +23,7 @@ router.put(
     body("deliveryOn").optional().isBoolean(),
     body("deliveryWhatsAppOn").optional().isBoolean(),
     body("deliveryPhone").optional().isString().trim().isLength({ max: 50 }),
+    body("deliveryMode").optional().isIn(["governorates", "distance"]),
   ]),
   menuDeliveryController.updateMenuDeliverySettings,
 );

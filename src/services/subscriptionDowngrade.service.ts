@@ -114,20 +114,7 @@ export class SubscriptionDowngradeService {
         logger.info(`Deleted ${adsResult.recordset.length} excess ads for user ${userId} (free plan allows 1 ad per menu)`);
       }
 
-      // Delete all branches (free plan doesn't support branches)
-      const branchesResult = await pool.request()
-        .input('userId', sql.Int, userId)
-        .query(`
-          DELETE FROM Branches
-          OUTPUT DELETED.id
-          WHERE menuId IN (
-            SELECT id FROM Menus WHERE userId = @userId
-          )
-        `);
-
-      if (branchesResult.recordset.length > 0) {
-        logger.info(`Deleted ${branchesResult.recordset.length} branches for user ${userId} (free plan doesn't support branches)`);
-      }
+      // Pro-only data (branches, distance delivery mode, etc.) is kept in DB — access is locked via requireProPlan at runtime.
 
       logger.info(`Successfully applied free plan limits for user ${userId}`);
     } catch (error) {

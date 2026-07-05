@@ -23,9 +23,14 @@ import {
   findNearestBranchMenu,
   MIN_BRANCH_REDIRECT_IMPROVEMENT_KM,
 } from "../services/menuGeoRedirect.service";
+import {
+  getEffectiveMenuDeliveryMode,
+  resolveBranchDeliveryQuote,
+} from "../services/menuDelivery.service";
 
 export type PublicDeliverySettings = {
   deliveryOn: boolean;
+  deliveryMode: "governorates" | "distance";
   deliveryPhone: string | null;
   phoneNumber: string | null;
   deliveryWhatsAppOn: boolean;
@@ -35,7 +40,9 @@ export type PublicDeliverySettings = {
 async function fetchPublicDeliveryForMenu(
   menuId: number,
 ): Promise<PublicDeliverySettings> {
-  return fetchMenuDeliverySettings(menuId);
+  const settings = await fetchMenuDeliverySettings(menuId);
+  const effectiveMode = await getEffectiveMenuDeliveryMode(menuId);
+  return { ...settings, deliveryMode: effectiveMode };
 }
 
 /** Optional table from QR: `?tableNumber=` or `?table=` (max 50 chars). */
@@ -405,9 +412,8 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       .input("limit", sql.Int, PUBLIC_MENU_INITIAL_ITEMS_LIMIT)
       .query(itemsQuery);
 
-    const countResult = await pool
-      .request()
-      .input("menuId", sql.Int, menu.id).query(`
+    const countResult = await pool.request().input("menuId", sql.Int, menu.id)
+      .query(`
         SELECT COUNT(*) as total
         FROM MenuItems mi
         WHERE mi.menuId = @menuId AND mi.available = 1
@@ -424,6 +430,9 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           b.phone,
           b.latitude,
           b.longitude,
+          b.deliveryBasePrice,
+          b.deliveryPricePerKm,
+          b.maxDeliveryRadiusKm,
           bt.name,
           bt.address,
           bt.locale
@@ -1202,7 +1211,9 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
     if (hasSizes) optionSelectParts.push("mi.sizes");
     if (hasVariants) optionSelectParts.push("mi.variants");
     const optionSelect =
-      optionSelectParts.length > 0 ? `,\n          ${optionSelectParts.join(",\n          ")}` : "";
+      optionSelectParts.length > 0
+        ? `,\n          ${optionSelectParts.join(",\n          ")}`
+        : "";
 
     const countRequest = pool.request().input("menuId", sql.Int, menuId);
     if (hasCategoryFilter && hasCategoryId) {
@@ -1348,4 +1359,85 @@ export async function getNearbyBranchMenu(
       message: "Failed to resolve nearby branch",
     });
   }
-};
+}
+
+/** GET /api/public/menu/:slug/branches/:branchId/delivery-quote — distance-based delivery fee. */
+export async function getBranchDeliveryQuote(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const slug = String(req.params.slug ?? "").trim();
+    const branchId = parseInt(String(req.params.branchId), 10);
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+
+    if (!slug || !Number.isFinite(branchId) || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      res.status(400).json({ success: false, message: "Invalid parameters" });
+      return;
+    }
+
+    const pool = await getPool();
+    const menuResult = await pool
+      .request()
+      .input("slug", sql.NVarChar, slug)
+      .query(`SELECT id FROM Menus WHERE slug = @slug`);
+
+    if (menuResult.recordset.length === 0) {
+      res.status(404).json({ success: false, message: "Menu not found" });
+      return;
+    }
+
+    const menuId = menuResult.recordset[0].id as number;
+    const deliveryMode = await getEffectiveMenuDeliveryMode(menuId);
+    if (deliveryMode !== "distance") {
+      sendApiError(res, req, 400, ApiErrors.deliveryModeNotDistance);
+      return;
+    }
+
+    const resolved = await resolveBranchDeliveryQuote(menuId, branchId, lat, lng);
+    if (!resolved.ok) {
+      if (resolved.reason === "branch_not_found") {
+        sendApiError(res, req, 404, ApiErrors.branchNotFound);
+        return;
+      }
+      if (resolved.reason === "not_configured") {
+        sendApiError(res, req, 400, ApiErrors.branchDeliveryNotConfigured);
+        return;
+      }
+      res.json({
+        success: true,
+        data: {
+          ...(resolved.quote ?? {
+            inRange: false,
+            distanceKm: 0,
+            deliveryFee: null,
+            maxDeliveryRadiusKm: null,
+          }),
+          message: ApiErrors.deliveryOutOfRange,
+        },
+      });
+      return;
+    }
+
+    const { quote } = resolved.delivery;
+    if (!quote.inRange) {
+      res.json({
+        success: true,
+        data: {
+          ...quote,
+          message: ApiErrors.deliveryOutOfRange,
+        },
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: quote,
+    });
+  } catch (error) {
+    console.error("Error calculating branch delivery quote:", error);
+    sendApiError(res, req, 500, ApiErrors.failedGetBranchDeliveryQuote);
+  }
+}
