@@ -188,7 +188,7 @@ export async function resolveBranchDeliveryQuote(
         b.deliveryPricePerKm,
         b.maxDeliveryRadiusKm
       FROM Branches b
-      WHERE b.menuId = @menuId AND b.id = @branchId AND b.isActive = 1
+      WHERE b.menuId = @menuId AND b.id = @branchId
     `);
 
   if (result.recordset.length === 0) {
