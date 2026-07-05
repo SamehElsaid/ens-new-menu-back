@@ -18,34 +18,6 @@
  *       200:
  *         description: Latest version
  *
- * /api/public/staff-call:
- *   post:
- *     tags: [Public]
- *     summary: Guest staff call / delivery order
- *     security: []
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [menuId]
- *             properties:
- *               menuId: { type: integer }
- *               type: { type: string, enum: [table, delivery] }
- *               tableNumber: { type: string }
- *               customerName: { type: string }
- *               customerPhone: { type: string }
- *               customerAddress: { type: string }
- *               orderNotes: { type: string }
- *               governorateId: { type: integer }
- *               branchId: { type: integer }
- *               customerLat: { type: number }
- *               customerLng: { type: number }
- *               status: { type: string, enum: [pending, confirmed, cancelled] }
- *     responses:
- *       201:
- *         description: Call created
- *
  * /api/public/menus:
  *   get:
  *     tags: [Public]
@@ -104,50 +76,51 @@
  * /api/public/menu/{slug}/nearby-branch:
  *   get:
  *     tags: [Public]
- *     summary: Geo-based nearest branch menu
+ *     summary: Nearest linked menu in a group (geo redirect)
+ *     description: |
+ *       Compares the customer's GPS to all menus in the same linked group.
+ *       Uses governorate coordinates for Free menus and branch GPS for Pro distance menus.
+ *       Returns a redirect slug when another group menu is at least 0.5 km closer.
  *     security: []
  *     parameters:
  *       - in: path
  *         name: slug
  *         required: true
  *         schema: { type: string }
+ *         example: alsham-restaurant
  *       - in: query
  *         name: lat
  *         required: true
- *         schema: { type: number }
+ *         schema: { type: number, minimum: -90, maximum: 90 }
+ *         example: 30.0444
  *       - in: query
  *         name: lng
  *         required: true
- *         schema: { type: number }
+ *         schema: { type: number, minimum: -180, maximum: 180 }
+ *         example: 31.2357
  *     responses:
  *       200:
- *         description: Branch redirect info
- *
- * /api/public/menu/{slug}/branches/{branchId}/delivery-quote:
- *   get:
- *     tags: [Public]
- *     summary: Distance-based delivery fee quote
- *     security: []
- *     parameters:
- *       - in: path
- *         name: slug
- *         required: true
- *         schema: { type: string }
- *       - in: path
- *         name: branchId
- *         required: true
- *         schema: { type: integer }
- *       - in: query
- *         name: lat
- *         required: true
- *         schema: { type: number }
- *       - in: query
- *         name: lng
- *         required: true
- *         schema: { type: number }
- *     responses:
- *       200:
- *         description: Delivery quote
+ *         description: Redirect decision
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     currentSlug: { type: string, example: alsham-cairo }
+ *                     minImprovementKm: { type: number, example: 0.5 }
+ *                     redirect:
+ *                       type: object
+ *                       nullable: true
+ *                       properties:
+ *                         menuId: { type: integer, example: 44 }
+ *                         slug: { type: string, example: alsham-alexandria }
+ *                         distanceKm: { type: number, example: 2.3 }
+ *       404:
+ *         description: Menu not found
  *
  * /api/public/menu/{slug}:
  *   get:
@@ -245,50 +218,6 @@
  *     responses:
  *       201:
  *         description: Rating submitted
- *
- * /api/public/ads/{id}/click:
- *   post:
- *     tags: [Public]
- *     summary: Track ad click
- *     security: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema: { type: integer }
- *     responses:
- *       200:
- *         description: Click recorded
- *
- * /api/public/ads:
- *   get:
- *     tags: [Public]
- *     summary: Active global ads
- *     security: []
- *     parameters:
- *       - in: query
- *         name: position
- *         schema: { type: string }
- *       - in: query
- *         name: limit
- *         schema: { type: integer, maximum: 20 }
- *     responses:
- *       200:
- *         description: Ads list
- *
- * /api/public/menu/{menuId}/ads:
- *   get:
- *     tags: [Public]
- *     summary: Menu custom ads
- *     security: []
- *     parameters:
- *       - in: path
- *         name: menuId
- *         required: true
- *         schema: { type: integer }
- *     responses:
- *       200:
- *         description: Menu ads
  *
  * /api/public/plans:
  *   get:

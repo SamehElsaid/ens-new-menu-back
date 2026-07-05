@@ -203,16 +203,140 @@ const PATH_OVERRIDES: Record<
     post: {
       request: {
         menuId: 42,
-        type: "table",
-        tableNumber: "T-5",
+        type: "delivery",
         customerName: "Mohamed",
-        orderNotes: "No ice please",
+        customerPhone: "+201012345678",
+        customerAddress: "Smouha, Alexandria",
+        branchId: 3,
+        customerLat: 31.2156,
+        customerLng: 29.9553,
         status: "pending",
       },
       response: {
         success: true,
         callId: 9001,
         status: "pending",
+      },
+    },
+  },
+  "/api/public/menu/{slug}/nearby-branch": {
+    get: {
+      response: {
+        success: true,
+        data: {
+          currentSlug: "alsham-cairo",
+          minImprovementKm: 0.5,
+          redirect: {
+            menuId: 44,
+            slug: "alsham-alexandria",
+            distanceKm: 2.3,
+          },
+        },
+      },
+    },
+  },
+  "/api/public/menu/{slug}/branches/{branchId}/delivery-quote": {
+    get: {
+      response: {
+        success: true,
+        data: {
+          inRange: true,
+          distanceKm: 4.2,
+          deliveryFee: 45,
+          maxDeliveryRadiusKm: 10,
+        },
+      },
+    },
+  },
+  "/api/menus/{menuId}/branches": {
+    get: {
+      response: {
+        branches: [
+          {
+            id: 3,
+            phone: null,
+            latitude: 30.0444,
+            longitude: 31.2357,
+            deliveryBasePrice: 20,
+            deliveryPricePerKm: 10,
+            maxDeliveryRadiusKm: 10,
+            nameAr: "فرع القاهرة",
+            nameEn: "Cairo Branch",
+            addressAr: null,
+            addressEn: null,
+          },
+        ],
+      },
+    },
+    post: {
+      request: {
+        nameAr: "فرع القاهرة",
+        nameEn: "Cairo Branch",
+        latitude: 30.0444,
+        longitude: 31.2357,
+        deliveryBasePrice: 20,
+        deliveryPricePerKm: 10,
+        maxDeliveryRadiusKm: 10,
+      },
+      response: {
+        message: "Branch created successfully",
+        branchId: 3,
+      },
+    },
+  },
+  "/api/menus/{menuId}/delivery/settings": {
+    get: {
+      response: {
+        deliveryOn: true,
+        deliveryMode: "distance",
+        deliveryPhone: "+201012345678",
+        phoneNumber: "+201012345678",
+        deliveryWhatsAppOn: true,
+        governorates: [],
+      },
+    },
+    put: {
+      request: {
+        deliveryOn: true,
+        deliveryMode: "distance",
+        deliveryWhatsAppOn: true,
+        deliveryPhone: "+201012345678",
+      },
+      response: {
+        deliveryOn: true,
+        deliveryMode: "distance",
+        deliveryPhone: "+201012345678",
+        phoneNumber: "+201012345678",
+        deliveryWhatsAppOn: true,
+        governorates: [],
+      },
+    },
+  },
+  "/api/menu-groups": {
+    get: {
+      response: {
+        groups: [
+          {
+            id: 2,
+            userId: 128,
+            name: "Cairo & Alexandria",
+            inboxMenuId: 42,
+            menuIds: [42, 44, 45],
+          },
+        ],
+      },
+    },
+    post: {
+      request: {
+        name: "Cairo & Alexandria",
+        menuIds: [42, 44],
+      },
+      response: {
+        group: {
+          id: 2,
+          name: "Cairo & Alexandria",
+          menuIds: [42, 44],
+        },
       },
     },
   },
@@ -248,12 +372,46 @@ const PATH_OVERRIDES: Record<
   "/api/user/profile": {
     get: {
       response: {
-        id: 128,
-        email: "owner@restaurant.com",
-        name: "Ahmed Hassan",
-        restaurantName: "مطعم الشام",
-        phoneNumber: "+201012345678",
-        profileImage: "/uploads/profile-images/example.webp",
+        user: {
+          id: 128,
+          email: "owner@restaurant.com",
+          name: "Ahmed Hassan",
+          restaurantName: "مطعم الشام",
+          phoneNumber: "+201012345678",
+          deliveryOn: true,
+          profileImage: "/uploads/profile-images/example.webp",
+          isEmailVerified: true,
+          isPhoneVerified: false,
+          hasFcmToken: true,
+        },
+      },
+    },
+  },
+  "/api/admin/stats": {
+    get: {
+      response: {
+        stats: {
+          totalUsers: 1250,
+          activeAccounts: 1180,
+          paidPlans: 320,
+          monthlyRevenue: 48500,
+        },
+      },
+    },
+  },
+  "/api/admin/users": {
+    get: {
+      response: {
+        users: [
+          {
+            id: 128,
+            name: "Ahmed Hassan",
+            email: "owner@restaurant.com",
+            planName: "Pro",
+            menusCount: 3,
+          },
+        ],
+        pagination: { currentPage: 1, totalItems: 1250 },
       },
     },
   },

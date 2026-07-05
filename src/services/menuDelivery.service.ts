@@ -140,21 +140,47 @@ export async function getMenuDeliveryMode(menuId: number): Promise<DeliveryMode>
 export async function getEffectiveMenuDeliveryMode(
   menuId: number,
 ): Promise<DeliveryMode> {
+  const modes = await getEffectiveMenuDeliveryModesForMenus([menuId]);
+  return modes.get(menuId) ?? "governorates";
+}
+
+/** Batch lookup of effective delivery mode (respects free plan → governorates). */
+export async function getEffectiveMenuDeliveryModesForMenus(
+  menuIds: number[],
+): Promise<Map<number, DeliveryMode>> {
+  const safeIds = [
+    ...new Set(menuIds.filter((n) => Number.isFinite(n) && n > 0)),
+  ];
+  const map = new Map<number, DeliveryMode>();
+  if (safeIds.length === 0) return map;
+
   await ensureDeliverySchema();
   const pool = await getPool();
-  const r = await pool.request().input("menuId", sql.Int, menuId).query(`
-    SELECT m.deliveryMode, m.userId
+  const inList = safeIds.join(",");
+  const r = await pool.request().query(`
+    SELECT m.id, m.deliveryMode, m.userId
     FROM Menus m
-    WHERE m.id = @menuId
+    WHERE m.id IN (${inList})
   `);
-  if (r.recordset.length === 0) {
-    return "governorates";
+
+  const freePlanByUser = new Map<number, boolean>();
+  for (const row of r.recordset as {
+    id: number;
+    deliveryMode?: string | null;
+    userId: number;
+  }[]) {
+    let isFree = freePlanByUser.get(row.userId);
+    if (isFree === undefined) {
+      isFree = await isUserOnFreePlan(row.userId);
+      freePlanByUser.set(row.userId, isFree);
+    }
+    map.set(
+      row.id,
+      isFree ? "governorates" : normalizeDeliveryMode(row.deliveryMode),
+    );
   }
-  const row = r.recordset[0] as { deliveryMode?: string | null; userId: number };
-  if (await isUserOnFreePlan(row.userId)) {
-    return "governorates";
-  }
-  return normalizeDeliveryMode(row.deliveryMode);
+
+  return map;
 }
 
 export type ResolvedBranchDelivery = {

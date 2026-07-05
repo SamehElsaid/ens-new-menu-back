@@ -1,10 +1,14 @@
-import { getPool, sql } from "../config/database";
+import { getPool } from "../config/database";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
 import { haversineKm, parseGeoCoord } from "../utils/geoDistance";
 import {
   buildSqlIntInList,
   getDeliveryGroupMenuIds,
 } from "./menuGroup.service";
+import {
+  getEffectiveMenuDeliveryModesForMenus,
+  type DeliveryMode,
+} from "./menuDelivery.service";
 
 export const DEFAULT_BRANCH_RADIUS_KM = 10;
 /** Minimum distance advantage before redirecting to another branch (avoids GPS jitter). */
@@ -23,6 +27,7 @@ type BranchZoneRow = {
   slug: string;
   lat: number | null;
   lan: number | null;
+  zoneType: "governorate" | "branch";
 };
 
 function minDistanceByMenu(
@@ -50,7 +55,34 @@ function minDistanceByMenu(
   return bestByMenu;
 }
 
-/** Closest group branch by delivery-zone coordinates; redirect if closer than current menu. */
+/** Pro distance menus use branch GPS only; free / governorate menus use governorate coords. */
+function filterZoneRowsByDeliveryMode(
+  rows: BranchZoneRow[],
+  modes: Map<number, DeliveryMode>,
+): BranchZoneRow[] {
+  const branchCountByMenu = new Map<number, number>();
+  for (const row of rows) {
+    if (row.zoneType === "branch") {
+      branchCountByMenu.set(
+        row.menuId,
+        (branchCountByMenu.get(row.menuId) ?? 0) + 1,
+      );
+    }
+  }
+
+  return rows.filter((row) => {
+    const mode = modes.get(row.menuId) ?? "governorates";
+    const hasBranches = (branchCountByMenu.get(row.menuId) ?? 0) > 0;
+
+    if (mode === "distance" && hasBranches) {
+      return row.zoneType === "branch";
+    }
+
+    return row.zoneType === "governorate";
+  });
+}
+
+/** Closest group branch by delivery mode; redirect if another menu is clearly closer. */
 export async function findNearestBranchMenu(
   currentMenuId: number,
   latRaw: unknown,
@@ -69,16 +101,30 @@ export async function findNearestBranchMenu(
 
   const pool = await getPool();
   const r = await pool.request().query(`
-    SELECT m.id AS menuId, m.slug, g.lat, g.lan
+    SELECT m.id AS menuId, m.slug, g.lat, g.lan, N'governorate' AS zoneType
     FROM Menus m
     INNER JOIN MenuDeliveryGovernorates g ON g.menuId = m.id
     WHERE m.id IN (${inList})
       AND m.deliveryOn = 1
       AND g.lat IS NOT NULL
       AND g.lan IS NOT NULL
+
+    UNION ALL
+
+    SELECT m.id AS menuId, m.slug, b.latitude AS lat, b.longitude AS lan, N'branch' AS zoneType
+    FROM Menus m
+    INNER JOIN Branches b ON b.menuId = m.id
+    WHERE m.id IN (${inList})
+      AND m.deliveryOn = 1
+      AND b.latitude IS NOT NULL
+      AND b.longitude IS NOT NULL
   `);
 
-  const rows = r.recordset as BranchZoneRow[];
+  const allRows = r.recordset as BranchZoneRow[];
+  if (allRows.length === 0) return null;
+
+  const deliveryModes = await getEffectiveMenuDeliveryModesForMenus(groupIds);
+  const rows = filterZoneRowsByDeliveryMode(allRows, deliveryModes);
   if (rows.length === 0) return null;
 
   const bestByMenu = minDistanceByMenu(rows, lat, lng);

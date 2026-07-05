@@ -4,10 +4,27 @@
  *   get:
  *     tags: [Menu Groups]
  *     summary: List menu groups (Pro)
+ *     description: Linked menus share delivery inbox and geo-based branch redirect.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     responses:
  *       200:
  *         description: Groups list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 groups:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id: { type: integer }
+ *                       name: { type: string }
+ *                       inboxMenuId: { type: integer, nullable: true }
+ *                       menuIds:
+ *                         type: array
+ *                         items: { type: integer }
  *   post:
  *     tags: [Menu Groups]
  *     summary: Create menu group (Pro)
@@ -19,7 +36,7 @@
  *             type: object
  *             required: [name, menuIds]
  *             properties:
- *               name: { type: string }
+ *               name: { type: string, maxLength: 255 }
  *               menuIds:
  *                 type: array
  *                 minItems: 2
@@ -27,6 +44,19 @@
  *     responses:
  *       201:
  *         description: Group created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 group:
+ *                   type: object
+ *                   properties:
+ *                     id: { type: integer }
+ *                     name: { type: string }
+ *                     menuIds:
+ *                       type: array
+ *                       items: { type: integer }
  *
  * /api/menu-groups/{groupId}:
  *   put:
@@ -38,9 +68,26 @@
  *         name: groupId
  *         required: true
  *         schema: { type: integer }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name: { type: string, maxLength: 255 }
+ *               menuIds:
+ *                 type: array
+ *                 minItems: 2
+ *                 items: { type: integer }
  *     responses:
  *       200:
  *         description: Updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 group: { type: object }
  *   delete:
  *     tags: [Menu Groups]
  *     summary: Delete menu group (Pro)
@@ -75,6 +122,12 @@
  *     responses:
  *       200:
  *         description: Menu added
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 group: { type: object }
  *
  * /api/menus/{menuId}/categories:
  *   get:
@@ -158,66 +211,6 @@
  *     responses:
  *       200:
  *         description: Deleted
- *
- * /api/menus/{menuId}/ads:
- *   get:
- *     tags: [Ads]
- *     summary: List menu ads
- *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
- *     parameters:
- *       - $ref: '#/components/parameters/menuId'
- *     responses:
- *       200:
- *         description: Ads list
- *   post:
- *     tags: [Ads]
- *     summary: Create menu ad
- *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
- *     parameters:
- *       - $ref: '#/components/parameters/menuId'
- *     responses:
- *       201:
- *         description: Ad created
- *
- * /api/ads/{adId}:
- *   put:
- *     tags: [Ads]
- *     summary: Update ad
- *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
- *     parameters:
- *       - in: path
- *         name: adId
- *         required: true
- *         schema: { type: integer }
- *     responses:
- *       200:
- *         description: Updated
- *   delete:
- *     tags: [Ads]
- *     summary: Delete ad
- *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
- *     parameters:
- *       - in: path
- *         name: adId
- *         required: true
- *         schema: { type: integer }
- *     responses:
- *       200:
- *         description: Deleted
- *
- * /api/ads/{adId}/toggle:
- *   patch:
- *     tags: [Ads]
- *     summary: Toggle ad status
- *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
- *     parameters:
- *       - in: path
- *         name: adId
- *         required: true
- *         schema: { type: integer }
- *     responses:
- *       200:
- *         description: Toggled
  */
 
 export {};

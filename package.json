@@ -13,7 +13,8 @@
     "start": "cross-env NODE_ENV=production node dist/server.js",
     "start:dev": "cross-env NODE_ENV=development node dist/server.js",
     "generate:secret": "node -e \"console.log('JWT_ACCESS_SECRET=' + require('crypto').randomBytes(64).toString('hex')); console.log('JWT_REFRESH_SECRET=' + require('crypto').randomBytes(64).toString('hex'));\"",
-    "postinstall": "echo '✅ Dependencies installed successfully'"
+    "postinstall": "echo '✅ Dependencies installed successfully'",
+    "swagger:validate": "node scripts/validate-swagger.js"
   },
   "keywords": [
     "saas",
