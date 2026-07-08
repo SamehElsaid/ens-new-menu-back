@@ -11,6 +11,7 @@ import {
   MENU_DELIVERY_GOVERNORATE_COLUMNS,
   normalizeDeliveryMode,
 } from "../services/menuDelivery.service";
+import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
 
 function parseOptionalCoord(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -118,6 +119,12 @@ export async function updateMenuDeliverySettings(
 
     if (deliveryMode !== undefined) {
       const mode = normalizeDeliveryMode(deliveryMode);
+      if (mode === "distance" && (await isUserOnFreePlan(req.user!.userId))) {
+        sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+          code: "PRO_REQUIRED",
+        });
+        return;
+      }
       updates.push("deliveryMode = @deliveryMode");
       request.input("deliveryMode", sql.NVarChar, mode);
     }

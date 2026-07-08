@@ -918,6 +918,7 @@ export async function processGuestStaffCall(
                 items: appended.items,
                 orderTotal: appended.orderTotal,
                 status: appended.status,
+                pendingGuestAddition: true,
               },
             }),
           },

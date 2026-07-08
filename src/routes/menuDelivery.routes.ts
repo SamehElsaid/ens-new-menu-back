@@ -3,12 +3,10 @@ import { body, param } from "express-validator";
 import * as menuDeliveryController from "../controllers/menuDelivery.controller";
 import { validate } from "../middleware/validation";
 import { requireAuth } from "../middleware/auth.middleware";
-import { requireProPlan } from "../middleware/planLimits";
 
 const router = Router({ mergeParams: true });
 
 router.use(requireAuth);
-router.use(requireProPlan);
 
 router.get(
   "/settings",

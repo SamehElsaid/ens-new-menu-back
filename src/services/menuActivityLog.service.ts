@@ -872,6 +872,7 @@ export async function listMenuActivityLogs(
             : null,
         items: order.items || [],
         totalPrice: Number(order.orderTotal || 0),
+        pendingGuestAddition: order.pendingGuestAddition === true,
       };
     });
 
@@ -1098,6 +1099,26 @@ function buildOrderDetailForLog(
   };
 }
 
+async function clearMenuOrderPendingGuestAddition(
+  storageMenuId: number,
+  callId: number,
+  existingOrder: Record<string, unknown>,
+): Promise<boolean> {
+  const pool = await getPool();
+  const updatedOrder = { ...existingOrder, pendingGuestAddition: false };
+  const result = await pool
+    .request()
+    .input("menuId", sql.Int, storageMenuId)
+    .input("orderId", sql.Int, callId)
+    .input("orderJson", sql.NVarChar(sql.MAX), JSON.stringify(updatedOrder))
+    .query(`
+      UPDATE dbo.MenuOrders
+      SET orderJson = @orderJson, updatedAt = SYSUTCDATETIME()
+      WHERE menuId = @menuId AND orderId = @orderId
+    `);
+  return (result.rowsAffected?.[0] ?? 0) > 0;
+}
+
 function actionToStatus(action: MenuOrderActionType): string {
   if (action === "TABLE_CALL_CONFIRMED") return "confirmed";
   if (action === "TABLE_CALL_CANCELLED") return "cancelled";
@@ -1231,7 +1252,9 @@ export async function applyMenuOrderAction(
     }
 
     const currentStatus = String(snapBefore.status ?? "pending").toLowerCase();
+    const pendingGuestAddition = existingOrder.pendingGuestAddition === true;
     let applied = false;
+    let nextStatus = actionToStatus(action);
 
     const actor = await resolveActorForLog(req);
     if (
@@ -1241,15 +1264,36 @@ export async function applyMenuOrderAction(
       return { ok: false, error: "FORBIDDEN" };
     }
 
+    if (
+      pendingGuestAddition &&
+      (action === "TABLE_CALL_CANCELLED" ||
+        action === "TABLE_CALL_PREPARED" ||
+        action === "TABLE_CALL_COMPLETED" ||
+        action === "TABLE_CALL_DELIVERED")
+    ) {
+      return { ok: false, error: "INVALID_STATE" };
+    }
+
     const isTableOrder =
       snapBefore.type !== "delivery" &&
       String(snapBefore.tableNumber ?? "").trim().toLowerCase() !== "delivery";
 
     if (action === "TABLE_CALL_CONFIRMED") {
-      if (currentStatus !== "pending") {
+      if (pendingGuestAddition) {
+        if (currentStatus === "cancelled" || currentStatus === "delivered") {
+          return { ok: false, error: "INVALID_STATE" };
+        }
+        applied = await clearMenuOrderPendingGuestAddition(
+          storageMenuId,
+          callId,
+          existingOrder,
+        );
+        nextStatus = currentStatus;
+      } else if (currentStatus !== "pending") {
         return { ok: false, error: "INVALID_STATE" };
+      } else {
+        applied = await setStaffTableCallStatus(callId, storageMenuId, "confirmed");
       }
-      applied = await setStaffTableCallStatus(callId, storageMenuId, "confirmed");
     } else if (action === "TABLE_CALL_CANCELLED") {
       if (currentStatus !== "pending") {
         return { ok: false, error: "INVALID_STATE" };
@@ -1289,11 +1333,21 @@ export async function applyMenuOrderAction(
     }
 
     const snapAfter = await getStaffTableCallSnapshot(storageMenuId, callId);
-    const nextStatus = actionToStatus(action);
-    const sums = orderActionSummaries(snapAfter, action);
+    const sums =
+      action === "TABLE_CALL_CONFIRMED" && pendingGuestAddition
+        ? {
+            ar: `قبول إضافة — طاولة ${String(snapAfter?.tableNumber ?? "?")}`,
+            en: `Addition accepted — table ${String(snapAfter?.tableNumber ?? "?")}`,
+          }
+        : orderActionSummaries(snapAfter, action);
     const orderDetail = buildOrderDetailForLog(
       snapAfter,
-      existingOrder,
+      {
+        ...existingOrder,
+        ...(action === "TABLE_CALL_CONFIRMED" && pendingGuestAddition
+          ? { pendingGuestAddition: false }
+          : {}),
+      },
       nextStatus,
     );
 

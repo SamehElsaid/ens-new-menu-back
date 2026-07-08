@@ -6,8 +6,8 @@
  *     summary: Get menu delivery settings
  *     description: |
  *       Returns delivery toggle, mode, contact phone, WhatsApp flag, and governorates list.
- *       Requires menu owner JWT + **Pro plan**.
- *       Public menu exposes the same shape (with Free plan forced to `governorates` mode).
+ *       Requires menu owner JWT. Governorates mode is available on Free and Pro.
+ *       Public menu exposes the same shape (Free plan always uses `governorates` mode).
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - $ref: '#/components/parameters/menuId'
@@ -40,7 +40,9 @@
  *       Partial update. At least one field required.
  *       When enabling delivery or WhatsApp, a phone number must be available
  *       (`deliveryPhone` or owner `phoneNumber`).
- *       `deliveryMode: distance` is stored for Pro; Free menus still behave as governorates publicly.
+ *       `deliveryMode: governorates` is available on Free and Pro.
+ *       `deliveryMode: distance` requires Pro (403 PRO_REQUIRED on Free).
+ *       Free menus always expose governorates mode publicly even if distance was stored before downgrade.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - $ref: '#/components/parameters/menuId'
@@ -72,6 +74,8 @@
  *                 - $ref: '#/components/schemas/MenuDeliverySettings'
  *       400:
  *         description: No fields to update or phone required when enabling delivery/WhatsApp
+ *       403:
+ *         description: distance mode requires Pro (PRO_REQUIRED)
  *
  * /api/menus/{menuId}/delivery/governorates:
  *   get:
