@@ -235,45 +235,89 @@ function lineTotal(unit: number, quantity: number): number {
   return Math.round(unit * quantity * 100) / 100;
 }
 
+function pickOptionString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function pickOptionPrice(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+/** Accept partial locale labels on round-trip edits (dashboard re-save). */
+function coerceStaffOrderLineSize(raw: unknown): MenuItemSize | undefined {
+  if (raw == null || raw === "") return undefined;
+  const normalized = normalizeMenuItemSizesInput([raw]);
+  if (normalized?.length === 1) return normalized[0];
+  if (typeof raw !== "object") return undefined;
+  const node = raw as Record<string, unknown>;
+  const nameAr =
+    pickOptionString(node.nameAr) ||
+    pickOptionString(node.name_ar) ||
+    pickOptionString(node.labelAr) ||
+    pickOptionString(node.label);
+  const nameEn =
+    pickOptionString(node.nameEn) ||
+    pickOptionString(node.name_en) ||
+    pickOptionString(node.labelEn) ||
+    pickOptionString(node.label);
+  const price = pickOptionPrice(node.price);
+  if (price === null) return undefined;
+  const ar = nameAr || nameEn;
+  const en = nameEn || nameAr;
+  if (!ar || !en) return undefined;
+  return { nameAr: ar, nameEn: en, price };
+}
+
+function coerceStaffOrderLineVariant(raw: unknown): MenuItemVariant | undefined {
+  if (raw == null || raw === "") return undefined;
+  const normalized = normalizeMenuItemVariantsInput([raw]);
+  if (normalized?.length === 1) return normalized[0];
+  if (typeof raw !== "object") return undefined;
+  const node = raw as Record<string, unknown>;
+  const labelAr =
+    pickOptionString(node.labelAr) ||
+    pickOptionString(node.label_ar) ||
+    pickOptionString(node.nameAr) ||
+    pickOptionString(node.label);
+  const labelEn =
+    pickOptionString(node.labelEn) ||
+    pickOptionString(node.label_en) ||
+    pickOptionString(node.nameEn) ||
+    pickOptionString(node.label);
+  const price = pickOptionPrice(node.price);
+  if (price === null) return undefined;
+  const ar = labelAr || labelEn;
+  const en = labelEn || labelAr;
+  if (!ar || !en) return undefined;
+  return { labelAr: ar, labelEn: en, price };
+}
+
 function parseStaffOrderLineSize(
   raw: unknown,
-): { ok: true; value: MenuItemSize | undefined } | { ok: false } {
+): { ok: true; value: MenuItemSize | undefined } {
   if (raw === null || raw === undefined || raw === "") {
     return { ok: true, value: undefined };
   }
-  const normalized = normalizeMenuItemSizesInput([raw]);
-  if (!normalized || normalized.length !== 1) {
-    return { ok: false };
-  }
-  return { ok: true, value: normalized[0] };
+  return { ok: true, value: coerceStaffOrderLineSize(raw) };
 }
 
 function parseStaffOrderLineVariant(
   raw: unknown,
-): { ok: true; value: MenuItemVariant | undefined } | { ok: false } {
+): { ok: true; value: MenuItemVariant | undefined } {
   if (raw === null || raw === undefined || raw === "") {
     return { ok: true, value: undefined };
   }
-  const normalized = normalizeMenuItemVariantsInput([raw]);
-  if (!normalized || normalized.length !== 1) {
-    return { ok: false };
-  }
-  return { ok: true, value: normalized[0] };
+  return { ok: true, value: coerceStaffOrderLineVariant(raw) };
 }
 
 function pickStaffOrderItemOptions(
   o: Record<string, unknown>,
-):
-  | { ok: true; size?: MenuItemSize; variant?: MenuItemVariant }
-  | { ok: false } {
+): { ok: true; size?: MenuItemSize; variant?: MenuItemVariant } {
   const sizeParsed = parseStaffOrderLineSize(o.size);
-  if (!sizeParsed.ok) {
-    return { ok: false };
-  }
   const variantParsed = parseStaffOrderLineVariant(o.variant);
-  if (!variantParsed.ok) {
-    return { ok: false };
-  }
   return {
     ok: true,
     ...(sizeParsed.value ? { size: sizeParsed.value } : {}),
@@ -511,9 +555,6 @@ function parseOrderItemsInput(
       const priceParsed = parsePriceField(o.price);
       const fromClient = priceParsed.ok ? priceParsed.value : undefined;
       const options = pickStaffOrderItemOptions(o);
-      if (!options.ok) {
-        return { ok: false };
-      }
       out.push({
         name: nameRaw,
         menuItemId,
@@ -543,9 +584,6 @@ function parseOrderItemsInput(
     }
     const optPrice = parsePriceField(o.price);
     const options = pickStaffOrderItemOptions(o);
-    if (!options.ok) {
-      return { ok: false };
-    }
     out.push({
       name: nameRaw,
       quantity,
@@ -563,9 +601,16 @@ function parseOrderItemsInput(
  * If client sent `price`, it overrides DB unit price.
  */
 export async function enrichMenuItemsFromDb(
-  menuId: number,
+  menuIdOrScope: number | number[],
   items: StaffOrderItem[],
 ): Promise<StaffOrderItem[]> {
+  const menuScope = [
+    ...new Set(
+      (Array.isArray(menuIdOrScope) ? menuIdOrScope : [menuIdOrScope]).filter(
+        (id) => Number.isFinite(id) && id > 0,
+      ),
+    ),
+  ];
   const ids = [
     ...new Set(
       items
@@ -575,13 +620,19 @@ export async function enrichMenuItemsFromDb(
   ];
   const byId = new Map<number, { unitPrice: number; displayName: string }>();
 
-  if (ids.length > 0) {
+  if (ids.length > 0 && menuScope.length > 0) {
     const pool = await getPool();
-    const req = pool.request().input("menuId", sql.Int, menuId);
-    const parts: string[] = [];
+    const req = pool.request();
+    const menuParts: string[] = [];
+    menuScope.forEach((id, i) => {
+      const p = `mscope${i}`;
+      menuParts.push(`@${p}`);
+      req.input(p, sql.Int, id);
+    });
+    const itemParts: string[] = [];
     ids.forEach((id, i) => {
       const p = `mid${i}`;
-      parts.push(`@${p}`);
+      itemParts.push(`@${p}`);
       req.input(p, sql.Int, id);
     });
     const r = await req.query(
@@ -591,7 +642,7 @@ export async function enrichMenuItemsFromDb(
        FROM MenuItems mi
        LEFT JOIN MenuItemTranslations mitar ON mitar.menuItemId = mi.id AND mitar.locale = N'ar'
        LEFT JOIN MenuItemTranslations miten ON miten.menuItemId = mi.id AND miten.locale = N'en'
-       WHERE mi.menuId = @menuId AND mi.id IN (${parts.join(", ")})`,
+       WHERE mi.menuId IN (${menuParts.join(", ")}) AND mi.id IN (${itemParts.join(", ")})`,
     );
     for (const row of r.recordset as {
       id: number;
@@ -651,24 +702,45 @@ export async function enrichMenuItemsFromDb(
   });
 }
 
+async function menuItemsExistForMenus(
+  menuIds: number[],
+  itemIds: number[],
+): Promise<boolean> {
+  if (itemIds.length === 0) return true;
+  const scope = [
+    ...new Set(menuIds.filter((id) => Number.isFinite(id) && id > 0)),
+  ];
+  if (scope.length === 0) return false;
+  const unique = [...new Set(itemIds)];
+  const pool = await getPool();
+  const req = pool.request();
+  const menuParts: string[] = [];
+  scope.forEach((id, i) => {
+    const p = `mscope${i}`;
+    menuParts.push(`@${p}`);
+    req.input(p, sql.Int, id);
+  });
+  const itemParts: string[] = [];
+  unique.forEach((id, i) => {
+    const p = `mid${i}`;
+    itemParts.push(`@${p}`);
+    req.input(p, sql.Int, id);
+  });
+  const r = await req.query(
+    `SELECT COUNT(DISTINCT id) AS c FROM MenuItems WHERE menuId IN (${menuParts.join(", ")}) AND id IN (${itemParts.join(", ")})`,
+  );
+  return Number(r.recordset[0]?.c) === unique.length;
+}
+
 async function menuItemsExistForMenu(
   menuId: number,
   itemIds: number[],
 ): Promise<boolean> {
-  if (itemIds.length === 0) return true;
-  const unique = [...new Set(itemIds)];
-  const pool = await getPool();
-  const req = pool.request().input("menuId", sql.Int, menuId);
-  const parts: string[] = [];
-  unique.forEach((id, i) => {
-    const p = `mid${i}`;
-    parts.push(`@${p}`);
-    req.input(p, sql.Int, id);
-  });
-  const r = await req.query(
-    `SELECT COUNT(*) AS c FROM MenuItems WHERE menuId = @menuId AND id IN (${parts.join(", ")})`,
-  );
-  return Number(r.recordset[0]?.c) === unique.length;
+  return menuItemsExistForMenus([menuId], itemIds);
+}
+
+async function resolveOrderItemsMenuScope(menuId: number): Promise<number[]> {
+  return getDeliveryGroupMenuIds(menuId);
 }
 
 /**
@@ -1959,8 +2031,9 @@ export async function updateStaffTableCallItems(
     const idsForCheck = itemsIn
       .map((i) => i.menuItemId)
       .filter((id): id is number => typeof id === "number");
+    const menuScope = await resolveOrderItemsMenuScope(menuId);
     if (idsForCheck.length > 0) {
-      const okIds = await menuItemsExistForMenu(menuId, idsForCheck);
+      const okIds = await menuItemsExistForMenus(menuScope, idsForCheck);
       if (!okIds) {
         return { ok: false, error: "INVALID_ORDER_ITEMS" };
       }
@@ -1968,7 +2041,7 @@ export async function updateStaffTableCallItems(
 
     let itemsResolved: StaffOrderItem[];
     try {
-      itemsResolved = await enrichMenuItemsFromDb(menuId, itemsIn);
+      itemsResolved = await enrichMenuItemsFromDb(menuScope, itemsIn);
     } catch (e) {
       logger.error("updateStaffTableCallItems enrich error:", e);
       return { ok: false, error: "SERVER_ERROR" };
@@ -2096,8 +2169,9 @@ export async function updateStaffTableCallItemsAndStatus(
     const idsForCheck = itemsIn
       .map((i) => i.menuItemId)
       .filter((id): id is number => typeof id === "number");
+    const menuScope = await resolveOrderItemsMenuScope(menuId);
     if (idsForCheck.length > 0) {
-      const okIds = await menuItemsExistForMenu(menuId, idsForCheck);
+      const okIds = await menuItemsExistForMenus(menuScope, idsForCheck);
       if (!okIds) {
         return { ok: false, error: "INVALID_ORDER_ITEMS" };
       }
@@ -2105,7 +2179,7 @@ export async function updateStaffTableCallItemsAndStatus(
 
     let itemsResolved: StaffOrderItem[];
     try {
-      itemsResolved = await enrichMenuItemsFromDb(menuId, itemsIn);
+      itemsResolved = await enrichMenuItemsFromDb(menuScope, itemsIn);
     } catch (e) {
       logger.error("updateStaffTableCallItemsAndStatus enrich error:", e);
       return { ok: false, error: "SERVER_ERROR" };

@@ -261,6 +261,68 @@
  *                 page: 1
  *                 total: 45
  *
+ * /api/menus/{menuId}/activity-logs/{id}/items:
+ *   put:
+ *     tags: [Orders]
+ *     summary: Replace order items (dashboard)
+ *     description: |
+ *       Replaces line items on an open table or delivery order.
+ *       Dashboard clients send HTTP PUT (legacy `axiosPatch`). PATCH is also accepted.
+ *       Not allowed on cancelled or delivered orders.
+ *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
+ *     parameters:
+ *       - $ref: '#/components/parameters/menuId'
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer, example: 1180 }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           example:
+ *             items:
+ *               - menuItemId: 2380
+ *                 name: "Tahini Plate"
+ *                 quantity: 2
+ *                 price: 10
+ *     responses:
+ *       200:
+ *         content:
+ *           application/json:
+ *             example:
+ *               ok: true
+ *               items:
+ *                 - menuItemId: 2380
+ *                   name: "Tahini Plate"
+ *                   quantity: 2
+ *                   price: 10
+ *                   total: 20
+ *               orderTotal: 20
+ *               status: confirmed
+ *   patch:
+ *     tags: [Orders]
+ *     summary: Replace order items (dashboard, PATCH alias)
+ *     description: Same as PUT — replaces line items on an open order.
+ *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
+ *     parameters:
+ *       - $ref: '#/components/parameters/menuId'
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer, example: 1180 }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           example:
+ *             items:
+ *               - menuItemId: 2380
+ *                 quantity: 1
+ *     responses:
+ *       200:
+ *         description: Items updated
+ *
  * /api/menus/{menuId}/activity-logs/{id}/actions:
  *   post:
  *     tags: [Orders]

@@ -233,7 +233,7 @@ export async function postMenuOrderActionHandler(
 }
 
 /**
- * PATCH /api/menus/:menuId/activity-logs/:id/items
+ * PATCH|PUT /api/menus/:menuId/activity-logs/:id/items
  * Body: { items: [...] } — replace lines on open orders (staff + owner).
  */
 export async function patchMenuOrderItemsHandler(

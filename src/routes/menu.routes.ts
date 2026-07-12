@@ -108,10 +108,20 @@ router.post(
   menuActivityLogController.postMenuOrderActionHandler,
 );
 
-// PATCH /api/menus/:menuId/activity-logs/:id/items — edit order lines
+// PATCH|PUT /api/menus/:menuId/activity-logs/:id/items — edit order lines
+// (dashboard axiosPatch uses HTTP PUT)
+const patchMenuOrderItemsValidators = validate([
+  param("menuId").isInt(),
+  param("id").isInt(),
+]);
 router.patch(
   "/:menuId/activity-logs/:id/items",
-  validate([param("menuId").isInt(), param("id").isInt()]),
+  patchMenuOrderItemsValidators,
+  menuActivityLogController.patchMenuOrderItemsHandler,
+);
+router.put(
+  "/:menuId/activity-logs/:id/items",
+  patchMenuOrderItemsValidators,
   menuActivityLogController.patchMenuOrderItemsHandler,
 );
 
