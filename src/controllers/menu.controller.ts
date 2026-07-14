@@ -325,6 +325,511 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
   }
 }
 
+/**
+ * Copy menu shape & settings into a new menu. Body requires `slug`, `nameAr`, `nameEn`.
+ * Copies: theme, branding, wifi/tax/service, social, hours,
+ * delivery flags/phone/mode, customizations, and delivery zones.
+ * Descriptions are copied from the source; names come from the request.
+ * Does not copy categories, items, staff, tables, ads, or group membership.
+ */
+export async function copyMenu(req: Request, res: Response): Promise<void> {
+  try {
+    if (req.user?.role === ROLES.STAFF) {
+      sendApiError(res, req, 403, {
+        en: "Only the menu owner can copy this menu.",
+        ar: "يستطيع مالك القائمة فقط نسخها.",
+      });
+      return;
+    }
+
+    const userId = req.user!.userId;
+    const sourceMenuId = parseInt(req.params.menuId, 10);
+    const rawSlug = req.body?.slug;
+    const rawNameAr = req.body?.nameAr;
+    const rawNameEn = req.body?.nameEn;
+
+    const nameAr =
+      typeof rawNameAr === "string" ? rawNameAr.trim() : "";
+    const nameEn =
+      typeof rawNameEn === "string" ? rawNameEn.trim() : "";
+
+    if (!nameAr || !nameEn) {
+      sendApiError(res, req, 400, ApiErrors.nameRequiredArEn);
+      return;
+    }
+
+    if (!rawSlug || typeof rawSlug !== "string") {
+      sendApiError(res, req, 400, ApiErrors.slugRequired);
+      return;
+    }
+
+    const slug = rawSlug.toLowerCase().trim();
+    if (!validateSlug(slug)) {
+      sendApiError(res, req, 400, ApiErrors.invalidSlugFormat);
+      return;
+    }
+
+    await ensureMenuChatbotSchema();
+    await ensureMenuWifiTaxServiceSchema();
+    await ensureMenuGroupSchema();
+    await ensureDeliverySchema();
+
+    const pool = await getPool();
+
+    const slugCheck = await pool
+      .request()
+      .input("slug", sql.NVarChar, slug)
+      .query("SELECT COUNT(*) as count FROM Menus WHERE slug = @slug");
+
+    if (Number(slugCheck.recordset[0]?.count ?? 0) > 0) {
+      sendApiError(res, req, 409, ApiErrors.slugAlreadyTaken, {
+        available: false,
+      });
+      return;
+    }
+
+    const sourceResult = await pool
+      .request()
+      .input("id", sql.Int, sourceMenuId)
+      .input("userId", sql.Int, userId).query(`
+        SELECT
+          m.id, m.logo, m.theme, ISNULL(m.currency, 'SAR') as currency,
+          ISNULL(m.chatbotEnabled, 1) as chatbotEnabled,
+          ISNULL(m.wifiEnabled, 0) as wifiEnabled,
+          m.wifiName, m.wifiPassword,
+          ISNULL(m.taxEnabled, 0) as taxEnabled, m.taxPercent,
+          ISNULL(m.serviceEnabled, 0) as serviceEnabled, m.servicePercent,
+          m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
+          m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
+          m.addressEn, m.addressAr, m.phone, m.workingHours,
+          ISNULL(m.deliveryOn, 0) as deliveryOn,
+          m.deliveryPhone,
+          ISNULL(m.deliveryWhatsAppOn, 1) as deliveryWhatsAppOn,
+          ISNULL(m.deliveryMode, N'governorates') as deliveryMode,
+          ar.name as nameAr, ar.description as descriptionAr,
+          en.name as nameEn, en.description as descriptionEn
+        FROM Menus m
+        LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
+        LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
+        WHERE m.id = @id AND m.userId = @userId
+      `);
+
+    if (sourceResult.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
+
+    const source = sourceResult.recordset[0] as Record<string, unknown>;
+    const logo =
+      typeof source.logo === "string" && source.logo.trim()
+        ? source.logo.trim()
+        : null;
+
+    if (!logo) {
+      sendApiError(res, req, 400, ApiErrors.logoRequired);
+      return;
+    }
+
+    const descriptionAr =
+      typeof source.descriptionAr === "string" ? source.descriptionAr : null;
+    const descriptionEn =
+      typeof source.descriptionEn === "string" ? source.descriptionEn : null;
+    const theme = normalizeMenuTheme(source.theme as string | null);
+    const currency =
+      typeof source.currency === "string" && source.currency.trim()
+        ? source.currency.trim().toUpperCase().slice(0, 3)
+        : "SAR";
+
+    let workingHoursValue: string | null = null;
+    if (source.workingHours != null) {
+      workingHoursValue =
+        typeof source.workingHours === "string"
+          ? source.workingHours
+          : JSON.stringify(source.workingHours);
+    }
+
+    const columnCheck = await pool.request().query(`
+      SELECT COLUMN_NAME, DATA_TYPE
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = 'Menus' AND COLUMN_NAME IN ('id', 'approvalStatus')
+    `);
+    const menuColumns = columnCheck.recordset as {
+      COLUMN_NAME: string;
+      DATA_TYPE: string;
+    }[];
+    const idColumn = menuColumns.find((c) => c.COLUMN_NAME === "id");
+    const isIdString = idColumn != null && idColumn.DATA_TYPE === "nvarchar";
+    const hasApprovalStatus = menuColumns.some(
+      (c) => c.COLUMN_NAME === "approvalStatus",
+    );
+
+    const newMenuUuid = generateMenuUuid();
+
+    const menuId = await executeTransaction(async (transaction) => {
+      let newMenuId: string | number;
+
+      if (isIdString) {
+        newMenuId = await generateUniqueMenuId(7);
+        const insertCols = hasApprovalStatus
+          ? `id, uuid, userId, slug, logo, theme, currency, approvalStatus`
+          : `id, uuid, userId, slug, logo, theme, currency`;
+        const insertVals = hasApprovalStatus
+          ? `@id, @uuid, @userId, @slug, @logo, @theme, @currency, @approvalStatus`
+          : `@id, @uuid, @userId, @slug, @logo, @theme, @currency`;
+
+        const insertRequest = transaction
+          .request()
+          .input("id", sql.NVarChar, newMenuId)
+          .input("uuid", sql.UniqueIdentifier, newMenuUuid)
+          .input("userId", sql.Int, userId)
+          .input("slug", sql.NVarChar, slug)
+          .input("logo", sql.NVarChar, logo)
+          .input("theme", sql.NVarChar, theme)
+          .input("currency", sql.NVarChar(3), currency);
+
+        if (hasApprovalStatus) {
+          insertRequest.input(
+            "approvalStatus",
+            sql.NVarChar(20),
+            MENU_APPROVAL_STATUS.ACTIVE,
+          );
+        }
+
+        await insertRequest.query(`
+          INSERT INTO Menus (${insertCols})
+          VALUES (${insertVals})
+        `);
+      } else {
+        const insertCols = hasApprovalStatus
+          ? `uuid, userId, slug, logo, theme, currency, approvalStatus`
+          : `uuid, userId, slug, logo, theme, currency`;
+        const insertVals = hasApprovalStatus
+          ? `@uuid, @userId, @slug, @logo, @theme, @currency, @approvalStatus`
+          : `@uuid, @userId, @slug, @logo, @theme, @currency`;
+
+        const insertRequest = transaction
+          .request()
+          .input("uuid", sql.UniqueIdentifier, newMenuUuid)
+          .input("userId", sql.Int, userId)
+          .input("slug", sql.NVarChar, slug)
+          .input("logo", sql.NVarChar, logo)
+          .input("theme", sql.NVarChar, theme)
+          .input("currency", sql.NVarChar(3), currency);
+
+        if (hasApprovalStatus) {
+          insertRequest.input(
+            "approvalStatus",
+            sql.NVarChar(20),
+            MENU_APPROVAL_STATUS.ACTIVE,
+          );
+        }
+
+        const menuResult = await insertRequest.query(`
+          INSERT INTO Menus (${insertCols})
+          OUTPUT INSERTED.id
+          VALUES (${insertVals})
+        `);
+        newMenuId = menuResult.recordset[0].id;
+      }
+
+      const settingsRequest = transaction.request();
+      if (isIdString) {
+        settingsRequest.input("menuId", sql.NVarChar, newMenuId);
+      } else {
+        settingsRequest.input("menuId", sql.Int, newMenuId);
+      }
+
+      await settingsRequest
+        .input("chatbotEnabled", sql.Bit, source.chatbotEnabled ? 1 : 0)
+        .input("wifiEnabled", sql.Bit, source.wifiEnabled ? 1 : 0)
+        .input(
+          "wifiName",
+          sql.NVarChar(255),
+          typeof source.wifiName === "string" ? source.wifiName : null,
+        )
+        .input(
+          "wifiPassword",
+          sql.NVarChar(255),
+          typeof source.wifiPassword === "string" ? source.wifiPassword : null,
+        )
+        .input("taxEnabled", sql.Bit, source.taxEnabled ? 1 : 0)
+        .input(
+          "taxPercent",
+          sql.Decimal(5, 2),
+          source.taxPercent == null ? null : Number(source.taxPercent),
+        )
+        .input("serviceEnabled", sql.Bit, source.serviceEnabled ? 1 : 0)
+        .input(
+          "servicePercent",
+          sql.Decimal(5, 2),
+          source.servicePercent == null ? null : Number(source.servicePercent),
+        )
+        .input(
+          "footerLogo",
+          sql.NVarChar,
+          typeof source.footerLogo === "string" ? source.footerLogo : null,
+        )
+        .input(
+          "footerDescriptionEn",
+          sql.NVarChar,
+          typeof source.footerDescriptionEn === "string"
+            ? source.footerDescriptionEn
+            : null,
+        )
+        .input(
+          "footerDescriptionAr",
+          sql.NVarChar,
+          typeof source.footerDescriptionAr === "string"
+            ? source.footerDescriptionAr
+            : null,
+        )
+        .input(
+          "socialFacebook",
+          sql.NVarChar,
+          typeof source.socialFacebook === "string"
+            ? source.socialFacebook
+            : null,
+        )
+        .input(
+          "socialInstagram",
+          sql.NVarChar,
+          typeof source.socialInstagram === "string"
+            ? source.socialInstagram
+            : null,
+        )
+        .input(
+          "socialTwitter",
+          sql.NVarChar,
+          typeof source.socialTwitter === "string"
+            ? source.socialTwitter
+            : null,
+        )
+        .input(
+          "socialWhatsapp",
+          sql.NVarChar,
+          typeof source.socialWhatsapp === "string"
+            ? source.socialWhatsapp
+            : null,
+        )
+        .input(
+          "addressEn",
+          sql.NVarChar,
+          typeof source.addressEn === "string" ? source.addressEn : null,
+        )
+        .input(
+          "addressAr",
+          sql.NVarChar,
+          typeof source.addressAr === "string" ? source.addressAr : null,
+        )
+        .input(
+          "phone",
+          sql.NVarChar,
+          typeof source.phone === "string" ? source.phone : null,
+        )
+        .input("workingHours", sql.NVarChar(sql.MAX), workingHoursValue)
+        .input("deliveryOn", sql.Bit, source.deliveryOn ? 1 : 0)
+        .input(
+          "deliveryPhone",
+          sql.NVarChar(50),
+          typeof source.deliveryPhone === "string"
+            ? source.deliveryPhone
+            : null,
+        )
+        .input(
+          "deliveryWhatsAppOn",
+          sql.Bit,
+          source.deliveryWhatsAppOn ? 1 : 0,
+        )
+        .input(
+          "deliveryMode",
+          sql.NVarChar(20),
+          typeof source.deliveryMode === "string"
+            ? source.deliveryMode
+            : "governorates",
+        ).query(`
+          UPDATE Menus SET
+            chatbotEnabled = @chatbotEnabled,
+            wifiEnabled = @wifiEnabled,
+            wifiName = @wifiName,
+            wifiPassword = @wifiPassword,
+            taxEnabled = @taxEnabled,
+            taxPercent = @taxPercent,
+            serviceEnabled = @serviceEnabled,
+            servicePercent = @servicePercent,
+            footerLogo = @footerLogo,
+            footerDescriptionEn = @footerDescriptionEn,
+            footerDescriptionAr = @footerDescriptionAr,
+            socialFacebook = @socialFacebook,
+            socialInstagram = @socialInstagram,
+            socialTwitter = @socialTwitter,
+            socialWhatsapp = @socialWhatsapp,
+            addressEn = @addressEn,
+            addressAr = @addressAr,
+            phone = @phone,
+            workingHours = @workingHours,
+            deliveryOn = @deliveryOn,
+            deliveryPhone = @deliveryPhone,
+            deliveryWhatsAppOn = @deliveryWhatsAppOn,
+            deliveryMode = @deliveryMode,
+            deliveryLegacyUserSeedDone = 1
+          WHERE id = @menuId
+        `);
+
+      for (const [locale, name, description] of [
+        ["ar", nameAr, descriptionAr],
+        ["en", nameEn, descriptionEn],
+      ] as const) {
+        const trRequest = transaction.request();
+        if (isIdString) {
+          trRequest.input("menuId", sql.NVarChar, newMenuId);
+        } else {
+          trRequest.input("menuId", sql.Int, newMenuId);
+        }
+        await trRequest
+          .input("locale", sql.NVarChar, locale)
+          .input("name", sql.NVarChar, name)
+          .input("description", sql.NVarChar, description).query(`
+            INSERT INTO MenuTranslations (menuId, locale, name, description)
+            VALUES (@menuId, @locale, @name, @description)
+          `);
+      }
+
+      const customResult = await transaction
+        .request()
+        .input("sourceMenuId", sql.Int, sourceMenuId).query(`
+          SELECT primaryColor, secondaryColor, backgroundColor, textColor,
+                 heroTitleAr, heroSubtitleAr, heroTitleEn, heroSubtitleEn
+          FROM MenuCustomizations
+          WHERE menuId = @sourceMenuId
+        `);
+
+      if (customResult.recordset.length > 0) {
+        const c = customResult.recordset[0] as Record<string, unknown>;
+        const customInsert = transaction.request();
+        if (isIdString) {
+          customInsert.input("menuId", sql.NVarChar, newMenuId);
+        } else {
+          customInsert.input("menuId", sql.Int, newMenuId);
+        }
+        await customInsert
+          .input(
+            "primaryColor",
+            sql.NVarChar(20),
+            typeof c.primaryColor === "string" ? c.primaryColor : null,
+          )
+          .input(
+            "secondaryColor",
+            sql.NVarChar(20),
+            typeof c.secondaryColor === "string" ? c.secondaryColor : null,
+          )
+          .input(
+            "backgroundColor",
+            sql.NVarChar(20),
+            typeof c.backgroundColor === "string" ? c.backgroundColor : null,
+          )
+          .input(
+            "textColor",
+            sql.NVarChar(20),
+            typeof c.textColor === "string" ? c.textColor : null,
+          )
+          .input(
+            "heroTitleAr",
+            sql.NVarChar(200),
+            typeof c.heroTitleAr === "string" ? c.heroTitleAr : null,
+          )
+          .input(
+            "heroSubtitleAr",
+            sql.NVarChar(500),
+            typeof c.heroSubtitleAr === "string" ? c.heroSubtitleAr : null,
+          )
+          .input(
+            "heroTitleEn",
+            sql.NVarChar(200),
+            typeof c.heroTitleEn === "string" ? c.heroTitleEn : null,
+          )
+          .input(
+            "heroSubtitleEn",
+            sql.NVarChar(500),
+            typeof c.heroSubtitleEn === "string" ? c.heroSubtitleEn : null,
+          ).query(`
+            INSERT INTO MenuCustomizations (
+              menuId, primaryColor, secondaryColor, backgroundColor, textColor,
+              heroTitleAr, heroSubtitleAr, heroTitleEn, heroSubtitleEn
+            )
+            VALUES (
+              @menuId, @primaryColor, @secondaryColor, @backgroundColor, @textColor,
+              @heroTitleAr, @heroSubtitleAr, @heroTitleEn, @heroSubtitleEn
+            )
+          `);
+      }
+
+      const zonesResult = await transaction
+        .request()
+        .input("sourceMenuId", sql.Int, sourceMenuId).query(`
+          SELECT nameAr, nameEn, price, lat, lan
+          FROM MenuDeliveryGovernorates
+          WHERE menuId = @sourceMenuId
+          ORDER BY id
+        `);
+
+      for (const zone of zonesResult.recordset as Record<string, unknown>[]) {
+        const zoneInsert = transaction.request();
+        if (isIdString) {
+          zoneInsert.input("menuId", sql.NVarChar, newMenuId);
+        } else {
+          zoneInsert.input("menuId", sql.Int, newMenuId);
+        }
+        await zoneInsert
+          .input("nameAr", sql.NVarChar(255), zone.nameAr ?? "")
+          .input("nameEn", sql.NVarChar(255), zone.nameEn ?? "")
+          .input("price", sql.Decimal(10, 2), Number(zone.price ?? 0))
+          .input(
+            "lat",
+            sql.Decimal(10, 8),
+            zone.lat == null ? null : Number(zone.lat),
+          )
+          .input(
+            "lan",
+            sql.Decimal(11, 8),
+            zone.lan == null ? null : Number(zone.lan),
+          ).query(`
+            INSERT INTO MenuDeliveryGovernorates (menuId, nameAr, nameEn, price, lat, lan)
+            VALUES (@menuId, @nameAr, @nameEn, @price, @lat, @lan)
+          `);
+      }
+
+      return newMenuId;
+    });
+
+    void logMenuActivitySafe(req, Number(menuId), {
+      action: "MENU_COPIED",
+      targetType: "menu",
+      targetId: Number(menuId),
+      summaryEn: `Menu copied from #${sourceMenuId} with slug ${slug}`,
+      summaryAr: `تم نسخ المنيو من #${sourceMenuId} بالرابط ${slug}`,
+      detailJson: JSON.stringify({ sourceMenuId, slug }),
+    });
+
+    res.status(201).json({
+      message: "Menu copied successfully",
+      menuId,
+      uuid: newMenuUuid,
+      slug,
+      nameAr,
+      nameEn,
+      descriptionAr,
+      descriptionEn,
+      logo,
+      theme,
+      currency,
+      isActive: true,
+    });
+  } catch (error) {
+    logger.error("Copy menu error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedCopyMenu);
+  }
+}
+
 // Get menu by ID
 export async function getMenuById(req: Request, res: Response): Promise<void> {
   try {

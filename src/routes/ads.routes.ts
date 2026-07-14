@@ -24,6 +24,8 @@ router.get("/menus/:menuId/ads", getMenuAds);
 router.put("/ads/:adId", updateAd);
 router.delete("/ads/:adId", deleteAd);
 router.patch("/ads/:adId/toggle", toggleAdStatus);
+// Dashboard axiosPatch uses HTTP PUT
+router.put("/ads/:adId/toggle", toggleAdStatus);
 
 export default router;
 

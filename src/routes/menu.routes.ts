@@ -59,6 +59,19 @@ router.post(
   menuController.createMenu,
 );
 
+// POST /api/menus/:menuId/copy — Copy menu shape & settings (names + slug)
+router.post(
+  "/:menuId/copy",
+  checkMenuLimit,
+  validate([
+    param("menuId").isInt(),
+    body("nameAr").notEmpty().trim().isLength({ max: 255 }),
+    body("nameEn").notEmpty().trim().isLength({ max: 255 }),
+    body("slug").notEmpty().trim().isLength({ min: 3, max: 100 }),
+  ]),
+  menuController.copyMenu,
+);
+
 // GET /api/menus/:menuId/analytics — Pro menu analytics (owner)
 router.get(
   "/:menuId/analytics",

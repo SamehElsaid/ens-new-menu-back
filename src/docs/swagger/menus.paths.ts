@@ -46,6 +46,69 @@
  *       201:
  *         description: Menu created
  *
+ * /api/menus/{menuId}/copy:
+ *   post:
+ *     tags: [Menus]
+ *     summary: Copy menu shape and settings
+ *     description: |
+ *       Creates a new menu from an existing one. Requires Arabic/English names
+ *       and a new slug. Copies design (theme, customizations), settings (wifi,
+ *       tax, service, social, hours, delivery flags/zones), descriptions, and logo.
+ *       Does not copy categories, items, staff, tables, ads, or group membership.
+ *       Subject to the same active menu plan limit as create.
+ *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
+ *     parameters:
+ *       - $ref: '#/components/parameters/menuId'
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [nameAr, nameEn, slug]
+ *             properties:
+ *               nameAr:
+ *                 type: string
+ *                 maxLength: 255
+ *                 example: فرع جديد
+ *               nameEn:
+ *                 type: string
+ *                 maxLength: 255
+ *                 example: New Branch
+ *               slug:
+ *                 type: string
+ *                 minLength: 3
+ *                 maxLength: 100
+ *                 example: my-new-branch
+ *           example:
+ *             nameAr: فرع جديد
+ *             nameEn: New Branch
+ *             slug: my-new-branch
+ *     responses:
+ *       201:
+ *         description: Menu copied
+ *         content:
+ *           application/json:
+ *             example:
+ *               message: Menu copied successfully
+ *               menuId: 42
+ *               uuid: 550e8400-e29b-41d4-a716-446655440000
+ *               slug: my-new-branch
+ *               nameAr: فرع جديد
+ *               nameEn: New Branch
+ *               logo: https://cdn.example.com/logo.png
+ *               theme: default
+ *               currency: EGP
+ *               isActive: true
+ *       400:
+ *         description: Missing names, invalid slug, or source menu has no logo
+ *       403:
+ *         description: Menu limit reached or staff not allowed
+ *       404:
+ *         description: Source menu not found
+ *       409:
+ *         description: Slug already taken
+ *
  * /api/menus/{menuId}/analytics:
  *   get:
  *     tags: [Menus]

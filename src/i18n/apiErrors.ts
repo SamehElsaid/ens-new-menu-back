@@ -78,6 +78,10 @@ export const ApiErrors = {
     en: "You have reached the maximum number of ads (1) for the Free plan. Upgrade to add more.",
     ar: "لقد وصلت للحد الأقصى من الإعلانات (1) في الخطة المجانية. قم بالترقية لإضافة المزيد.",
   },
+  activeAdLimitExceeded: {
+    en: "You have reached the maximum number of active ads for your plan. Pause another ad first, or upgrade.",
+    ar: "وصلت للحد الأقصى من الإعلانات النشطة في خطتك. أوقف إعلاناً آخر أولاً، أو قم بالترقية.",
+  },
   menuNotFound: {
     en: "Menu not found",
     ar: "المنيو غير موجود",
@@ -97,6 +101,14 @@ export const ApiErrors = {
   failedCreateMenu: {
     en: "Failed to create menu",
     ar: "فشل إنشاء المنيو",
+  },
+  failedCopyMenu: {
+    en: "Failed to copy menu",
+    ar: "فشل نسخ المنيو",
+  },
+  slugAlreadyTaken: {
+    en: "This slug is already taken. Please choose another one.",
+    ar: "هذا الـ slug مستخدم بالفعل. اختر واحداً آخر.",
   },
   invalidPrimaryMenuLink: {
     en: "The selected primary menu is invalid or cannot be used for linking.",

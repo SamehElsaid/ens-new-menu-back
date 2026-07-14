@@ -94,6 +94,9 @@
  *   put:
  *     tags: [Ads]
  *     summary: Update menu ad
+ *     description: |
+ *       Updates ad fields. Setting isActive to true is blocked when the plan
+ *       active-ad quota is already full (code ACTIVE_AD_LIMIT).
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -114,6 +117,8 @@
  *             example:
  *               success: true
  *               message: "Ad updated successfully"
+ *       403:
+ *         description: Active ad plan limit reached (code ACTIVE_AD_LIMIT)
  *       404:
  *         description: Ad not found
  *   delete:
@@ -137,7 +142,10 @@
  *   patch:
  *     tags: [Ads]
  *     summary: Toggle ad active/inactive
- *     description: Flips isActive without deleting the ad.
+ *     description: |
+ *       Flips isActive without deleting the ad. Activating is blocked when the
+ *       plan active-ad quota is already full (code ACTIVE_AD_LIMIT). On Pro to
+ *       Free downgrade, excess ads are paused (not deleted).
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -153,6 +161,23 @@
  *               message: "Ad status updated successfully"
  *               data:
  *                 isActive: false
+ *       403:
+ *         description: Active ad plan limit reached (code ACTIVE_AD_LIMIT)
+ *   put:
+ *     tags: [Ads]
+ *     summary: Toggle ad active/inactive (PUT alias)
+ *     description: Same as PATCH /api/ads/{adId}/toggle for clients that send PUT.
+ *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: adId
+ *         required: true
+ *         schema: { type: integer, example: 9 }
+ *     responses:
+ *       200:
+ *         description: Status toggled
+ *       403:
+ *         description: Active ad plan limit reached (code ACTIVE_AD_LIMIT)
  *
  * /api/public/ads:
  *   get:

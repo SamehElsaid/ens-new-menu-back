@@ -1,5 +1,6 @@
 import { getPool, sql } from '../config/database';
 import { logger } from '../utils/logger';
+import { getFreePlanCapabilities } from './planCapabilities.service';
 
 /**
  * Service to handle subscription downgrades
@@ -94,24 +95,41 @@ export class SubscriptionDowngradeService {
 
       // Products/items are kept on downgrade — free plan limits only block new additions (see checkProductLimit)
 
-      // Keep only the oldest ad per menu (free plan allows 1 ad per menu)
-      const adsResult = await pool.request()
-        .input('userId', sql.Int, userId)
-        .query(`
-          WITH RankedAds AS (
-            SELECT a.id,
-              ROW_NUMBER() OVER (PARTITION BY a.menuId ORDER BY a.createdAt ASC) AS rn
-            FROM Ads a
-            INNER JOIN Menus m ON a.menuId = m.id
-            WHERE m.userId = @userId AND a.adType = 'menu'
-          )
-          DELETE FROM Ads
-          OUTPUT DELETED.id
-          WHERE id IN (SELECT id FROM RankedAds WHERE rn > 1)
-        `);
+      // Pause excess active ads (do not delete) so the user can re-enable within Free quota later
+      const freeCaps = await getFreePlanCapabilities();
+      const maxAdsPerMenu = freeCaps.maxAdsPerMenu;
 
-      if (adsResult.recordset.length > 0) {
-        logger.info(`Deleted ${adsResult.recordset.length} excess ads for user ${userId} (free plan allows 1 ad per menu)`);
+      if (maxAdsPerMenu >= 0) {
+        const adsResult = await pool
+          .request()
+          .input('userId', sql.Int, userId)
+          .input('maxAds', sql.Int, maxAdsPerMenu)
+          .query(`
+            WITH RankedActiveAds AS (
+              SELECT a.id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY a.menuId
+                  ORDER BY a.createdAt ASC, a.id ASC
+                ) AS rn
+              FROM Ads a
+              INNER JOIN Menus m ON a.menuId = m.id
+              WHERE m.userId = @userId
+                AND a.adType = 'menu'
+                AND ISNULL(a.isActive, 0) = 1
+            )
+            UPDATE Ads
+            SET isActive = 0
+            OUTPUT INSERTED.id
+            WHERE id IN (
+              SELECT id FROM RankedActiveAds WHERE rn > @maxAds
+            )
+          `);
+
+        if (adsResult.recordset.length > 0) {
+          logger.info(
+            `Paused ${adsResult.recordset.length} excess ads for user ${userId} (free plan allows ${maxAdsPerMenu} active ad(s) per menu)`,
+          );
+        }
       }
 
       // Pro-only data (branches, distance delivery mode, etc.) is kept in DB — access is locked via requireProPlan at runtime.
