@@ -22,6 +22,47 @@
  *                   monthlyPrice: 99
  *                   yearlyPrice: 999
  *
+ * /api/admin/plans/custom-display:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Custom plan marketing display settings
+ *     description: |
+ *       Display-only capabilities for the Pricing "Custom" column (not enforced at runtime).
+ *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         content:
+ *           application/json:
+ *             example:
+ *               capabilities:
+ *                 aiMenuImport: true
+ *                 tableOrderingQr: true
+ *                 liveOrderNotifications: true
+ *                 staffAndTables: true
+ *                 advancedDeliveryMaps: true
+ *                 maxAdsPerMenu: -1
+ *                 allowedThemes: [default, coffee, neon, sky, waffle, vanilla, onecard]
+ *   put:
+ *     tags: [Admin]
+ *     summary: Update Custom plan marketing display
+ *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           example:
+ *             capabilities:
+ *               aiMenuImport: true
+ *               tableOrderingQr: true
+ *               liveOrderNotifications: true
+ *               staffAndTables: true
+ *               advancedDeliveryMaps: true
+ *               maxAdsPerMenu: -1
+ *               allowedThemes: [default, coffee, neon, sky, waffle, vanilla]
+ *     responses:
+ *       200:
+ *         description: Updated
+ *
  * /api/admin/plans:
  *   get:
  *     tags: [Admin]
@@ -40,6 +81,14 @@
  *                   monthlyPrice: 99
  *                   yearlyPrice: 999
  *                   isActive: true
+ *                   capabilities:
+ *                     aiMenuImport: true
+ *                     tableOrderingQr: true
+ *                     liveOrderNotifications: true
+ *                     staffAndTables: true
+ *                     advancedDeliveryMaps: true
+ *                     maxAdsPerMenu: -1
+ *                     allowedThemes: [default, coffee, neon, sky, waffle, vanilla]
  *   post:
  *     tags: [Admin]
  *     summary: Create subscription plan
@@ -53,6 +102,14 @@
  *             maxProductsPerMenu: -1
  *             monthlyPrice: 149
  *             yearlyPrice: 1499
+ *             capabilities:
+ *               aiMenuImport: true
+ *               tableOrderingQr: true
+ *               staffAndTables: true
+ *               liveOrderNotifications: true
+ *               advancedDeliveryMaps: true
+ *               maxAdsPerMenu: -1
+ *               allowedThemes: [default, coffee, neon]
  *     responses:
  *       201:
  *         description: Created
@@ -74,6 +131,14 @@
  *             name: Pro
  *             yearlyPrice: 1099
  *             isActive: true
+ *             capabilities:
+ *               aiMenuImport: true
+ *               tableOrderingQr: true
+ *               liveOrderNotifications: true
+ *               staffAndTables: true
+ *               advancedDeliveryMaps: true
+ *               maxAdsPerMenu: -1
+ *               allowedThemes: [default, coffee, neon, sky, waffle, vanilla]
  *     responses:
  *       200:
  *         description: Updated
@@ -91,6 +156,8 @@
  *         application/json:
  *           example:
  *             yearlyPrice: 1099
+ *             capabilities:
+ *               maxAdsPerMenu: 3
  *     responses:
  *       200:
  *         description: Patched

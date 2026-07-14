@@ -24,6 +24,8 @@ export type StaffTableCallBroadcastPayload = {
   orderTotal: number;
   /** New orders from the view start as `pending`. */
   status: StaffTableCallStatus;
+  /** `order` | `waiter` | `bill` — service ping vs food order. */
+  requestKind?: "order" | "waiter" | "bill";
   /** Filled when staff changes items after create (if DB has last-edited columns). */
   lastEditedByStaffId?: number | null;
   lastEditedAt?: string | null;

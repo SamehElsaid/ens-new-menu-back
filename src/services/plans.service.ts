@@ -1,5 +1,16 @@
 import { getPool } from "../config/database";
 import { applyProIntroPricingForUser } from "../config/proYearlyPricing";
+import { ensurePlanCapabilitiesSchema } from "../schemas/planCapabilities.schema";
+import { ensureSubscriptionExtrasSchema } from "../schemas/subscriptionExtras.schema";
+import {
+  getCustomPlanDisplay,
+  parsePlanCapabilities,
+} from "./planCapabilities.service";
+import {
+  FREE_PLAN_CAPABILITIES_DEFAULT,
+  PRO_PLAN_CAPABILITIES_DEFAULT,
+  type PlanCapabilities,
+} from "../types/planCapabilities";
 
 export type PlanDisplayRow = {
   id: number;
@@ -16,12 +27,22 @@ export type PlanDisplayRow = {
   maxProductsPerMenu: number;
   allowCustomDomain: boolean;
   hasAds: boolean;
+  extraMenuPrice?: number | null;
   features: string[];
+  capabilities: PlanCapabilities;
 };
+
+function defaultsForName(name: string): PlanCapabilities {
+  return name.trim().toLowerCase() === "free"
+    ? FREE_PLAN_CAPABILITIES_DEFAULT
+    : PRO_PLAN_CAPABILITIES_DEFAULT;
+}
 
 export async function getActivePlansForDisplay(
   userId?: number | null,
 ): Promise<PlanDisplayRow[]> {
+  await ensureSubscriptionExtrasSchema();
+  await ensurePlanCapabilitiesSchema();
   const pool = await getPool();
 
   const result = await pool.request().query(`
@@ -35,7 +56,9 @@ export async function getActivePlansForDisplay(
         maxProductsPerMenu,
         allowCustomDomain,
         hasAds,
-        features
+        features,
+        extraMenuPrice,
+        capabilities
       FROM Plans
       WHERE isActive = 1
       ORDER BY priceMonthly ASC
@@ -43,7 +66,6 @@ export async function getActivePlansForDisplay(
 
   return Promise.all(
     result.recordset.map(async (plan) => {
-      const row = plan as Record<string, unknown>;
       const isPro =
         String(plan.name ?? "")
           .trim()
@@ -73,9 +95,15 @@ export async function getActivePlansForDisplay(
         currency = pricing.currency;
       }
 
+      const planName = String(plan.name ?? "");
+      const capabilities = parsePlanCapabilities(
+        plan.capabilities,
+        defaultsForName(planName),
+      );
+
       return {
         id: Number(plan.id),
-        name: String(plan.name ?? ""),
+        name: planName,
         description: String(plan.description ?? ""),
         priceMonthly,
         priceYearly,
@@ -88,8 +116,21 @@ export async function getActivePlansForDisplay(
         maxProductsPerMenu: Number(plan.maxProductsPerMenu),
         allowCustomDomain: Boolean(plan.allowCustomDomain),
         hasAds: Boolean(plan.hasAds),
+        extraMenuPrice:
+          plan.extraMenuPrice != null && plan.extraMenuPrice !== ""
+            ? Number(plan.extraMenuPrice)
+            : null,
         features: plan.features ? JSON.parse(String(plan.features)) : [],
+        capabilities,
       };
     }),
   );
+}
+
+export async function getPlansWithCustomDisplay(userId?: number | null) {
+  const [plans, customDisplay] = await Promise.all([
+    getActivePlansForDisplay(userId),
+    getCustomPlanDisplay(),
+  ]);
+  return { plans, customDisplay };
 }

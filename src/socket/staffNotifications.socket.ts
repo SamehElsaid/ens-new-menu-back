@@ -10,7 +10,7 @@ import {
   getPendingStaffTableCalls,
   processGuestStaffCall,
 } from "../services/staffTableCall.service";
-import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
+import { menuOwnerHasCapability } from "../services/planCapabilities.service";
 import { notifyStaffOfTableCall } from "../services/staffNotify.service";
 import { verifyMenuAccessForSocket } from "../utils/menuAccess";
 
@@ -63,7 +63,9 @@ export function attachStaffNotificationsSocket(
           reply({ ok: false, error: "STAFF_NOT_FOUND" });
           return;
         }
-        if (!(await menuOwnerHasProPlan(menuId))) {
+        if (
+          !(await menuOwnerHasCapability(menuId, "liveOrderNotifications"))
+        ) {
           reply({ ok: false, error: "PRO_REQUIRED" });
           return;
         }
@@ -157,6 +159,7 @@ export function attachStaffNotificationsSocket(
           customerAddress?: string;
           orderNotes?: string;
           type?: "table" | "delivery";
+          requestKind?: "order" | "waiter" | "bill";
         },
         cb,
       ) => {
@@ -177,6 +180,7 @@ export function attachStaffNotificationsSocket(
             customerAddress: payload?.customerAddress,
             orderNotes: payload?.orderNotes,
             type: payload?.type,
+            requestKind: payload?.requestKind,
             items: payload?.items,
             status: payload?.status,
             governorateId: payload?.governorateId,
@@ -196,8 +200,9 @@ export function attachStaffNotificationsSocket(
             items: result.items,
             orderTotal: result.orderTotal,
             status: result.status,
+            requestKind: result.requestKind,
           });
-          reply({ ok: true });
+          reply({ ok: true, id: result.id, requestKind: result.requestKind });
         } catch (e) {
           logger.error("guest:call_staff error:", e);
           reply({ ok: false, error: "SERVER_ERROR" });

@@ -26,6 +26,13 @@ export async function ensureStaffTableCallsOrderTypeSchema(): Promise<void> {
     BEGIN
       ALTER TABLE StaffTableCalls ADD customerAddress NVARCHAR(500) NULL;
     END
+
+    IF COL_LENGTH('StaffTableCalls', 'requestKind') IS NULL
+    BEGIN
+      ALTER TABLE StaffTableCalls
+        ADD requestKind NVARCHAR(20) NOT NULL
+        CONSTRAINT DF_StaffTableCalls_requestKind DEFAULT N'order';
+    END
   `);
 
   await pool.request().query(`

@@ -1,4 +1,5 @@
 import type sql from "mssql";
+import { hasCapability } from "./planCapabilities.service";
 
 export class BulkImportLimitError extends Error {
   readonly used: number;
@@ -12,19 +13,26 @@ export class BulkImportLimitError extends Error {
   }
 }
 
-export async function canUserBulkImport(_userId: number): Promise<{
+export async function canUserBulkImport(userId: number): Promise<{
   allowed: boolean;
   used: number;
   limit: number;
 }> {
+  const allowed = await hasCapability(userId, "aiMenuImport");
+  if (!allowed) {
+    return { allowed: false, used: 0, limit: 0 };
+  }
   return { allowed: true, used: 0, limit: -1 };
 }
 
-/** No-op — AI menu import is free for all users. */
+/** Records usage only when the capability is enabled (unlimited uses while allowed). */
 export async function assertAndRecordBulkImportUsage(
   _transaction: sql.Transaction,
-  _userId: number,
+  userId: number,
   _menuId: number,
 ): Promise<void> {
-  return;
+  const { allowed } = await canUserBulkImport(userId);
+  if (!allowed) {
+    throw new BulkImportLimitError(0, 0);
+  }
 }

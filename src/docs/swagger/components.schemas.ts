@@ -105,6 +105,11 @@
  *           enum: [table, delivery]
  *           example: delivery
  *           description: "table = dine-in order; delivery = home delivery"
+ *         requestKind:
+ *           type: string
+ *           enum: [order, waiter, bill]
+ *           example: waiter
+ *           description: "order = food/cart (default); waiter = call waiter; bill = request the check. waiter/bill require tableNumber and ignore items."
  *         tableNumber: { type: string, example: "T-5", description: "Required for table orders from QR" }
  *         customerName: { type: string, example: "Mohamed Ali" }
  *         customerPhone: { type: string, example: "+201012345678" }
@@ -120,7 +125,7 @@
  *           example: pending
  *         items:
  *           type: array
- *           description: Cart lines (optional on create)
+ *           description: Cart lines (optional on create; ignored for waiter/bill)
  *           items:
  *             type: object
  *             properties:

@@ -17,6 +17,7 @@ import {
 } from "./menuGroup.service";
 import {
   advanceStaffTableCallStatus,
+  attachMenuChargeFieldsToOrder,
   completeStaffTableCall,
   getStaffTableCallSnapshot,
   setStaffTableCallStatus,
@@ -666,6 +667,31 @@ export async function getMenuActivityLogById(
       order,
       items: order.items || [],
       totalPrice: Number(order.orderTotal || 0),
+      itemsSubtotal:
+        order.itemsSubtotal != null &&
+        Number.isFinite(Number(order.itemsSubtotal))
+          ? Number(order.itemsSubtotal)
+          : null,
+      taxEnabled: order.taxEnabled === true,
+      taxPercent:
+        order.taxPercent != null && Number.isFinite(Number(order.taxPercent))
+          ? Number(order.taxPercent)
+          : null,
+      taxAmount:
+        order.taxAmount != null && Number.isFinite(Number(order.taxAmount))
+          ? Number(order.taxAmount)
+          : null,
+      serviceEnabled: order.serviceEnabled === true,
+      servicePercent:
+        order.servicePercent != null &&
+        Number.isFinite(Number(order.servicePercent))
+          ? Number(order.servicePercent)
+          : null,
+      serviceAmount:
+        order.serviceAmount != null &&
+        Number.isFinite(Number(order.serviceAmount))
+          ? Number(order.serviceAmount)
+          : null,
       updatedAt: r.updatedAt ? String(r.updatedAt) : null,
       customerPhone: order.customerPhone ?? stcPhone,
       customerAddress: order.customerAddress ?? stcAddress,
@@ -872,6 +898,31 @@ export async function listMenuActivityLogs(
             : null,
         items: order.items || [],
         totalPrice: Number(order.orderTotal || 0),
+        itemsSubtotal:
+          order.itemsSubtotal != null &&
+          Number.isFinite(Number(order.itemsSubtotal))
+            ? Number(order.itemsSubtotal)
+            : null,
+        taxEnabled: order.taxEnabled === true,
+        taxPercent:
+          order.taxPercent != null && Number.isFinite(Number(order.taxPercent))
+            ? Number(order.taxPercent)
+            : null,
+        taxAmount:
+          order.taxAmount != null && Number.isFinite(Number(order.taxAmount))
+            ? Number(order.taxAmount)
+            : null,
+        serviceEnabled: order.serviceEnabled === true,
+        servicePercent:
+          order.servicePercent != null &&
+          Number.isFinite(Number(order.servicePercent))
+            ? Number(order.servicePercent)
+            : null,
+        serviceAmount:
+          order.serviceAmount != null &&
+          Number.isFinite(Number(order.serviceAmount))
+            ? Number(order.serviceAmount)
+            : null,
         pendingGuestAddition: order.pendingGuestAddition === true,
       };
     });
@@ -1264,12 +1315,10 @@ export async function applyMenuOrderAction(
       return { ok: false, error: "FORBIDDEN" };
     }
 
+    /** Reject/prepare stay blocked while guest additions await review. Finish may auto-clear. */
     if (
       pendingGuestAddition &&
-      (action === "TABLE_CALL_CANCELLED" ||
-        action === "TABLE_CALL_PREPARED" ||
-        action === "TABLE_CALL_COMPLETED" ||
-        action === "TABLE_CALL_DELIVERED")
+      (action === "TABLE_CALL_CANCELLED" || action === "TABLE_CALL_PREPARED")
     ) {
       return { ok: false, error: "INVALID_STATE" };
     }
@@ -1311,11 +1360,25 @@ export async function applyMenuOrderAction(
       if (currentStatus !== "confirmed" && currentStatus !== "prepared") {
         return { ok: false, error: "INVALID_STATE" };
       }
+      if (pendingGuestAddition) {
+        await clearMenuOrderPendingGuestAddition(
+          storageMenuId,
+          callId,
+          existingOrder,
+        );
+      }
       applied = await completeStaffTableCall(callId, storageMenuId);
     } else if (action === "TABLE_CALL_DELIVERED") {
       if (isTableOrder) {
         if (currentStatus !== "confirmed" && currentStatus !== "prepared") {
           return { ok: false, error: "INVALID_STATE" };
+        }
+        if (pendingGuestAddition) {
+          await clearMenuOrderPendingGuestAddition(
+            storageMenuId,
+            callId,
+            existingOrder,
+          );
         }
         applied = await completeStaffTableCall(callId, storageMenuId);
       } else {
@@ -1340,15 +1403,19 @@ export async function applyMenuOrderAction(
             en: `Addition accepted — table ${String(snapAfter?.tableNumber ?? "?")}`,
           }
         : orderActionSummaries(snapAfter, action);
-    const orderDetail = buildOrderDetailForLog(
-      snapAfter,
-      {
-        ...existingOrder,
-        ...(action === "TABLE_CALL_CONFIRMED" && pendingGuestAddition
-          ? { pendingGuestAddition: false }
-          : {}),
-      },
-      nextStatus,
+    const orderDetail = await attachMenuChargeFieldsToOrder(
+      storageMenuId,
+      snapAfter?.items ?? [],
+      buildOrderDetailForLog(
+        snapAfter,
+        {
+          ...existingOrder,
+          ...(action === "TABLE_CALL_CONFIRMED" && pendingGuestAddition
+            ? { pendingGuestAddition: false }
+            : {}),
+        },
+        nextStatus,
+      ),
     );
 
     await logMenuActivitySafe(req, storageMenuId, {
@@ -1461,10 +1528,10 @@ export async function applyMenuOrderItemsUpdate(
     }
 
     const snapAfter = await getStaffTableCallSnapshot(storageMenuId, callId);
-    const orderDetail = buildOrderDetailForLog(
-      snapAfter,
-      existingOrder,
-      result.status,
+    const orderDetail = await attachMenuChargeFieldsToOrder(
+      storageMenuId,
+      snapAfter?.items ?? result.items,
+      buildOrderDetailForLog(snapAfter, existingOrder, result.status),
     );
 
     await logMenuActivitySafe(req, storageMenuId, {
@@ -1482,7 +1549,7 @@ export async function applyMenuOrderItemsUpdate(
     return {
       ok: true,
       items: result.items,
-      orderTotal: result.orderTotal,
+      orderTotal: Number(orderDetail.orderTotal ?? result.orderTotal),
       status: result.status,
     };
   } catch (error) {

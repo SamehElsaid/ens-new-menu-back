@@ -32,6 +32,18 @@ import {
   logAdminActivity,
   getUserSnapshot,
 } from "../services/adminActivityLog.service";
+import { ensurePlanCapabilitiesSchema } from "../schemas/planCapabilities.schema";
+import {
+  capabilitiesToJson,
+  getCustomPlanDisplay,
+  normalizeCapabilitiesInput,
+  parsePlanCapabilities,
+  updateCustomPlanDisplay,
+} from "../services/planCapabilities.service";
+import {
+  FREE_PLAN_CAPABILITIES_DEFAULT,
+  PRO_PLAN_CAPABILITIES_DEFAULT,
+} from "../types/planCapabilities";
 
 // Get Admin Dashboard Statistics
 export async function getAdminStats(
@@ -728,6 +740,7 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
 export async function getAllPlans(req: Request, res: Response): Promise<void> {
   try {
     await ensureSubscriptionExtrasSchema();
+    await ensurePlanCapabilitiesSchema();
     const pool = await getPool();
 
     const result = await pool.request().query(`
@@ -738,7 +751,19 @@ export async function getAllPlans(req: Request, res: Response): Promise<void> {
       ORDER BY p.priceMonthly ASC
     `);
 
-    res.json({ plans: result.recordset });
+    const plans = result.recordset.map((row) => {
+      const name = String(row.name ?? "");
+      const fallback =
+        name.trim().toLowerCase() === "free"
+          ? FREE_PLAN_CAPABILITIES_DEFAULT
+          : PRO_PLAN_CAPABILITIES_DEFAULT;
+      return {
+        ...row,
+        capabilities: parsePlanCapabilities(row.capabilities, fallback),
+      };
+    });
+
+    res.json({ plans });
   } catch (error) {
     logger.error("Get all plans error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetPlans);
@@ -749,6 +774,7 @@ export async function getAllPlans(req: Request, res: Response): Promise<void> {
 export async function updatePlan(req: Request, res: Response): Promise<void> {
   try {
     await ensureSubscriptionExtrasSchema();
+    await ensurePlanCapabilitiesSchema();
     const { id } = req.params;
     const {
       name,
@@ -762,13 +788,14 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
       hasAds,
       features,
       isActive,
+      capabilities,
     } = req.body;
 
     const pool = await getPool();
 
     // Check if plan exists
     const planResult = await pool.request().input("planId", sql.Int, id).query(`
-        SELECT id FROM Plans WHERE id = @planId
+        SELECT id, name, capabilities FROM Plans WHERE id = @planId
       `);
 
     if (planResult.recordset.length === 0) {
@@ -776,9 +803,16 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    const existing = planResult.recordset[0];
+    const existingName = String(existing.name ?? "");
+    const existingFallback =
+      existingName.trim().toLowerCase() === "free"
+        ? FREE_PLAN_CAPABILITIES_DEFAULT
+        : PRO_PLAN_CAPABILITIES_DEFAULT;
+
     // Build update query dynamically
     const updates: string[] = [];
-    const inputs: any = { planId: id };
+    const inputs: Record<string, unknown> = { planId: id };
 
     if (name !== undefined) {
       updates.push("name = @name");
@@ -824,6 +858,14 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
       updates.push("isActive = @isActive");
       inputs.isActive = isActive;
     }
+    if (capabilities !== undefined) {
+      const normalized = normalizeCapabilitiesInput(
+        capabilities,
+        parsePlanCapabilities(existing.capabilities, existingFallback),
+      );
+      updates.push("capabilities = @capabilities");
+      inputs.capabilities = capabilitiesToJson(normalized);
+    }
 
     if (updates.length === 0) {
       sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
@@ -844,10 +886,16 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
         key === "extraMenuPrice"
       ) {
         request.input(key, sql.Decimal(12, 2), inputs[key]);
-      } else if (key === "planId" || key === "maxMenus" || key === "maxProductsPerMenu") {
+      } else if (
+        key === "planId" ||
+        key === "maxMenus" ||
+        key === "maxProductsPerMenu"
+      ) {
         request.input(key, sql.Int, inputs[key]);
+      } else if (key === "capabilities" || key === "features") {
+        request.input(key, sql.NVarChar(sql.MAX), inputs[key]);
       } else {
-        request.input(key, inputs[key]);
+        request.input(key, inputs[key] as string | number | boolean);
       }
     });
 
@@ -860,9 +908,37 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
   }
 }
 
+export async function getAdminCustomPlanDisplay(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const capabilities = await getCustomPlanDisplay();
+    res.json({ capabilities });
+  } catch (error) {
+    logger.error("Get custom plan display error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedGetPlans);
+  }
+}
+
+export async function putAdminCustomPlanDisplay(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const raw = req.body?.capabilities ?? req.body;
+    const capabilities = await updateCustomPlanDisplay(raw);
+    res.json({ message: "Custom plan display updated", capabilities });
+  } catch (error) {
+    logger.error("Update custom plan display error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedUpdatePlan);
+  }
+}
+
 // Create New Plan
 export async function createPlan(req: Request, res: Response): Promise<void> {
   try {
+    await ensurePlanCapabilitiesSchema();
     const {
       name,
       description,
@@ -874,12 +950,21 @@ export async function createPlan(req: Request, res: Response): Promise<void> {
       hasAds = true,
       features = [],
       isActive = true,
+      capabilities,
     } = req.body;
 
     if (!name || priceMonthly === undefined || priceYearly === undefined) {
       sendApiError(res, req, 400, ApiErrors.missingRequiredFields);
       return;
     }
+
+    const fallback =
+      String(name).trim().toLowerCase() === "free"
+        ? FREE_PLAN_CAPABILITIES_DEFAULT
+        : PRO_PLAN_CAPABILITIES_DEFAULT;
+    const capsJson = capabilitiesToJson(
+      normalizeCapabilitiesInput(capabilities ?? fallback, fallback),
+    );
 
     const pool = await getPool();
 
@@ -894,15 +979,16 @@ export async function createPlan(req: Request, res: Response): Promise<void> {
       .input("allowCustomDomain", sql.Bit, allowCustomDomain)
       .input("hasAds", sql.Bit, hasAds)
       .input("features", sql.NVarChar, JSON.stringify(features))
+      .input("capabilities", sql.NVarChar(sql.MAX), capsJson)
       .input("isActive", sql.Bit, isActive).query(`
         INSERT INTO Plans (
           name, description, priceMonthly, priceYearly, maxMenus, 
-          maxProductsPerMenu, allowCustomDomain, hasAds, features, isActive
+          maxProductsPerMenu, allowCustomDomain, hasAds, features, capabilities, isActive
         )
         OUTPUT INSERTED.id
         VALUES (
           @name, @description, @priceMonthly, @priceYearly, @maxMenus,
-          @maxProductsPerMenu, @allowCustomDomain, @hasAds, @features, @isActive
+          @maxProductsPerMenu, @allowCustomDomain, @hasAds, @features, @capabilities, @isActive
         )
       `);
 

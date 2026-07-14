@@ -7,14 +7,23 @@
  *     description: |
  *       **Public — no JWT.** Primary endpoint for customer orders from the menu app.
  *
- *       **Table order** (`type: table`):
+ *       **Table order** (`type: table`, `requestKind: order` default):
  *       - Set `tableNumber` from QR scan
  *       - Notifies staff via socket + persists as table call
+ *
+ *       **Waiter call** (`requestKind: waiter`):
+ *       - Requires `tableNumber`; ignores `items`
+ *       - Notifies staff that the guest wants a waiter at the table
+ *
+ *       **Bill request** (`requestKind: bill`):
+ *       - Requires `tableNumber`; ignores `items`
+ *       - Notifies staff that the guest wants the check
  *
  *       **Delivery order** (`type: delivery`):
  *       - Set `customerName`, `customerPhone`, `customerAddress`
  *       - **Governorates mode**: pass `governorateId`
  *       - **Distance mode**: pass `branchId`, `customerLat`, `customerLng`
+ *       - Not valid with `requestKind` waiter/bill
  *
  *       Optional `items` array for cart lines. `status` defaults to `pending`.
  *     security: []
@@ -38,6 +47,20 @@
  *                     name: "Orange Juice"
  *                     quantity: 2
  *                     price: 35
+ *             callWaiter:
+ *               summary: Call waiter to table T-5
+ *               value:
+ *                 menuId: 42
+ *                 type: table
+ *                 tableNumber: "T-5"
+ *                 requestKind: waiter
+ *             requestBill:
+ *               summary: Ask waiter to bring the bill
+ *               value:
+ *                 menuId: 42
+ *                 type: table
+ *                 tableNumber: "T-5"
+ *                 requestKind: bill
  *             deliveryGovernorates:
  *               summary: Home delivery (governorates mode)
  *               value:
@@ -62,15 +85,30 @@
  *                 customerLng: 31.2569
  *                 status: pending
  *     responses:
- *       201:
- *         description: Order created
+ *       200:
+ *         description: Call created
  *         content:
  *           application/json:
- *             example:
- *               success: true
- *               callId: 9001
- *               status: pending
- *               type: delivery
+ *             examples:
+ *               order:
+ *                 value:
+ *                   ok: true
+ *                   id: 9001
+ *                   menuId: 42
+ *                   tableNumber: "T-5"
+ *                   status: pending
+ *                   requestKind: order
+ *                   orderTotal: 70
+ *               waiter:
+ *                 value:
+ *                   ok: true
+ *                   id: 9002
+ *                   menuId: 42
+ *                   tableNumber: "T-5"
+ *                   status: pending
+ *                   requestKind: waiter
+ *                   items: []
+ *                   orderTotal: 0
  *       400:
  *         description: Validation error or delivery not enabled
  *
@@ -89,6 +127,7 @@
  *                 - id: 9001
  *                   menuId: 42
  *                   type: delivery
+ *                   requestKind: order
  *                   status: pending
  *                   customerName: "Ahmed Hassan"
  *                   customerPhone: "+201012345678"
@@ -98,6 +137,14 @@
  *                       quantity: 1
  *                       price: 85
  *                   requestedAt: "2026-07-05T12:00:00.000Z"
+ *                 - id: 9002
+ *                   menuId: 42
+ *                   requestKind: bill
+ *                   status: pending
+ *                   tableNumber: "T-5"
+ *                   items: []
+ *                   orderTotal: 0
+ *                   at: "2026-07-05T12:05:00.000Z"
  *
  * /api/staff-auth/table-calls/history:
  *   get:

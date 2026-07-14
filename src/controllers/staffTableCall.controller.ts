@@ -11,7 +11,7 @@ import {
 } from "../services/staffTableCall.service";
 import { canStaffFinishOrders } from "../config/staffJobRoles";
 import { resolveActorForLog } from "../services/menuActivityLog.service";
-import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
+import { menuOwnerHasCapability } from "../services/planCapabilities.service";
 import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
@@ -101,6 +101,7 @@ async function emitCallChanged(
     items: snap.items,
     orderTotal: snap.orderTotal,
     status: snap.status,
+    requestKind: snap.requestKind,
   };
   if (snap.lastEditedByStaffId != null) {
     payload.lastEditedByStaffId = snap.lastEditedByStaffId;
@@ -129,9 +130,10 @@ export async function listStaffTableCallsHistory(
       return;
     }
 
-    if (!(await menuOwnerHasProPlan(menuId))) {
+    if (!(await menuOwnerHasCapability(menuId, "tableOrderingQr"))) {
       sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
-        code: "PRO_REQUIRED",
+        code: "PLAN_CAPABILITY_REQUIRED",
+        capability: "tableOrderingQr",
       });
       return;
     }
@@ -149,6 +151,7 @@ export async function listStaffTableCallsHistory(
         id: c.id,
         menuId: c.menuId,
         tableNumber: c.tableNumber,
+        requestKind: c.requestKind,
         requestedAt: c.createdAt.toISOString(),
         confirmedAt: c.acknowledgedAt
           ? c.acknowledgedAt.toISOString()
@@ -179,9 +182,10 @@ export async function getStaffTableCallById(
       return;
     }
 
-    if (!(await menuOwnerHasProPlan(menuId))) {
+    if (!(await menuOwnerHasCapability(menuId, "tableOrderingQr"))) {
       sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
-        code: "PRO_REQUIRED",
+        code: "PLAN_CAPABILITY_REQUIRED",
+        capability: "tableOrderingQr",
       });
       return;
     }
@@ -203,6 +207,7 @@ export async function getStaffTableCallById(
       id: snap.id,
       menuId: snap.menuId,
       tableNumber: snap.tableNumber,
+      requestKind: snap.requestKind,
       requestedAt: snap.createdAt.toISOString(),
       confirmedAt: acknowledgedAt ? acknowledgedAt.toISOString() : null,
       customerName: snap.customerName,
@@ -231,9 +236,10 @@ export async function listPendingStaffTableCalls(
       return;
     }
 
-    if (!(await menuOwnerHasProPlan(menuId))) {
+    if (!(await menuOwnerHasCapability(menuId, "tableOrderingQr"))) {
       sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
-        code: "PRO_REQUIRED",
+        code: "PLAN_CAPABILITY_REQUIRED",
+        capability: "tableOrderingQr",
       });
       return;
     }
@@ -246,6 +252,7 @@ export async function listPendingStaffTableCalls(
         id: c.id,
         menuId: c.menuId,
         tableNumber: c.tableNumber,
+        requestKind: c.requestKind,
         at: c.createdAt.toISOString(),
         customerName: c.customerName,
         items: c.items,
@@ -276,9 +283,10 @@ export async function putStaffTableCall(
       return;
     }
 
-    if (!(await menuOwnerHasProPlan(menuId))) {
+    if (!(await menuOwnerHasCapability(menuId, "tableOrderingQr"))) {
       sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
-        code: "PRO_REQUIRED",
+        code: "PLAN_CAPABILITY_REQUIRED",
+        capability: "tableOrderingQr",
       });
       return;
     }
@@ -384,9 +392,10 @@ export async function patchTableCallStatus(
       return;
     }
 
-    if (!(await menuOwnerHasProPlan(menuId))) {
+    if (!(await menuOwnerHasCapability(menuId, "tableOrderingQr"))) {
       sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
-        code: "PRO_REQUIRED",
+        code: "PLAN_CAPABILITY_REQUIRED",
+        capability: "tableOrderingQr",
       });
       return;
     }
@@ -464,9 +473,10 @@ export async function patchTableCallItems(
       return;
     }
 
-    if (!(await menuOwnerHasProPlan(menuId))) {
+    if (!(await menuOwnerHasCapability(menuId, "tableOrderingQr"))) {
       sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
-        code: "PRO_REQUIRED",
+        code: "PLAN_CAPABILITY_REQUIRED",
+        capability: "tableOrderingQr",
       });
       return;
     }
@@ -563,9 +573,10 @@ export async function patchTableCallComplete(
       return;
     }
 
-    if (!(await menuOwnerHasProPlan(menuId))) {
+    if (!(await menuOwnerHasCapability(menuId, "tableOrderingQr"))) {
       sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
-        code: "PRO_REQUIRED",
+        code: "PLAN_CAPABILITY_REQUIRED",
+        capability: "tableOrderingQr",
       });
       return;
     }

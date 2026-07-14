@@ -11,7 +11,7 @@ import {
   MENU_DELIVERY_GOVERNORATE_COLUMNS,
   normalizeDeliveryMode,
 } from "../services/menuDelivery.service";
-import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
+import { hasCapability } from "../services/planCapabilities.service";
 
 function parseOptionalCoord(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -119,9 +119,13 @@ export async function updateMenuDeliverySettings(
 
     if (deliveryMode !== undefined) {
       const mode = normalizeDeliveryMode(deliveryMode);
-      if (mode === "distance" && (await isUserOnFreePlan(req.user!.userId))) {
+      if (
+        mode === "distance" &&
+        !(await hasCapability(req.user!.userId, "advancedDeliveryMaps"))
+      ) {
         sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
-          code: "PRO_REQUIRED",
+          code: "PLAN_CAPABILITY_REQUIRED",
+          capability: "advancedDeliveryMaps",
         });
         return;
       }

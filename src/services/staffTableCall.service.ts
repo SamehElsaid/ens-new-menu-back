@@ -18,7 +18,7 @@ import {
   type MenuItemVariant,
   normalizeMenuItemVariantsInput,
 } from "../utils/menuItemVariants";
-import { isUserOnFreePlan } from "./subscriptionPlan.service";
+import { hasCapability } from "./planCapabilities.service";
 import { logMenuOrderEventSafe } from "./menuActivityLog.service";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
 import { ensureStaffTableCallsOrderTypeSchema } from "../schemas/staffTableCallsOrderType.schema";
@@ -38,9 +38,18 @@ import {
   broadcastMenuActivityUpdated,
   broadcastStaffTableCallChanged,
 } from "../socket/staffIoBroadcast";
+import { ensureMenuWifiTaxServiceSchema } from "../schemas/menuWifiTaxService.schema";
+import { applyMenuOrderCharges } from "../utils/menuOrderCharges";
+import {
+  normalizeOptionalEnabled,
+  normalizePercent,
+} from "../utils/normalizeOptionalEnabled";
 import { parseGeoCoord } from "../utils/geoDistance";
 
 export type StaffOrderType = "table" | "delivery";
+
+/** Guest intent: food order, waiter ping, or bill request. */
+export type StaffRequestKind = "order" | "waiter" | "bill";
 
 /** Persisted on StaffTableCalls.status (after migration). */
 export type StaffTableCallStatus =
@@ -115,6 +124,13 @@ export type GuestStaffCallOptions = {
   orderNotes?: string | null;
   /** `table` | `delivery` — preferred over legacy heuristics. */
   type?: unknown;
+  /**
+   * Guest button intent:
+   * - `order` (default): cart / food order
+   * - `waiter`: call waiter to the table
+   * - `bill`: ask waiter to bring the check
+   */
+  requestKind?: unknown;
   items?: unknown;
   /** If set, stored on insert (default `pending`). */
   status?: unknown;
@@ -124,11 +140,29 @@ export type GuestStaffCallOptions = {
   customerLng?: number | null;
 };
 
+export function parseStaffRequestKind(raw: unknown): StaffRequestKind {
+  const normalized = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (normalized === "waiter" || normalized === "bill") {
+    return normalized;
+  }
+  return "order";
+}
+
+export function isServiceRequestKind(kind: StaffRequestKind): boolean {
+  return kind === "waiter" || kind === "bill";
+}
+
 function parseOrderType(
   raw: unknown,
   governorateId: number | null,
   tableNumber: string,
+  requestKind: StaffRequestKind = "order",
 ): StaffOrderType {
+  if (isServiceRequestKind(requestKind)) {
+    return "table";
+  }
   const normalized = String(raw ?? "")
     .trim()
     .toLowerCase();
@@ -139,6 +173,31 @@ function parseOrderType(
     return "delivery";
   }
   return "table";
+}
+
+function serviceRequestSummaries(
+  requestKind: "waiter" | "bill",
+  tableNumber: string,
+  customerName: string | null,
+): { summaryAr: string; summaryEn: string } {
+  if (requestKind === "bill") {
+    return {
+      summaryAr: customerName
+        ? `طلب الحساب من ${customerName} - طاولة ${tableNumber}`
+        : `طلب الحساب - طاولة ${tableNumber}`,
+      summaryEn: customerName
+        ? `Bill request from ${customerName} - table ${tableNumber}`
+        : `Bill request - table ${tableNumber}`,
+    };
+  }
+  return {
+    summaryAr: customerName
+      ? `استدعاء الويتر من ${customerName} - طاولة ${tableNumber}`
+      : `استدعاء الويتر - طاولة ${tableNumber}`,
+    summaryEn: customerName
+      ? `Waiter call from ${customerName} - table ${tableNumber}`
+      : `Waiter call - table ${tableNumber}`,
+  };
 }
 
 function parseCustomerPhone(
@@ -367,6 +426,79 @@ export function computeOrderTotalFromItems(items: StaffOrderItem[]): number {
   );
 }
 
+async function fetchMenuOrderCharges(menuId: number): Promise<{
+  taxEnabled: boolean;
+  taxPercent: number | null;
+  serviceEnabled: boolean;
+  servicePercent: number | null;
+} | null> {
+  try {
+    await ensureMenuWifiTaxServiceSchema();
+    const pool = await getPool();
+    const result = await pool
+      .request()
+      .input("id", sql.Int, menuId)
+      .query(`
+        SELECT
+          ISNULL(taxEnabled, 0) AS taxEnabled,
+          taxPercent,
+          ISNULL(serviceEnabled, 0) AS serviceEnabled,
+          servicePercent
+        FROM Menus
+        WHERE id = @id
+      `);
+    const row = result.recordset[0] as
+      | {
+          taxEnabled?: unknown;
+          taxPercent?: unknown;
+          serviceEnabled?: unknown;
+          servicePercent?: unknown;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      taxEnabled: normalizeOptionalEnabled(row.taxEnabled),
+      taxPercent: normalizePercent(row.taxPercent),
+      serviceEnabled: normalizeOptionalEnabled(row.serviceEnabled),
+      servicePercent: normalizePercent(row.servicePercent),
+    };
+  } catch (error) {
+    logger.error("fetchMenuOrderCharges error:", error);
+    return null;
+  }
+}
+
+async function computeOrderTotalWithMenuCharges(
+  menuId: number,
+  items: StaffOrderItem[],
+): Promise<number> {
+  const subtotal = computeOrderTotalFromItems(items);
+  const charges = await fetchMenuOrderCharges(menuId);
+  if (!charges) return subtotal;
+  return applyMenuOrderCharges(subtotal, charges).total;
+}
+
+export async function attachMenuChargeFieldsToOrder(
+  menuId: number,
+  items: StaffOrderItem[],
+  order: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const subtotal = computeOrderTotalFromItems(items);
+  const charges = await fetchMenuOrderCharges(menuId);
+  const applied = applyMenuOrderCharges(subtotal, charges);
+  return {
+    ...order,
+    itemsSubtotal: applied.subtotal,
+    taxEnabled: charges?.taxEnabled === true,
+    taxPercent: charges?.taxPercent ?? null,
+    taxAmount: applied.taxAmount,
+    serviceEnabled: charges?.serviceEnabled === true,
+    servicePercent: charges?.servicePercent ?? null,
+    serviceAmount: applied.serviceAmount,
+    orderTotal: applied.total,
+  };
+}
+
 export function isOpenStaffTableCallStatus(
   status: StaffTableCallStatus,
 ): boolean {
@@ -401,7 +533,7 @@ export async function findOpenTableCallForTable(
       .input("menuId", sql.Int, menuId)
       .input("tableNumber", sql.NVarChar, safeTable).query(`
         SELECT TOP 1
-          id, menuId, tableNumber, orderType, customerPhone, customerAddress,
+          id, menuId, tableNumber, orderType, requestKind, customerPhone, customerAddress,
           orderNotes, createdAt, customerName, orderItemsJson, status, acknowledgedAt
         FROM StaffTableCalls
         WHERE menuId = @menuId
@@ -409,6 +541,10 @@ export async function findOpenTableCallForTable(
           AND (
             orderType IS NULL
             OR LOWER(LTRIM(RTRIM(orderType))) = N'table'
+          )
+          AND (
+            requestKind IS NULL
+            OR LOWER(LTRIM(RTRIM(requestKind))) = N'order'
           )
           AND (
             status IS NULL
@@ -420,7 +556,8 @@ export async function findOpenTableCallForTable(
       | Parameters<typeof toStaffTableCallRow>[0]
       | undefined;
     if (!row) return null;
-    const parsed = toStaffTableCallRow(row, false);
+    const charges = await fetchMenuOrderCharges(menuId);
+    const parsed = toStaffTableCallRow(row, false, charges);
     return isOpenStaffTableCallStatus(parsed.status) ? parsed : null;
   } catch (error) {
     logger.error("findOpenTableCallForTable error:", error);
@@ -451,7 +588,7 @@ export async function appendItemsToOpenTableCall(
       return { ok: false, error: "NOT_EDITABLE" };
     }
     const merged = mergeStaffOrderItems(snap.items, incomingItems);
-    const orderTotal = computeOrderTotalFromItems(merged);
+    const orderTotal = await computeOrderTotalWithMenuCharges(menuId, merged);
     const orderJson = merged.length > 0 ? JSON.stringify(merged) : null;
     const pool = await getPool();
     const schema = await getStaffTableCallsSchemaFlags();
@@ -481,6 +618,7 @@ export async function appendItemsToOpenTableCall(
 
 /**
  * Cashier closes an active table order (`confirmed` or `prepared` → `delivered`).
+ * Also accepts rows that only have `acknowledgedAt` set (legacy / partial status writes).
  */
 export async function completeStaffTableCall(
   callId: number,
@@ -492,6 +630,12 @@ export async function completeStaffTableCall(
     if (!schema.status) {
       return false;
     }
+    const ackClause = schema.acknowledgedAt
+      ? `OR (
+           acknowledgedAt IS NOT NULL
+           AND LOWER(LTRIM(RTRIM(ISNULL(status, '')))) NOT IN (N'cancelled', N'delivered')
+         )`
+      : "";
     const result = await pool
       .request()
       .input("id", sql.Int, callId)
@@ -499,7 +643,10 @@ export async function completeStaffTableCall(
         UPDATE StaffTableCalls
         SET status = N'delivered'
         WHERE id = @id AND menuId = @menuId
-          AND LOWER(LTRIM(RTRIM(ISNULL(status, '')))) IN (N'confirmed', N'prepared')
+          AND (
+            LOWER(LTRIM(RTRIM(ISNULL(status, '')))) IN (N'confirmed', N'prepared')
+            ${ackClause}
+          )
       `);
     return (result.rowsAffected?.[0] ?? 0) > 0;
   } catch (error) {
@@ -756,6 +903,7 @@ export async function processGuestStaffCall(
       id: number;
       menuId: number;
       type: StaffOrderType;
+      requestKind: StaffRequestKind;
       tableNumber: string;
       createdAt: Date;
       customerName: string | null;
@@ -775,13 +923,20 @@ export async function processGuestStaffCall(
     .trim()
     .slice(0, 50);
 
+  const requestKind = parseStaffRequestKind(options?.requestKind);
+  const isServiceRequest = isServiceRequestKind(requestKind);
   const governorateIdFromOptions = parseGovernorateId(options?.governorateId);
   const orderType = parseOrderType(
     options?.type,
     governorateIdFromOptions,
     safeTable,
+    requestKind,
   );
   const isDeliveryOrder = orderType === "delivery";
+
+  if (isServiceRequest && isDeliveryOrder) {
+    return { ok: false, error: "INVALID_PAYLOAD" };
+  }
 
   if (!isDeliveryOrder && !safeTable) {
     return { ok: false, error: "INVALID_PAYLOAD" };
@@ -804,7 +959,9 @@ export async function processGuestStaffCall(
   const orderNotes = parseOrderNotes(options?.orderNotes);
   const effectiveTable = isDeliveryOrder ? "" : safeTable;
   const initialStatus = parseGuestInitialStaffCallStatus(options?.status);
-  const parsedItems = parseOrderItemsInput(options?.items);
+  const parsedItems = isServiceRequest
+    ? { ok: true as const, items: [] as StaffOrderItem[] }
+    : parseOrderItemsInput(options?.items);
   if (!parsedItems.ok) {
     return { ok: false, error: "INVALID_PAYLOAD" };
   }
@@ -833,7 +990,10 @@ export async function processGuestStaffCall(
     }
 
     const ownerId = m.userId as number;
-    if ((await isUserOnFreePlan(ownerId)) && !isDeliveryOrder) {
+    if (
+      !(await hasCapability(ownerId, "tableOrderingQr")) &&
+      !isDeliveryOrder
+    ) {
       return { ok: false, error: "FEATURE_REQUIRES_PRO" };
     }
 
@@ -933,7 +1093,10 @@ export async function processGuestStaffCall(
       return { ok: false, error: "SERVER_ERROR" };
     }
 
-    const orderTotal = computeOrderTotalFromItems(itemsResolved);
+    const orderTotal = await computeOrderTotalWithMenuCharges(
+      menuId,
+      itemsResolved,
+    );
 
     let storageMenuId = menuId;
     let sourceMenuId: number | null = null;
@@ -953,7 +1116,7 @@ export async function processGuestStaffCall(
       }
     }
 
-    if (!isDeliveryOrder && itemsResolved.length > 0) {
+    if (!isServiceRequest && !isDeliveryOrder && itemsResolved.length > 0) {
       const openCall = await findOpenTableCallForTable(
         storageMenuId,
         effectiveTable,
@@ -983,15 +1146,20 @@ export async function processGuestStaffCall(
             detailJson: JSON.stringify({
               status: appended.status,
               mergedFromGuest: true,
-              order: {
-                type: orderType,
-                tableNumber: effectiveTable,
-                customerName: openCall.customerName ?? customerName,
-                items: appended.items,
-                orderTotal: appended.orderTotal,
-                status: appended.status,
-                pendingGuestAddition: true,
-              },
+              order: await attachMenuChargeFieldsToOrder(
+                storageMenuId,
+                appended.items,
+                {
+                  type: orderType,
+                  requestKind: "order",
+                  tableNumber: effectiveTable,
+                  customerName: openCall.customerName ?? customerName,
+                  items: appended.items,
+                  orderTotal: appended.orderTotal,
+                  status: appended.status,
+                  pendingGuestAddition: true,
+                },
+              ),
             }),
           },
           {
@@ -1014,6 +1182,7 @@ export async function processGuestStaffCall(
             items: mergedSnap.items,
             orderTotal: mergedSnap.orderTotal,
             status: mergedSnap.status,
+            requestKind: mergedSnap.requestKind,
           });
         }
         return {
@@ -1021,6 +1190,7 @@ export async function processGuestStaffCall(
           id: openCall.id,
           menuId: storageMenuId,
           type: orderType,
+          requestKind: openCall.requestKind ?? "order",
           tableNumber: effectiveTable,
           createdAt: openCall.createdAt,
           customerName: openCall.customerName ?? customerName,
@@ -1042,6 +1212,7 @@ export async function processGuestStaffCall(
       initialStatus,
       {
         orderType,
+        requestKind,
         customerPhone,
         customerAddress,
         orderNotes,
@@ -1052,6 +1223,10 @@ export async function processGuestStaffCall(
       return { ok: false, error: "SERVER_ERROR" };
     }
 
+    const serviceSummaries = isServiceRequest
+      ? serviceRequestSummaries(requestKind, effectiveTable, customerName)
+      : null;
+
     await logMenuOrderEventSafe(
       storageMenuId,
       persisted.id,
@@ -1059,32 +1234,38 @@ export async function processGuestStaffCall(
         action: "TABLE_CALL_CREATED",
         targetType: "order",
         targetId: persisted.id,
-        summaryAr: isDeliveryOrder
-          ? customerName
-            ? distanceDelivery
-              ? `طلب توصيل جديد من ${customerName} - ${distanceDelivery.distanceKm} كم`
-              : `طلب توصيل جديد من ${customerName}${deliveryGovernorate ? ` - ${deliveryGovernorate.nameAr}` : ""}`
-            : distanceDelivery
-              ? `طلب توصيل جديد - ${distanceDelivery.distanceKm} كم`
-              : `طلب توصيل جديد${deliveryGovernorate ? ` - ${deliveryGovernorate.nameAr}` : ""}`
-          : customerName
-            ? `طلب جديد من ${customerName} - طاولة ${effectiveTable}`
-            : `طلب جديد - طاولة ${effectiveTable}`,
-        summaryEn: isDeliveryOrder
-          ? customerName
-            ? distanceDelivery
-              ? `New delivery order from ${customerName} - ${distanceDelivery.distanceKm} km`
-              : `New delivery order from ${customerName}${deliveryGovernorate ? ` - ${deliveryGovernorate.nameEn}` : ""}`
-            : distanceDelivery
-              ? `New delivery order - ${distanceDelivery.distanceKm} km`
-              : `New delivery order${deliveryGovernorate ? ` - ${deliveryGovernorate.nameEn}` : ""}`
-          : customerName
-            ? `New order from ${customerName} - table ${effectiveTable}`
-            : `New order - table ${effectiveTable}`,
+        summaryAr: serviceSummaries
+          ? serviceSummaries.summaryAr
+          : isDeliveryOrder
+            ? customerName
+              ? distanceDelivery
+                ? `طلب توصيل جديد من ${customerName} - ${distanceDelivery.distanceKm} كم`
+                : `طلب توصيل جديد من ${customerName}${deliveryGovernorate ? ` - ${deliveryGovernorate.nameAr}` : ""}`
+              : distanceDelivery
+                ? `طلب توصيل جديد - ${distanceDelivery.distanceKm} كم`
+                : `طلب توصيل جديد${deliveryGovernorate ? ` - ${deliveryGovernorate.nameAr}` : ""}`
+            : customerName
+              ? `طلب جديد من ${customerName} - طاولة ${effectiveTable}`
+              : `طلب جديد - طاولة ${effectiveTable}`,
+        summaryEn: serviceSummaries
+          ? serviceSummaries.summaryEn
+          : isDeliveryOrder
+            ? customerName
+              ? distanceDelivery
+                ? `New delivery order from ${customerName} - ${distanceDelivery.distanceKm} km`
+                : `New delivery order from ${customerName}${deliveryGovernorate ? ` - ${deliveryGovernorate.nameEn}` : ""}`
+              : distanceDelivery
+                ? `New delivery order - ${distanceDelivery.distanceKm} km`
+                : `New delivery order${deliveryGovernorate ? ` - ${deliveryGovernorate.nameEn}` : ""}`
+            : customerName
+              ? `New order from ${customerName} - table ${effectiveTable}`
+              : `New order - table ${effectiveTable}`,
         detailJson: JSON.stringify({
           status: initialStatus,
-          order: {
+          requestKind,
+          order: await attachMenuChargeFieldsToOrder(menuId, itemsResolved, {
             type: orderType,
+            requestKind,
             tableNumber: effectiveTable || null,
             customerName,
             customerPhone,
@@ -1117,7 +1298,7 @@ export async function processGuestStaffCall(
                   deliveryMode: "distance",
                 }
               : {}),
-          },
+          }),
         }),
       },
       {
@@ -1139,6 +1320,7 @@ export async function processGuestStaffCall(
       id: persisted.id,
       menuId: storageMenuId,
       type: orderType,
+      requestKind,
       tableNumber: effectiveTable,
       createdAt: persisted.createdAt,
       customerName,
@@ -1159,6 +1341,7 @@ export type StaffTableCallRow = {
   id: number;
   menuId: number;
   type: StaffOrderType;
+  requestKind: StaffRequestKind;
   tableNumber: string;
   createdAt: Date;
   customerName: string | null;
@@ -1361,6 +1544,7 @@ type StaffTableCallsSchemaFlags = {
   lastEditedByStaffId: boolean;
   lastEditedAt: boolean;
   orderType: boolean;
+  requestKind: boolean;
   customerPhone: boolean;
   customerAddress: boolean;
   orderNotes: boolean;
@@ -1396,6 +1580,7 @@ async function getStaffTableCallsSchemaFlags(): Promise<StaffTableCallsSchemaFla
     lastEditedByStaffId: lower.has("lasteditedbystaffid"),
     lastEditedAt: lower.has("lasteditedat"),
     orderType: lower.has("ordertype"),
+    requestKind: lower.has("requestkind"),
     customerPhone: lower.has("customerphone"),
     customerAddress: lower.has("customeraddress"),
     orderNotes: lower.has("ordernotes"),
@@ -1480,12 +1665,19 @@ function resolveStaffOrderType(row: {
   return table === "delivery" ? "delivery" : "table";
 }
 
+function resolveStaffRequestKind(row: {
+  requestKind?: string | null;
+}): StaffRequestKind {
+  return parseStaffRequestKind(row.requestKind);
+}
+
 function toStaffTableCallRow(
   row: {
     id: number;
     menuId: number;
     tableNumber: string;
     orderType?: string | null;
+    requestKind?: string | null;
     createdAt: Date;
     customerName: string | null;
     customerPhone?: string | null;
@@ -1499,16 +1691,27 @@ function toStaffTableCallRow(
     lastEditedByName?: string | null;
   },
   includeLastEdit: boolean,
+  charges?: {
+    taxEnabled: boolean;
+    taxPercent: number | null;
+    serviceEnabled: boolean;
+    servicePercent: number | null;
+  } | null,
 ): StaffTableCallRow {
   const items = parseOrderItemsJson(row.orderItemsJson);
   const status = normalizeStaffTableCallStatus(
     row.status,
     row.acknowledgedAt ?? null,
   );
+  const subtotal = computeOrderTotalFromItems(items);
+  const orderTotal = charges
+    ? applyMenuOrderCharges(subtotal, charges).total
+    : subtotal;
   const base: StaffTableCallRow = {
     id: row.id,
     menuId: row.menuId,
     type: resolveStaffOrderType(row),
+    requestKind: resolveStaffRequestKind(row),
     tableNumber: String(row.tableNumber),
     createdAt: row.createdAt,
     customerName:
@@ -1528,7 +1731,7 @@ function toStaffTableCallRow(
         ? String(row.orderNotes).trim()
         : null,
     items,
-    orderTotal: computeOrderTotalFromItems(items),
+    orderTotal,
     status,
     acknowledgedAt: row.acknowledgedAt ?? null,
   };
@@ -1563,6 +1766,7 @@ export async function createStaffTableCall(
   initialStatus: StaffTableCallStatus = "pending",
   meta?: {
     orderType?: StaffOrderType;
+    requestKind?: StaffRequestKind;
     customerPhone?: string | null;
     customerAddress?: string | null;
     orderNotes?: string | null;
@@ -1571,12 +1775,15 @@ export async function createStaffTableCall(
 ): Promise<{ id: number; createdAt: Date } | null> {
   try {
     await ensureStaffTableCallsOrderTypeSchema();
+    // Column may have been added after an earlier cache fill in this process.
+    staffTableCallsSchemaCache = null;
     await ensureMenuGroupSchema();
     const pool = await getPool();
     const orderJson = items.length > 0 ? JSON.stringify(items) : null;
     const statusNorm = parseGuestInitialStaffCallStatus(initialStatus);
     const acknowledgedAt = statusNorm === "confirmed" ? new Date() : null;
     const orderType = meta?.orderType === "delivery" ? "delivery" : "table";
+    const requestKind = parseStaffRequestKind(meta?.requestKind);
     const sourceMenuId =
       meta?.sourceMenuId != null &&
       Number.isFinite(meta.sourceMenuId) &&
@@ -1592,6 +1799,7 @@ export async function createStaffTableCall(
       .input("status", sql.NVarChar(20), statusNorm)
       .input("acknowledgedAt", sql.DateTime2, acknowledgedAt)
       .input("orderType", sql.NVarChar(20), orderType)
+      .input("requestKind", sql.NVarChar(20), requestKind)
       .input("customerPhone", sql.NVarChar(50), meta?.customerPhone ?? null)
       .input(
         "customerAddress",
@@ -1602,12 +1810,12 @@ export async function createStaffTableCall(
       .input("sourceMenuId", sql.Int, sourceMenuId).query(`
         INSERT INTO StaffTableCalls (
           menuId, tableNumber, customerName, orderItemsJson, status, acknowledgedAt,
-          orderType, customerPhone, customerAddress, orderNotes, sourceMenuId
+          orderType, requestKind, customerPhone, customerAddress, orderNotes, sourceMenuId
         )
         OUTPUT INSERTED.id, INSERTED.createdAt
         VALUES (
           @menuId, @tableNumber, @customerName, @orderItemsJson, @status, @acknowledgedAt,
-          @orderType, @customerPhone, @customerAddress, @orderNotes, @sourceMenuId
+          @orderType, @requestKind, @customerPhone, @customerAddress, @orderNotes, @sourceMenuId
         )
       `);
     const row = result.recordset[0];
@@ -1629,6 +1837,7 @@ export async function getStaffTableCallSnapshot(
   callId: number,
 ): Promise<StaffTableCallRow | null> {
   try {
+    await ensureStaffTableCallsOrderTypeSchema();
     const pool = await getPool();
     const flags = await getStaffTableCallsLastEditColFlags();
     const hasLast = flags.byId && flags.at;
@@ -1645,6 +1854,7 @@ export async function getStaffTableCallSnapshot(
           c.menuId,
           c.tableNumber,
           c.orderType,
+          c.requestKind,
           c.customerPhone,
           c.customerAddress,
           c.orderNotes,
@@ -1671,6 +1881,7 @@ export async function getStaffTableCallSnapshot(
           menuId,
           tableNumber,
           orderType,
+          requestKind,
           customerPhone,
           customerAddress,
           orderNotes,
@@ -1701,7 +1912,8 @@ export async function getStaffTableCallSnapshot(
     if (!row) {
       return null;
     }
-    return toStaffTableCallRow(row, hasLast);
+    const charges = await fetchMenuOrderCharges(menuId);
+    return toStaffTableCallRow(row, hasLast, charges);
   } catch (error) {
     logger.error("getStaffTableCallSnapshot error:", error);
     return null;
@@ -1713,6 +1925,7 @@ export async function getPendingStaffTableCalls(
   limit = 100,
 ): Promise<StaffTableCallRow[]> {
   try {
+    await ensureStaffTableCallsOrderTypeSchema();
     const pool = await getPool();
     const result = await pool
       .request()
@@ -1723,6 +1936,7 @@ export async function getPendingStaffTableCalls(
           menuId,
           tableNumber,
           orderType,
+          requestKind,
           customerPhone,
           customerAddress,
           orderNotes,
@@ -1739,10 +1953,12 @@ export async function getPendingStaffTableCalls(
           )
         ORDER BY createdAt ASC
       `);
+    const charges = await fetchMenuOrderCharges(menuId);
     return (result.recordset as Record<string, unknown>[]).map((row) =>
       toStaffTableCallRow(
         row as Parameters<typeof toStaffTableCallRow>[0],
         false,
+        charges,
       ),
     );
   } catch (error) {
@@ -1760,6 +1976,7 @@ export async function getStaffTableCallsHistory(
   limit = 20,
 ): Promise<StaffTableCallHistoryPage> {
   try {
+    await ensureStaffTableCallsOrderTypeSchema();
     const pool = await getPool();
     const safePage = Math.max(1, Math.floor(page));
     const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 500);
@@ -1788,6 +2005,8 @@ export async function getStaffTableCallsHistory(
           c.id,
           c.menuId,
           c.tableNumber,
+          c.orderType,
+          c.requestKind,
           c.createdAt,
           c.acknowledgedAt,
           c.customerName,
@@ -1813,6 +2032,8 @@ export async function getStaffTableCallsHistory(
           id,
           menuId,
           tableNumber,
+          orderType,
+          requestKind,
           createdAt,
           acknowledgedAt,
           customerName,
@@ -1825,6 +2046,7 @@ export async function getStaffTableCallsHistory(
       `);
     }
 
+    const charges = await fetchMenuOrderCharges(menuId);
     const rows = (rowsResult.recordset as Record<string, unknown>[]).map(
       (row) => {
         const r = row as {
@@ -1840,7 +2062,11 @@ export async function getStaffTableCallsHistory(
           lastEditedAt?: Date | null;
           lastEditedByName?: string | null;
         };
-        return toStaffTableCallRow(r, hasLast) as StaffTableCallHistoryRow;
+        return toStaffTableCallRow(
+          r,
+          hasLast,
+          charges,
+        ) as StaffTableCallHistoryRow;
       },
     );
 
@@ -2047,7 +2273,10 @@ export async function updateStaffTableCallItems(
       return { ok: false, error: "SERVER_ERROR" };
     }
 
-    const orderTotal = computeOrderTotalFromItems(itemsResolved);
+    const orderTotal = await computeOrderTotalWithMenuCharges(
+      menuId,
+      itemsResolved,
+    );
     const orderJson =
       itemsResolved.length > 0 ? JSON.stringify(itemsResolved) : null;
 
@@ -2185,7 +2414,10 @@ export async function updateStaffTableCallItemsAndStatus(
       return { ok: false, error: "SERVER_ERROR" };
     }
 
-    const orderTotal = computeOrderTotalFromItems(itemsResolved);
+    const orderTotal = await computeOrderTotalWithMenuCharges(
+      menuId,
+      itemsResolved,
+    );
     const orderJson =
       itemsResolved.length > 0 ? JSON.stringify(itemsResolved) : null;
 

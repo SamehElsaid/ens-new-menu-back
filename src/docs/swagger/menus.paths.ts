@@ -60,6 +60,53 @@
  *       200:
  *         description: Analytics data
  *
+ * /api/menus/{menuId}/ratings:
+ *   get:
+ *     tags: [Menus]
+ *     summary: List customer ratings for a menu
+ *     description: |
+ *       Returns paginated customer ratings for a menu the caller owns
+ *       (or cashier staff assigned to). Includes optional contact fields.
+ *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
+ *     parameters:
+ *       - $ref: '#/components/parameters/menuId'
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, minimum: 1, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 100, default: 12 }
+ *       - in: query
+ *         name: q
+ *         schema: { type: string, maxLength: 100 }
+ *         description: Search name, phone, email, or comment
+ *     responses:
+ *       200:
+ *         description: Ratings list
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 ratings:
+ *                   - id: 12
+ *                     stars: 5
+ *                     comment: Great food
+ *                     customerName: Ahmed
+ *                     customerPhone: "+201012345678"
+ *                     customerEmail: ahmed@example.com
+ *                     createdAt: "2026-07-14T12:00:00.000Z"
+ *                 summary:
+ *                   total: 42
+ *                   average: 4.5
+ *                 pagination:
+ *                   total: 42
+ *                   page: 1
+ *                   limit: 12
+ *                   totalPages: 4
+ *       404:
+ *         description: Menu not found or no access
+ *
  * /api/menus/{menuId}/audit-logs:
  *   get:
  *     tags: [Menus]
@@ -96,6 +143,9 @@
  *   put:
  *     tags: [Menus]
  *     summary: Update menu
+ *     description: |
+ *       Updates menu profile and optional settings. WiFi (name/password), tax percent,
+ *       and service percent are optional and gated by their enabled flags (default off).
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -107,9 +157,29 @@
  *         application/json:
  *           schema:
  *             type: object
+ *             properties:
+ *               wifiEnabled: { type: boolean }
+ *               wifiName: { type: string, nullable: true, maxLength: 255 }
+ *               wifiPassword: { type: string, nullable: true, maxLength: 255 }
+ *               taxEnabled: { type: boolean }
+ *               taxPercent: { type: number, nullable: true, minimum: 0, maximum: 100 }
+ *               serviceEnabled: { type: boolean }
+ *               servicePercent: { type: number, nullable: true, minimum: 0, maximum: 100 }
+ *           example:
+ *             wifiEnabled: true
+ *             wifiName: Guest-WiFi
+ *             wifiPassword: cafe1234
+ *             taxEnabled: true
+ *             taxPercent: 14
+ *             serviceEnabled: false
+ *             servicePercent: 12
  *     responses:
  *       200:
  *         description: Updated
+ *         content:
+ *           application/json:
+ *             example:
+ *               message: Menu updated successfully
  *   delete:
  *     tags: [Menus]
  *     summary: Delete menu

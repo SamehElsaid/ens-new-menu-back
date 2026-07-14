@@ -9,6 +9,7 @@ import { ensureMenuItemSizesSchema } from "./menuItemSizes.schema";
 import { ensureMenuItemVariantsSchema } from "./menuItemVariants.schema";
 import { ensureMenuAuditLogSchema } from "./menuAuditLog.schema";
 import { ensureMenuChatbotSchema } from "./menuChatbot.schema";
+import { ensureMenuWifiTaxServiceSchema } from "./menuWifiTaxService.schema";
 import { ensureMenuStaffSchema } from "./menuStaff.schema";
 import { ensureMenuTablesSchema } from "./menuTables.schema";
 import { ensureMenuUuidSchema } from "./menuUuid.schema";
@@ -25,6 +26,8 @@ import { ensureDomainTransferSchema } from "./domainTransfer.schema";
 import { ensureSubscriptionExtrasSchema } from "./subscriptionExtras.schema";
 import { ensureMenuGroupSchema } from "./menuGroup.schema";
 import { ensureBranchDeliverySchema } from "./branchDelivery.schema";
+import { ensureRatingsSchema } from "./ratings.schema";
+import { ensurePlanCapabilitiesSchema } from "./planCapabilities.schema";
 
 export { ensureAdminActivityLogSchema } from "./adminActivityLog.schema";
 export { ensureAdminCustomerSchema } from "./adminCustomer.schema";
@@ -36,6 +39,7 @@ export { ensureMenuItemSizesSchema } from "./menuItemSizes.schema";
 export { ensureMenuItemVariantsSchema } from "./menuItemVariants.schema";
 export { ensureMenuAuditLogSchema } from "./menuAuditLog.schema";
 export { ensureMenuChatbotSchema } from "./menuChatbot.schema";
+export { ensureMenuWifiTaxServiceSchema } from "./menuWifiTaxService.schema";
 export { ensureMenuStaffSchema } from "./menuStaff.schema";
 export { ensureMenuTablesSchema } from "./menuTables.schema";
 export { ensureMenuUuidSchema } from "./menuUuid.schema";
@@ -52,6 +56,8 @@ export { ensureDomainTransferSchema } from "./domainTransfer.schema";
 export { ensureSubscriptionExtrasSchema } from "./subscriptionExtras.schema";
 export { ensureMenuGroupSchema } from "./menuGroup.schema";
 export { ensureBranchDeliverySchema } from "./branchDelivery.schema";
+export { ensureRatingsSchema } from "./ratings.schema";
+export { ensurePlanCapabilitiesSchema } from "./planCapabilities.schema";
 
 /** Runs all idempotent DB schema migrations on startup (after pool is connected). */
 export async function ensureDatabaseSchemas(): Promise<void> {
@@ -77,11 +83,14 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "menuItemVariants", run: ensureMenuItemVariantsSchema },
     { name: "menuAuditLog", run: ensureMenuAuditLogSchema },
     { name: "menuChatbot", run: ensureMenuChatbotSchema },
+    { name: "menuWifiTaxService", run: ensureMenuWifiTaxServiceSchema },
     { name: "deprecatedMenuThemes", run: migrateDeprecatedMenuThemes },
     { name: "domainTransfer", run: ensureDomainTransferSchema },
     { name: "subscriptionExtras", run: ensureSubscriptionExtrasSchema },
+    { name: "planCapabilities", run: ensurePlanCapabilitiesSchema },
     { name: "menuGroup", run: ensureMenuGroupSchema },
     { name: "branchDelivery", run: ensureBranchDeliverySchema },
+    { name: "ratings", run: ensureRatingsSchema },
   ];
 
   for (const step of steps) {

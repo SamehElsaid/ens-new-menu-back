@@ -1,8 +1,7 @@
 import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
-import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
-import { FREE_MAX_ADS_PER_MENU } from "../config/constants";
+import { getMaxAdsPerMenuForUser } from "../services/planCapabilities.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 
@@ -41,8 +40,7 @@ export const createMenuAd = async (req: Request, res: Response) => {
       `);
 
     const currentCount = countResult.recordset[0]?.total ?? 0;
-    const onFreePlan = await isUserOnFreePlan(userId);
-    const maxAds = onFreePlan ? FREE_MAX_ADS_PER_MENU : -1;
+    const maxAds = await getMaxAdsPerMenuForUser(userId);
 
     if (maxAds !== -1 && currentCount >= maxAds) {
       sendApiError(res, req, 403, ApiErrors.adLimitExceeded, {

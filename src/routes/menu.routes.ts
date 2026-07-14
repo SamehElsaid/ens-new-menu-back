@@ -3,6 +3,7 @@ import { body, query, param } from "express-validator";
 import * as menuController from "../controllers/menu.controller";
 import * as menuActivityLogController from "../controllers/menuActivityLog.controller";
 import { getMenuAnalytics } from "../controllers/menuAnalytics.controller";
+import { listMenuRatingsHandler } from "../controllers/menuRatings.controller";
 import { ALLOWED_MENU_THEMES } from "../constants/menuThemes";
 import { validate } from "../middleware/validation";
 import { requireAuth } from "../middleware/auth.middleware";
@@ -66,6 +67,19 @@ router.get(
     query("period").optional().isIn(["7d", "30d", "90d"]),
   ]),
   getMenuAnalytics,
+);
+
+// GET /api/menus/:menuId/ratings — customer ratings for this menu (owner / cashier)
+router.get(
+  "/:menuId/ratings",
+  validate([
+    param("menuId").isInt(),
+    query("page").optional().isInt({ min: 1 }),
+    query("limit").optional().isInt({ min: 1, max: 100 }),
+    query("q").optional().isString().trim().isLength({ max: 100 }),
+    query("search").optional().isString().trim().isLength({ max: 100 }),
+  ]),
+  listMenuRatingsHandler,
 );
 
 // GET /api/menus/:menuId/audit-logs — menu audit trail (create/update/delete)
@@ -181,6 +195,25 @@ router.put(
     body("currency").optional().isString().isLength({ min: 3, max: 3 }),
     body("isActive").optional().isBoolean(),
     body("chatbotEnabled").optional().isBoolean(),
+    body("wifiEnabled").optional().isBoolean(),
+    body("wifiName")
+      .optional({ nullable: true, checkFalsy: true })
+      .isString()
+      .trim()
+      .isLength({ max: 255 }),
+    body("wifiPassword")
+      .optional({ nullable: true, checkFalsy: true })
+      .isString()
+      .trim()
+      .isLength({ max: 255 }),
+    body("taxEnabled").optional().isBoolean(),
+    body("taxPercent")
+      .optional({ nullable: true })
+      .isFloat({ min: 0, max: 100 }),
+    body("serviceEnabled").optional().isBoolean(),
+    body("servicePercent")
+      .optional({ nullable: true })
+      .isFloat({ min: 0, max: 100 }),
     body("addressEn")
       .optional({ nullable: true, checkFalsy: true })
       .isString()

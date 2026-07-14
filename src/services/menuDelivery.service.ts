@@ -1,6 +1,6 @@
 import { getPool, sql } from "../config/database";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
-import { isUserOnFreePlan } from "./subscriptionPlan.service";
+import { hasCapability } from "./planCapabilities.service";
 import {
   quoteBranchDelivery,
   type BranchDeliveryQuote,
@@ -144,7 +144,7 @@ export async function getEffectiveMenuDeliveryMode(
   return modes.get(menuId) ?? "governorates";
 }
 
-/** Batch lookup of effective delivery mode (respects free plan → governorates). */
+/** Batch lookup of effective delivery mode (distance only when plan allows maps). */
 export async function getEffectiveMenuDeliveryModesForMenus(
   menuIds: number[],
 ): Promise<Map<number, DeliveryMode>> {
@@ -163,20 +163,22 @@ export async function getEffectiveMenuDeliveryModesForMenus(
     WHERE m.id IN (${inList})
   `);
 
-  const freePlanByUser = new Map<number, boolean>();
+  const mapsByUser = new Map<number, boolean>();
   for (const row of r.recordset as {
     id: number;
     deliveryMode?: string | null;
     userId: number;
   }[]) {
-    let isFree = freePlanByUser.get(row.userId);
-    if (isFree === undefined) {
-      isFree = await isUserOnFreePlan(row.userId);
-      freePlanByUser.set(row.userId, isFree);
+    let canUseMaps = mapsByUser.get(row.userId);
+    if (canUseMaps === undefined) {
+      canUseMaps = await hasCapability(row.userId, "advancedDeliveryMaps");
+      mapsByUser.set(row.userId, canUseMaps);
     }
     map.set(
       row.id,
-      isFree ? "governorates" : normalizeDeliveryMode(row.deliveryMode),
+      canUseMaps
+        ? normalizeDeliveryMode(row.deliveryMode)
+        : "governorates",
     );
   }
 

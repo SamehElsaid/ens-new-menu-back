@@ -16,7 +16,8 @@ import { getExtraMenuPricingFromEndDate } from "../services/extraMenus.service";
 import { getProExtraMenuPriceEgp } from "../services/subscriptionPricing.service";
 import { ensureSubscriptionExtrasSchema } from "../schemas/subscriptionExtras.schema";
 import { getProRenewalInfo } from "../services/subscriptionRenewal.service";
-import { getActivePlansForDisplay } from "../services/plans.service";
+import { getPlansWithCustomDisplay } from "../services/plans.service";
+import { getUserPlanCapabilities } from "../services/planCapabilities.service";
 import { ensureRestaurantNameSchema } from "../schemas/restaurantName.schema";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
 
@@ -463,8 +464,8 @@ export async function upgradePlan(req: Request, res: Response): Promise<void> {
 export async function getPlans(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
-    const plans = await getActivePlansForDisplay(userId);
-    res.json({ success: true, plans });
+    const { plans, customDisplay } = await getPlansWithCustomDisplay(userId);
+    res.json({ success: true, plans, customDisplay });
   } catch (error) {
     logger.error("Get user plans error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetPlans);
@@ -507,6 +508,7 @@ export async function getSubscription(
         maxMenus: 1,
         maxProductsPerMenu: -1,
       };
+      const { capabilities } = await getUserPlanCapabilities(userId);
 
       res.json({
         subscription: {
@@ -529,6 +531,7 @@ export async function getSubscription(
           renewExtendsFromEndDate: renewalInfo.extendFromEndDate,
           isInGracePeriod: renewalInfo.isInGracePeriod,
           maxProductsPerMenu: freePlan.maxProductsPerMenu,
+          capabilities,
         },
       });
       return;
@@ -545,12 +548,14 @@ export async function getSubscription(
     const renewalInfo = await getProRenewalInfo(userId);
     const isPro =
       String(subscription.planName ?? "").trim().toLowerCase() === "pro";
+    const { capabilities } = await getUserPlanCapabilities(userId);
     res.json({
       subscription: {
         ...subscription,
         plan: subscription.planName || "Free",
         extraMenus,
         effectiveMaxMenus: maxMenus + extraMenus,
+        capabilities,
         extraMenuPrice: extraMenuUnitPrice,
         ...extraMenuPricing,
         canRenewPro: isPro && renewalInfo.canRenew,

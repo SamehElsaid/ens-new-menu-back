@@ -466,6 +466,10 @@ export const ApiErrors = {
     en: "Failed to get statistics",
     ar: "فشل جلب الإحصائيات",
   },
+  failedGetRatings: {
+    en: "Failed to get ratings",
+    ar: "فشل جلب التقييمات",
+  },
   invalidPlanType: {
     en: "Invalid plan type",
     ar: "نوع الخطة غير صالح",

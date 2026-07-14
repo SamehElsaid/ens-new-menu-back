@@ -44,6 +44,7 @@ function statusForError(error: string): number {
  *     | { name: string; quantity?: number; price?: number; notes?: string }
  *   >
  *   (price optional — filled from MenuItems + size/variant; response includes line totals + orderTotal)
+ *   requestKind?: "order" | "waiter" | "bill" — waiter/bill = service ping (no items; table only)
  *   status?: "pending" | "confirmed" | "cancelled" — optional; default pending (confirmed sets acknowledgedAt)
  * }
  */
@@ -61,6 +62,7 @@ export async function postGuestStaffCall(
       customerAddress: req.body?.customerAddress,
       orderNotes: req.body?.orderNotes,
       type: req.body?.type,
+      requestKind: req.body?.requestKind,
       items: req.body?.items,
       status: req.body?.status,
       governorateId: req.body?.governorateId,
@@ -96,6 +98,7 @@ export async function postGuestStaffCall(
       items: result.items,
       orderTotal: result.orderTotal,
       status: result.status,
+      requestKind: result.requestKind,
     }).catch((err) => {
       logger.warn("notifyStaffOfTableCall failed after staff-call", {
         menuId: result.menuId,
@@ -114,6 +117,7 @@ export async function postGuestStaffCall(
       items: result.items,
       orderTotal: result.orderTotal,
       status: result.status,
+      requestKind: result.requestKind,
     });
   } catch (error) {
     logger.error("postGuestStaffCall error:", error);

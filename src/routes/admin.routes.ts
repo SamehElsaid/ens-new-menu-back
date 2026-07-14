@@ -10,6 +10,8 @@ import {
   getAllPlans,
   updatePlan,
   createPlan,
+  getAdminCustomPlanDisplay,
+  putAdminCustomPlanDisplay,
   getGlobalAds,
   createGlobalAd,
   updateGlobalAd,
@@ -149,6 +151,8 @@ router.put("/users/:id/support/:caseId", patchAdminUserSupportStatus);
 
 // Plans Management
 router.get("/plans/subscription", getPlansForSubscription);
+router.get("/plans/custom-display", getAdminCustomPlanDisplay);
+router.put("/plans/custom-display", putAdminCustomPlanDisplay);
 router.get("/plans", getAllPlans);
 router.post("/plans", createPlan);
 router.put("/plans/:id", updatePlan);

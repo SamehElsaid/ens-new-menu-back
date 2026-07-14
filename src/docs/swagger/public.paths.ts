@@ -126,6 +126,9 @@
  *   get:
  *     tags: [Public]
  *     summary: Get public menu by slug
+ *     description: |
+ *       Returns public menu bootstrap including optional WiFi (when wifiEnabled),
+ *       taxEnabled/taxPercent, and serviceEnabled/servicePercent for checkout totals.
  *     security: []
  *     parameters:
  *       - in: path
@@ -199,6 +202,9 @@
  *   post:
  *     tags: [Public]
  *     summary: Submit rating
+ *     description: |
+ *       Submit a 1-5 star rating for a public menu. Optional comment and contact
+ *       fields (name, phone, email).
  *     security: []
  *     parameters:
  *       - in: path
@@ -206,27 +212,67 @@
  *         required: true
  *         schema: { type: string }
  *     requestBody:
+ *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
  *             required: [stars]
  *             properties:
- *               stars: { type: integer, minimum: 1, maximum: 5 }
- *               comment: { type: string }
- *               customerName: { type: string }
+ *               stars: { type: integer, minimum: 1, maximum: 5, example: 5 }
+ *               comment: { type: string, maxLength: 1000, example: Great food and service }
+ *               customerName: { type: string, maxLength: 255, example: Ahmed }
+ *               customerPhone: { type: string, maxLength: 50, example: "+201012345678" }
+ *               customerEmail: { type: string, format: email, example: ahmed@example.com }
+ *           example:
+ *             stars: 5
+ *             comment: Great food and service
+ *             customerName: Ahmed
+ *             customerPhone: "+201012345678"
+ *             customerEmail: ahmed@example.com
  *     responses:
  *       201:
  *         description: Rating submitted
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: Rating submitted successfully
+ *       400:
+ *         description: Invalid stars or email
+ *       404:
+ *         description: Menu not found
  *
  * /api/public/plans:
  *   get:
  *     tags: [Public]
  *     summary: Active subscription plans
+ *     description: |
+ *       Active Free/Pro plans with `capabilities` plus marketing-only `customDisplay`
+ *       for the Pricing Custom column.
  *     security: []
  *     responses:
  *       200:
  *         description: Plans list
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               plans:
+ *                 - id: 1
+ *                   name: Free
+ *                   priceMonthly: 0
+ *                   maxMenus: 1
+ *                   capabilities:
+ *                     aiMenuImport: true
+ *                     tableOrderingQr: false
+ *                     maxAdsPerMenu: 1
+ *                     allowedThemes: [default, coffee]
+ *               customDisplay:
+ *                 aiMenuImport: true
+ *                 tableOrderingQr: true
+ *                 maxAdsPerMenu: -1
+ *                 allowedThemes: [default, coffee, neon, sky, waffle, vanilla]
  *
  * /api/public/homepage-featured-logos:
  *   get:

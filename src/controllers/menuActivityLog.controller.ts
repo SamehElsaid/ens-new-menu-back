@@ -14,7 +14,7 @@ import {
   type MenuOrderChannel,
   type MenuOrderActionType,
 } from "../services/menuActivityLog.service";
-import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
+import { menuOwnerHasCapability } from "../services/planCapabilities.service";
 import { logger } from "../utils/logger";
 
 /**
@@ -194,9 +194,13 @@ export async function postMenuOrderActionHandler(
     }
 
     const orderChannel = await getMenuOrderChannelFromLogId(mid, logId);
-    if (orderChannel === "table" && !(await menuOwnerHasProPlan(mid))) {
+    if (
+      orderChannel === "table" &&
+      !(await menuOwnerHasCapability(mid, "tableOrderingQr"))
+    ) {
       sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
-        code: "PRO_REQUIRED",
+        code: "PLAN_CAPABILITY_REQUIRED",
+        capability: "tableOrderingQr",
       });
       return;
     }
@@ -217,7 +221,10 @@ export async function postMenuOrderActionHandler(
         sendApiError(res, req, 403, ApiErrors.staffCashierRequired);
         return;
       }
-      if (result.error === "INVALID_STATE") {
+      if (
+        result.error === "INVALID_STATE" ||
+        result.error === "INVALID_ACTION"
+      ) {
         sendApiError(res, req, 409, ApiErrors.callNotFoundOrNotPending);
         return;
       }
@@ -257,9 +264,13 @@ export async function patchMenuOrderItemsHandler(
     }
 
     const orderChannel = await getMenuOrderChannelFromLogId(mid, logId);
-    if (orderChannel === "table" && !(await menuOwnerHasProPlan(mid))) {
+    if (
+      orderChannel === "table" &&
+      !(await menuOwnerHasCapability(mid, "tableOrderingQr"))
+    ) {
       sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
-        code: "PRO_REQUIRED",
+        code: "PLAN_CAPABILITY_REQUIRED",
+        capability: "tableOrderingQr",
       });
       return;
     }

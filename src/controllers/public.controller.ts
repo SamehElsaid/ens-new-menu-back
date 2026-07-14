@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
-import { getActivePlansForDisplay } from "../services/plans.service";
+import { getPlansWithCustomDisplay } from "../services/plans.service";
 import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
@@ -16,7 +16,13 @@ import { getImageUrl } from "../utils/urlHelper";
 import { attachParsedMenuItemOptionsList } from "../utils/menuItemVariants";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
+import { ensureMenuWifiTaxServiceSchema } from "../schemas/menuWifiTaxService.schema";
+import { ensureRatingsSchema } from "../schemas/ratings.schema";
 import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
+import {
+  normalizeOptionalEnabled,
+  normalizePercent,
+} from "../utils/normalizeOptionalEnabled";
 import { normalizeMenuTheme } from "../constants/menuThemes";
 import { fetchMenuDeliverySettings } from "../services/menuDelivery.service";
 import {
@@ -180,6 +186,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     const tableId = parsePublicMenuTableId(req);
 
     await ensureMenuChatbotSchema();
+    await ensureMenuWifiTaxServiceSchema();
 
     const pool = await getPool();
 
@@ -196,6 +203,13 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           ISNULL(m.currency, 'SAR') as currency,
           m.isActive,
           ISNULL(m.chatbotEnabled, 1) as chatbotEnabled,
+          ISNULL(m.wifiEnabled, 0) as wifiEnabled,
+          m.wifiName,
+          m.wifiPassword,
+          ISNULL(m.taxEnabled, 0) as taxEnabled,
+          m.taxPercent,
+          ISNULL(m.serviceEnabled, 0) as serviceEnabled,
+          m.servicePercent,
           m.userId,
           m.footerLogo,
           m.footerDescriptionEn,
@@ -255,6 +269,13 @@ export const getPublicMenu = async (req: Request, res: Response) => {
             slug: menu.slug,
             isActive: menu.isActive,
             chatbotEnabled: normalizeChatbotEnabled(menu.chatbotEnabled),
+            wifiEnabled: normalizeOptionalEnabled(menu.wifiEnabled),
+            wifiName: menu.wifiName ?? null,
+            wifiPassword: menu.wifiPassword ?? null,
+            taxEnabled: normalizeOptionalEnabled(menu.taxEnabled),
+            taxPercent: normalizePercent(menu.taxPercent),
+            serviceEnabled: normalizeOptionalEnabled(menu.serviceEnabled),
+            servicePercent: normalizePercent(menu.servicePercent),
             locale: menu.locale,
             ownerPlanType: menu.ownerPlanType || "free",
             footerLogo: getImageUrl(menu.footerLogo),
@@ -556,6 +577,13 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           slug: menu.slug,
           isActive: menu.isActive,
           chatbotEnabled: normalizeChatbotEnabled(menu.chatbotEnabled),
+          wifiEnabled: normalizeOptionalEnabled(menu.wifiEnabled),
+          wifiName: menu.wifiName ?? null,
+          wifiPassword: menu.wifiPassword ?? null,
+          taxEnabled: normalizeOptionalEnabled(menu.taxEnabled),
+          taxPercent: normalizePercent(menu.taxPercent),
+          serviceEnabled: normalizeOptionalEnabled(menu.serviceEnabled),
+          servicePercent: normalizePercent(menu.servicePercent),
           locale: menu.locale,
           ownerPlanType: menu.ownerPlanType || "free", // Add owner's plan type
           footerLogo: getImageUrl(menu.footerLogo),
@@ -686,7 +714,8 @@ export const postMenuItemView = async (
 export const submitRating = async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
-    const { stars, comment, customerName } = req.body;
+    const { stars, comment, customerName, customerPhone, customerEmail } =
+      req.body;
 
     // Validation
     if (!stars || stars < 1 || stars > 5) {
@@ -696,6 +725,7 @@ export const submitRating = async (req: Request, res: Response) => {
       });
     }
 
+    await ensureRatingsSchema();
     const pool = await getPool();
 
     // Get menu ID from slug
@@ -714,35 +744,37 @@ export const submitRating = async (req: Request, res: Response) => {
 
     const menuId = menuResult.recordset[0].id;
     const ipAddress = req.ip || req.socket.remoteAddress || "";
-
-    // Check if IP already rated in the last 24 hours
-    const rateCheckResult = await pool
-      .request()
-      .input("menuId", sql.Int, menuId)
-      .input("ipAddress", sql.NVarChar, ipAddress).query(`
-        SELECT id FROM Ratings 
-        WHERE menuId = @menuId 
-        AND ipAddress = @ipAddress 
-        AND createdAt > DATEADD(hour, -24, GETDATE())
-      `);
-
-    if (rateCheckResult.recordset.length > 0) {
-      return res.status(429).json({
-        success: false,
-        message: "You can only rate once every 24 hours",
-      });
-    }
+    const normalizedName =
+      typeof customerName === "string" && customerName.trim()
+        ? customerName.trim()
+        : null;
+    const normalizedPhone =
+      typeof customerPhone === "string" && customerPhone.trim()
+        ? customerPhone.trim()
+        : null;
+    const normalizedEmail =
+      typeof customerEmail === "string" && customerEmail.trim()
+        ? customerEmail.trim()
+        : null;
+    const normalizedComment =
+      typeof comment === "string" && comment.trim() ? comment.trim() : null;
 
     // Insert rating
     await pool
       .request()
       .input("menuId", sql.Int, menuId)
       .input("stars", sql.Int, stars)
-      .input("comment", sql.NVarChar, comment || null)
-      .input("customerName", sql.NVarChar, customerName || null)
+      .input("comment", sql.NVarChar, normalizedComment)
+      .input("customerName", sql.NVarChar, normalizedName)
+      .input("customerPhone", sql.NVarChar(50), normalizedPhone)
+      .input("customerEmail", sql.NVarChar(255), normalizedEmail)
       .input("ipAddress", sql.NVarChar, ipAddress).query(`
-        INSERT INTO Ratings (menuId, stars, comment, customerName, ipAddress)
-        VALUES (@menuId, @stars, @comment, @customerName, @ipAddress)
+        INSERT INTO Ratings (
+          menuId, stars, comment, customerName, customerPhone, customerEmail, ipAddress
+        )
+        VALUES (
+          @menuId, @stars, @comment, @customerName, @customerPhone, @customerEmail, @ipAddress
+        )
       `);
 
     res.status(201).json({
@@ -762,10 +794,11 @@ export const submitRating = async (req: Request, res: Response) => {
 // Get all active plans for public display (landing page)
 export const getPublicPlans = async (req: Request, res: Response) => {
   try {
-    const plans = await getActivePlansForDisplay(null);
+    const { plans, customDisplay } = await getPlansWithCustomDisplay(null);
     res.json({
       success: true,
       plans,
+      customDisplay,
     });
   } catch (error: any) {
     console.error("Error fetching public plans:", error);

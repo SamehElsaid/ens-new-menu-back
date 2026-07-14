@@ -121,8 +121,8 @@
  *     tags: [User]
  *     summary: Available plans with personalized pricing
  *     description: |
- *       Active subscription plans with intro/discount pricing for the logged-in user.
- *       Used on the upgrade/billing page before payment.
+ *       Active subscription plans with intro/discount pricing for the logged-in user,
+ *       including `capabilities` and marketing-only `customDisplay`.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     responses:
  *       200:
@@ -133,15 +133,25 @@
  *               plans:
  *                 - id: 1
  *                   name: Free
- *                   billingCycle: free
- *                   price: 0
+ *                   priceMonthly: 0
  *                   maxMenus: 1
+ *                   capabilities:
+ *                     aiMenuImport: true
+ *                     tableOrderingQr: false
+ *                     staffAndTables: false
+ *                     maxAdsPerMenu: 1
  *                 - id: 2
  *                   name: Pro
- *                   billingCycle: yearly
- *                   price: 999
- *                   introPrice: 799
+ *                   priceMonthly: 99
  *                   maxMenus: 5
+ *                   capabilities:
+ *                     tableOrderingQr: true
+ *                     staffAndTables: true
+ *                     maxAdsPerMenu: -1
+ *               customDisplay:
+ *                 advancedDeliveryMaps: true
+ *                 maxAdsPerMenu: -1
+ *                 allowedThemes: [default, coffee, neon, sky, waffle, vanilla]
  *
  * /api/user/subscription:
  *   get:

@@ -38,6 +38,10 @@ router.post(
   validate([
     body("menuId").isInt({ min: 1 }).toInt(),
     body("type").optional().isIn(["table", "delivery"]),
+    body("requestKind")
+      .optional()
+      .isIn(["order", "waiter", "bill"])
+      .withMessage("requestKind must be order, waiter, or bill"),
     body("tableNumber").optional().isString().trim().isLength({ max: 50 }),
     body("customerName").optional().isString().trim().isLength({ max: 200 }),
     body("customerPhone").optional().isString().trim().isLength({ max: 50 }),
@@ -182,6 +186,12 @@ router.post(
       .withMessage("Stars must be between 1 and 5"),
     body("comment").optional().isString().trim().isLength({ max: 1000 }),
     body("customerName").optional().isString().trim().isLength({ max: 255 }),
+    body("customerPhone").optional().isString().trim().isLength({ max: 50 }),
+    body("customerEmail")
+      .optional({ nullable: true, checkFalsy: true })
+      .isEmail()
+      .withMessage("Invalid email")
+      .isLength({ max: 255 }),
   ]),
   submitRating,
 );

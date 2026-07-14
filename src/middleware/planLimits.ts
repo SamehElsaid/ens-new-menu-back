@@ -3,6 +3,8 @@ import { getPool, sql } from "../config/database";
 import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
 import { canUserBulkImport } from "../services/bulkImportUsage.service";
 import { getActiveSubscriptionLimits } from "../services/extraMenus.service";
+import { hasCapability } from "../services/planCapabilities.service";
+import type { BooleanCapabilityKey } from "../types/planCapabilities";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 
@@ -180,7 +182,36 @@ export async function requireProPlan(
   }
 }
 
-/** Bulk import — Free: 1 use per user; Pro: unlimited. */
+/** Require a specific boolean capability from the user's active plan. */
+export function requirePlanCapability(key: BooleanCapabilityKey) {
+  return async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    try {
+      const userId = req.user!.userId;
+      if (!(await hasCapability(userId, key))) {
+        sendApiError(
+          res,
+          req,
+          403,
+          {
+            en: ApiErrors.proFeatureOnly.en,
+            ar: ApiErrors.proFeatureOnly.ar,
+          },
+          { code: "PLAN_CAPABILITY_REQUIRED", capability: key },
+        );
+        return;
+      }
+      next();
+    } catch {
+      sendApiError(res, req, 500, ApiErrors.failedVerifySubscription);
+    }
+  };
+}
+
+/** Bulk import — gated by plan `aiMenuImport` capability. */
 export async function checkBulkImportLimit(
   req: Request,
   res: Response,

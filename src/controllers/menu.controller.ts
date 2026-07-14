@@ -7,7 +7,10 @@ import {
 } from "../utils/slugGenerator";
 import { logger } from "../utils/logger";
 import { normalizeMenuTableRow } from "../utils/normalizeMenuTableRow";
-import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
+import {
+  getUserPlanCapabilities,
+  isThemeAllowedForUser,
+} from "../services/planCapabilities.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { MENU_APPROVAL_STATUS, ROLES } from "../config/constants";
@@ -18,11 +21,44 @@ import {
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 import { generateMenuUuid } from "../utils/menuIdentifier";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
+import { ensureMenuWifiTaxServiceSchema } from "../schemas/menuWifiTaxService.schema";
 import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
+import {
+  normalizeOptionalEnabled,
+  normalizePercent,
+} from "../utils/normalizeOptionalEnabled";
 import { normalizeMenuTheme } from "../constants/menuThemes";
 import { enforceActiveMenuLimitOnActivation } from "../middleware/planLimits";
 import { ensureMenuGroupSchema } from "../schemas/menuGroup.schema";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
+
+const MENU_WIFI_TAX_SERVICE_SELECT_SQL = `
+  ISNULL(m.wifiEnabled, 0) as wifiEnabled,
+  m.wifiName,
+  m.wifiPassword,
+  ISNULL(m.taxEnabled, 0) as taxEnabled,
+  m.taxPercent,
+  ISNULL(m.serviceEnabled, 0) as serviceEnabled,
+  m.servicePercent
+`;
+
+function attachWifiTaxServiceFields(
+  menu: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...menu,
+    wifiEnabled: normalizeOptionalEnabled(menu.wifiEnabled),
+    wifiName: typeof menu.wifiName === "string" ? menu.wifiName : menu.wifiName ?? null,
+    wifiPassword:
+      typeof menu.wifiPassword === "string"
+        ? menu.wifiPassword
+        : menu.wifiPassword ?? null,
+    taxEnabled: normalizeOptionalEnabled(menu.taxEnabled),
+    taxPercent: normalizePercent(menu.taxPercent),
+    serviceEnabled: normalizeOptionalEnabled(menu.serviceEnabled),
+    servicePercent: normalizePercent(menu.servicePercent),
+  };
+}
 
 function attachMenuGroupFields(row: Record<string, unknown>): Record<string, unknown> {
   const menuGroupIdRaw = row.menuGroupId;
@@ -293,6 +329,7 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
 export async function getMenuById(req: Request, res: Response): Promise<void> {
   try {
     await ensureMenuChatbotSchema();
+    await ensureMenuWifiTaxServiceSchema();
     await ensureMenuGroupSchema();
     const auth = req.user!;
     const userId = auth.userId;
@@ -316,6 +353,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
           m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
           m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
           m.addressEn, m.addressAr, m.phone, m.workingHours,
+          ${MENU_WIFI_TAX_SERVICE_SELECT_SQL},
           ${MENU_GROUP_SELECT_SQL},
           ar.name as nameAr, ar.description as descriptionAr,
           en.name as nameEn, en.description as descriptionEn
@@ -339,6 +377,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
           m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
           m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
           m.addressEn, m.addressAr, m.phone, m.workingHours,
+          ${MENU_WIFI_TAX_SERVICE_SELECT_SQL},
           ${MENU_GROUP_SELECT_SQL},
           ar.name as nameAr, ar.description as descriptionAr,
           en.name as nameEn, en.description as descriptionEn
@@ -360,11 +399,11 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
     }
 
     let menu = attachMenuGroupFields(result.recordset[0] as Record<string, unknown>);
-    menu = {
+    menu = attachWifiTaxServiceFields({
       ...menu,
       chatbotEnabled: normalizeChatbotEnabled(menu.chatbotEnabled),
       theme: normalizeMenuTheme(menu.theme as string | null),
-    };
+    });
 
     // Parse workingHours if it's a JSON string
     if (menu.workingHours && typeof menu.workingHours === "string") {
@@ -400,10 +439,10 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
     const menuQrScans = Number(viewsResult.recordset[0]?.qrScanCount ?? 0);
 
     const ownerUserId = menu.userId as number;
-    const freeUser = await isUserOnFreePlan(ownerUserId);
+    const { capabilities } = await getUserPlanCapabilities(ownerUserId);
 
-    // Staff & tables are Pro-only — omit lists and counts for Free (dashboard)
-    if (freeUser) {
+    // Staff & tables omitted when plan lacks staffAndTables
+    if (!capabilities.staffAndTables) {
       res.json({
         menu: menu,
         itemsCount: stats.totalItems || 0,
@@ -478,6 +517,13 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       currency,
       isActive,
       chatbotEnabled,
+      wifiEnabled,
+      wifiName,
+      wifiPassword,
+      taxEnabled,
+      taxPercent,
+      serviceEnabled,
+      servicePercent,
       footerLogo,
       footerDescriptionEn,
       footerDescriptionAr,
@@ -493,6 +539,7 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
 
     const touched: string[] = [];
     await ensureMenuChatbotSchema();
+    await ensureMenuWifiTaxServiceSchema();
 
     if (
       isActive === true &&
@@ -500,6 +547,18 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       !(await enforceActiveMenuLimitOnActivation(req, res, userId, menuId))
     ) {
       return;
+    }
+
+    let themeIdToSave: string | undefined;
+    if (theme !== undefined) {
+      themeIdToSave = normalizeMenuTheme(String(theme));
+      if (!(await isThemeAllowedForUser(userId, themeIdToSave))) {
+        sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+          code: "THEME_NOT_ALLOWED",
+          theme: themeIdToSave,
+        });
+        return;
+      }
     }
 
     await executeTransaction(async (transaction) => {
@@ -524,10 +583,10 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
         menuRequest.input("logo", sql.NVarChar, logo || null);
       }
 
-      if (theme !== undefined) {
+      if (themeIdToSave !== undefined) {
         touched.push("theme");
         menuUpdates.push("theme = @theme");
-        menuRequest.input("theme", sql.NVarChar, theme);
+        menuRequest.input("theme", sql.NVarChar, themeIdToSave);
       }
 
       if (currency !== undefined) {
@@ -546,6 +605,64 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
         touched.push("chatbotEnabled");
         menuUpdates.push("chatbotEnabled = @chatbotEnabled");
         menuRequest.input("chatbotEnabled", sql.Bit, chatbotEnabled ? 1 : 0);
+      }
+
+      if (wifiEnabled !== undefined) {
+        touched.push("wifiEnabled");
+        menuUpdates.push("wifiEnabled = @wifiEnabled");
+        menuRequest.input("wifiEnabled", sql.Bit, wifiEnabled ? 1 : 0);
+      }
+
+      if (wifiName !== undefined) {
+        touched.push("wifiName");
+        menuUpdates.push("wifiName = @wifiName");
+        menuRequest.input("wifiName", sql.NVarChar(255), wifiName || null);
+      }
+
+      if (wifiPassword !== undefined) {
+        touched.push("wifiPassword");
+        menuUpdates.push("wifiPassword = @wifiPassword");
+        menuRequest.input(
+          "wifiPassword",
+          sql.NVarChar(255),
+          wifiPassword || null,
+        );
+      }
+
+      if (taxEnabled !== undefined) {
+        touched.push("taxEnabled");
+        menuUpdates.push("taxEnabled = @taxEnabled");
+        menuRequest.input("taxEnabled", sql.Bit, taxEnabled ? 1 : 0);
+      }
+
+      if (taxPercent !== undefined) {
+        touched.push("taxPercent");
+        menuUpdates.push("taxPercent = @taxPercent");
+        menuRequest.input(
+          "taxPercent",
+          sql.Decimal(5, 2),
+          taxPercent === null || taxPercent === ""
+            ? null
+            : Number(taxPercent),
+        );
+      }
+
+      if (serviceEnabled !== undefined) {
+        touched.push("serviceEnabled");
+        menuUpdates.push("serviceEnabled = @serviceEnabled");
+        menuRequest.input("serviceEnabled", sql.Bit, serviceEnabled ? 1 : 0);
+      }
+
+      if (servicePercent !== undefined) {
+        touched.push("servicePercent");
+        menuUpdates.push("servicePercent = @servicePercent");
+        menuRequest.input(
+          "servicePercent",
+          sql.Decimal(5, 2),
+          servicePercent === null || servicePercent === ""
+            ? null
+            : Number(servicePercent),
+        );
       }
 
       if (footerLogo !== undefined) {
