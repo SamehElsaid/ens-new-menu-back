@@ -1223,9 +1223,10 @@ export async function processGuestStaffCall(
       return { ok: false, error: "SERVER_ERROR" };
     }
 
-    const serviceSummaries = isServiceRequest
-      ? serviceRequestSummaries(requestKind, effectiveTable, customerName)
-      : null;
+    const serviceSummaries =
+      requestKind === "waiter" || requestKind === "bill"
+        ? serviceRequestSummaries(requestKind, effectiveTable, customerName)
+        : null;
 
     await logMenuOrderEventSafe(
       storageMenuId,

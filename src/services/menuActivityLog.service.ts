@@ -531,6 +531,13 @@ export async function getMenuActivityLogById(
   order: any;
   items: any[];
   totalPrice: number;
+  itemsSubtotal?: number | null;
+  taxEnabled?: boolean;
+  taxPercent?: number | null;
+  taxAmount?: number | null;
+  serviceEnabled?: boolean;
+  servicePercent?: number | null;
+  serviceAmount?: number | null;
   updatedAt: string | null;
   customerPhone?: string | null;
   customerAddress?: string | null;
