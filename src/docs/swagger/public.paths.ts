@@ -129,6 +129,9 @@
  *     description: |
  *       Returns public menu bootstrap including optional WiFi (when wifiEnabled),
  *       taxEnabled/taxPercent, and serviceEnabled/servicePercent for checkout totals.
+ *       Optional `table` / `tableNumber` / `tableId` resolve a dine-in session only when
+ *       that table exists and is active; inactive tables leave `menu.table` null so the
+ *       guest falls back to the regular menu (clients should strip the query param).
  *     security: []
  *     parameters:
  *       - in: path
@@ -138,9 +141,11 @@
  *       - $ref: '#/components/parameters/locale'
  *       - in: query
  *         name: tableNumber
+ *         description: Table label from QR; ignored when the table is inactive
  *         schema: { type: string }
  *       - in: query
  *         name: tableId
+ *         description: MenuTables row id from QR; ignored when the table is inactive
  *         schema: { type: integer }
  *       - in: query
  *         name: src

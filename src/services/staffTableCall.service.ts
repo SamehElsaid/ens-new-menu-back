@@ -2484,3 +2484,408 @@ export async function updateStaffTableCallItemsAndStatus(
     return { ok: false, error: "SERVER_ERROR" };
   }
 }
+
+/**
+ * Remove table/delivery staff calls (and matching MenuOrders) for all menus of a user.
+ * Used when downgrading Pro → Free so pending order notifications disappear.
+ */
+export async function clearStaffTableAndDeliveryCallsForUser(
+  userId: number,
+): Promise<{ clearedCalls: number; clearedOrders: number }> {
+  if (!Number.isFinite(userId) || userId <= 0) {
+    return { clearedCalls: 0, clearedOrders: 0 };
+  }
+
+  try {
+    const pool = await getPool();
+
+    const menusResult = await pool
+      .request()
+      .input("userId", sql.Int, userId)
+      .query(`
+        SELECT id FROM Menus WHERE userId = @userId
+      `);
+    const menuIds = (menusResult.recordset as { id: number }[])
+      .map((r) => Number(r.id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (menuIds.length === 0) {
+      return { clearedCalls: 0, clearedOrders: 0 };
+    }
+
+    const stcOid = await pool.request().query(`
+      SELECT OBJECT_ID(N'dbo.StaffTableCalls', N'U') AS oid
+    `);
+    if (!stcOid.recordset[0]?.oid) {
+      return { clearedCalls: 0, clearedOrders: 0 };
+    }
+
+    let clearedOrders = 0;
+    const moOid = await pool.request().query(`
+      SELECT OBJECT_ID(N'dbo.MenuOrders', N'U') AS oid
+    `);
+    if (moOid.recordset[0]?.oid) {
+      const moDel = await pool.request().input("userId", sql.Int, userId)
+        .query(`
+          DELETE mo
+          FROM dbo.MenuOrders mo
+          INNER JOIN Menus m ON mo.menuId = m.id
+          WHERE m.userId = @userId
+            AND EXISTS (
+              SELECT 1
+              FROM dbo.StaffTableCalls stc
+              WHERE stc.menuId = mo.menuId
+                AND stc.id = mo.orderId
+            )
+        `);
+      clearedOrders = Number(moDel.rowsAffected?.[0] ?? 0);
+    }
+
+    const callsDel = await pool.request().input("userId", sql.Int, userId)
+      .query(`
+        DELETE stc
+        FROM dbo.StaffTableCalls stc
+        INNER JOIN Menus m ON stc.menuId = m.id
+        WHERE m.userId = @userId
+      `);
+    const clearedCalls = Number(callsDel.rowsAffected?.[0] ?? 0);
+
+    for (const menuId of menuIds) {
+      broadcastMenuActivityUpdated(menuId);
+    }
+
+    if (clearedCalls > 0 || clearedOrders > 0) {
+      logger.info(
+        `Cleared ${clearedCalls} StaffTableCalls and ${clearedOrders} MenuOrders for user ${userId} (Pro→Free)`,
+      );
+    }
+
+    return { clearedCalls, clearedOrders };
+  } catch (error) {
+    logger.error(
+      `clearStaffTableAndDeliveryCallsForUser error for user ${userId}:`,
+      error,
+    );
+    throw error;
+  }
+}
+
+export type GuestOpenTableOrderError =
+  | "INVALID_PAYLOAD"
+  | "MENU_NOT_FOUND"
+  | "FEATURE_REQUIRES_PRO"
+  | "INVALID_TABLE"
+  | "NOT_FOUND"
+  | "NOT_EDITABLE"
+  | "INVALID_ORDER_ITEMS"
+  | "SERVER_ERROR";
+
+export type GuestOpenTableOrderCall = {
+  id: number;
+  menuId: number;
+  tableNumber: string;
+  customerName: string | null;
+  items: StaffOrderItem[];
+  orderTotal: number;
+  status: StaffTableCallStatus;
+  createdAt: Date;
+  requestKind: StaffRequestKind;
+};
+
+async function assertGuestTableOrderAccess(
+  menuId: number,
+  tableNumber: string,
+): Promise<{ ok: true; tableNumber: string } | { ok: false; error: GuestOpenTableOrderError }> {
+  if (!Number.isFinite(menuId) || menuId <= 0) {
+    return { ok: false, error: "INVALID_PAYLOAD" };
+  }
+  const safeTable = String(tableNumber ?? "")
+    .trim()
+    .slice(0, 50);
+  if (!safeTable) {
+    return { ok: false, error: "INVALID_PAYLOAD" };
+  }
+
+  try {
+    const pool = await getPool();
+    const menuCheck = await pool
+      .request()
+      .input("id", sql.Int, menuId)
+      .query(`SELECT id, isActive, userId FROM Menus WHERE id = @id`);
+    const m = menuCheck.recordset[0];
+    if (!m || !m.isActive) {
+      return { ok: false, error: "MENU_NOT_FOUND" };
+    }
+    const ownerId = m.userId as number;
+    if (!(await hasCapability(ownerId, "tableOrderingQr"))) {
+      return { ok: false, error: "FEATURE_REQUIRES_PRO" };
+    }
+
+    const tablesCount = await pool
+      .request()
+      .input("menuId", sql.Int, menuId)
+      .query(`SELECT COUNT(*) as c FROM MenuTables WHERE menuId = @menuId`);
+    const hasTables = Number(tablesCount.recordset[0]?.c) > 0;
+    if (hasTables) {
+      const tableMeta = await getMenuTablesColumnMeta();
+      const activeSql = tableMeta.activeColumnQuoted
+        ? ` AND ${tableMeta.activeColumnQuoted} = 1`
+        : "";
+      const match = await pool
+        .request()
+        .input("menuId", sql.Int, menuId)
+        .input("tableNumber", sql.NVarChar, safeTable)
+        .query(
+          `SELECT id FROM MenuTables WHERE menuId = @menuId AND tableNumber = @tableNumber${activeSql}`,
+        );
+      if (match.recordset.length === 0) {
+        return { ok: false, error: "INVALID_TABLE" };
+      }
+    }
+
+    return { ok: true, tableNumber: safeTable };
+  } catch (error) {
+    logger.error("assertGuestTableOrderAccess error:", error);
+    return { ok: false, error: "SERVER_ERROR" };
+  }
+}
+
+function toGuestOpenTableOrderCall(
+  row: StaffTableCallRow,
+): GuestOpenTableOrderCall {
+  return {
+    id: row.id,
+    menuId: row.menuId,
+    tableNumber: row.tableNumber,
+    customerName: row.customerName,
+    items: row.items,
+    orderTotal: row.orderTotal,
+    status: row.status,
+    createdAt: row.createdAt,
+    requestKind: row.requestKind,
+  };
+}
+
+/**
+ * Public: open table order for guest View (menuId + tableNumber).
+ */
+export async function getGuestOpenTableOrder(
+  menuId: number,
+  tableNumber: string,
+): Promise<
+  | { ok: true; call: GuestOpenTableOrderCall | null }
+  | { ok: false; error: GuestOpenTableOrderError }
+> {
+  const access = await assertGuestTableOrderAccess(menuId, tableNumber);
+  if (!access.ok) {
+    return access;
+  }
+  try {
+    const openCall = await findOpenTableCallForTable(menuId, access.tableNumber);
+    return {
+      ok: true,
+      call: openCall ? toGuestOpenTableOrderCall(openCall) : null,
+    };
+  } catch (error) {
+    logger.error("getGuestOpenTableOrder error:", error);
+    return { ok: false, error: "SERVER_ERROR" };
+  }
+}
+
+/**
+ * Public: guest replaces pending open-table items (or cancels if items empty).
+ * Confirmed/prepared orders are not editable.
+ */
+export async function replaceGuestPendingTableOrder(
+  menuId: number,
+  tableNumber: string,
+  itemsRaw: unknown,
+): Promise<
+  | {
+      ok: true;
+      cancelled: boolean;
+      call: GuestOpenTableOrderCall | null;
+    }
+  | { ok: false; error: GuestOpenTableOrderError }
+> {
+  const access = await assertGuestTableOrderAccess(menuId, tableNumber);
+  if (!access.ok) {
+    return access;
+  }
+
+  const parsed = parseOrderItemsInput(itemsRaw);
+  if (!parsed.ok) {
+    return { ok: false, error: "INVALID_PAYLOAD" };
+  }
+
+  try {
+    const openCall = await findOpenTableCallForTable(menuId, access.tableNumber);
+    if (!openCall) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+    if (openCall.status !== "pending") {
+      return { ok: false, error: "NOT_EDITABLE" };
+    }
+
+    const safeTable = access.tableNumber;
+
+    if (parsed.items.length === 0) {
+      const cancelled = await setStaffTableCallStatus(
+        openCall.id,
+        menuId,
+        "cancelled",
+      );
+      if (!cancelled) {
+        return { ok: false, error: "NOT_EDITABLE" };
+      }
+      await logMenuOrderEventSafe(
+        menuId,
+        openCall.id,
+        {
+          action: "TABLE_CALL_CANCELLED",
+          targetType: "order",
+          targetId: openCall.id,
+          summaryAr: `إلغاء طلب طاولة ${safeTable} من الضيف`,
+          summaryEn: `Guest cancelled table ${safeTable} order`,
+          detailJson: JSON.stringify({
+            status: "cancelled",
+            cancelledByGuest: true,
+            order: {
+              type: "table",
+              requestKind: "order",
+              tableNumber: safeTable,
+              customerName: openCall.customerName,
+              items: [],
+              orderTotal: 0,
+              status: "cancelled",
+            },
+          }),
+        },
+        {
+          actorName: openCall.customerName || "Guest",
+          actorRole: "guest",
+        },
+      );
+      broadcastMenuActivityUpdated(menuId);
+      broadcastStaffTableCallChanged(menuId, {
+        id: openCall.id,
+        menuId,
+        tableNumber: safeTable,
+        at: openCall.createdAt.toISOString(),
+        customerName: openCall.customerName,
+        items: [],
+        orderTotal: 0,
+        status: "cancelled",
+        requestKind: openCall.requestKind,
+      });
+      return { ok: true, cancelled: true, call: null };
+    }
+
+    const idsForCheck = parsed.items
+      .map((i) => i.menuItemId)
+      .filter((id): id is number => typeof id === "number");
+    if (idsForCheck.length > 0) {
+      const okIds = await menuItemsExistForMenu(menuId, idsForCheck);
+      if (!okIds) {
+        return { ok: false, error: "INVALID_ORDER_ITEMS" };
+      }
+    }
+
+    let itemsResolved: StaffOrderItem[];
+    try {
+      itemsResolved = await enrichMenuItemsFromDb(menuId, parsed.items);
+    } catch (e) {
+      logger.error("replaceGuestPendingTableOrder enrich error:", e);
+      return { ok: false, error: "SERVER_ERROR" };
+    }
+
+    const orderTotal = await computeOrderTotalWithMenuCharges(
+      menuId,
+      itemsResolved,
+    );
+    const orderJson = JSON.stringify(itemsResolved);
+    const pool = await getPool();
+    const schema = await getStaffTableCallsSchemaFlags();
+    const upd = await pool
+      .request()
+      .input("id", sql.Int, openCall.id)
+      .input("menuId", sql.Int, menuId)
+      .input("orderItemsJson", sql.NVarChar(sql.MAX), orderJson).query(`
+        UPDATE StaffTableCalls
+        SET orderItemsJson = @orderItemsJson
+        WHERE ${buildEditableRowWhereSql(schema)}
+          AND (
+            status IS NULL
+            OR LOWER(LTRIM(RTRIM(status))) = N'pending'
+          )
+      `);
+    if ((upd.rowsAffected?.[0] ?? 0) === 0) {
+      return { ok: false, error: "NOT_EDITABLE" };
+    }
+
+    await logMenuOrderEventSafe(
+      menuId,
+      openCall.id,
+      {
+        action: "TABLE_CALL_ITEMS_UPDATED",
+        targetType: "order",
+        targetId: openCall.id,
+        summaryAr: openCall.customerName
+          ? `تعديل طلب ${openCall.customerName} — طاولة ${safeTable}`
+          : `تعديل طلب طاولة ${safeTable}`,
+        summaryEn: openCall.customerName
+          ? `Order updated — ${openCall.customerName} — table ${safeTable}`
+          : `Table ${safeTable} order updated`,
+        detailJson: JSON.stringify({
+          status: "pending",
+          editedByGuest: true,
+          order: await attachMenuChargeFieldsToOrder(menuId, itemsResolved, {
+            type: "table",
+            requestKind: "order",
+            tableNumber: safeTable,
+            customerName: openCall.customerName,
+            items: itemsResolved,
+            orderTotal,
+            status: "pending",
+            pendingGuestAddition: true,
+          }),
+        }),
+      },
+      {
+        actorName: openCall.customerName || "Guest",
+        actorRole: "guest",
+      },
+    );
+    broadcastMenuActivityUpdated(menuId);
+    broadcastStaffTableCallChanged(menuId, {
+      id: openCall.id,
+      menuId,
+      tableNumber: safeTable,
+      at: openCall.createdAt.toISOString(),
+      customerName: openCall.customerName,
+      items: itemsResolved,
+      orderTotal,
+      status: "pending",
+      requestKind: openCall.requestKind,
+    });
+
+    return {
+      ok: true,
+      cancelled: false,
+      call: {
+        id: openCall.id,
+        menuId,
+        tableNumber: safeTable,
+        customerName: openCall.customerName,
+        items: itemsResolved,
+        orderTotal,
+        status: "pending",
+        createdAt: openCall.createdAt,
+        requestKind: openCall.requestKind,
+      },
+    };
+  } catch (error) {
+    logger.error("replaceGuestPendingTableOrder error:", error);
+    return { ok: false, error: "SERVER_ERROR" };
+  }
+}

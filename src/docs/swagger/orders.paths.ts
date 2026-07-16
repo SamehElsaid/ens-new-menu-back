@@ -10,6 +10,7 @@
  *       **Table order** (`type: table`, `requestKind: order` default):
  *       - Set `tableNumber` from QR scan
  *       - Notifies staff via socket + persists as table call
+ *       - If an open table order already exists, new items are appended
  *
  *       **Waiter call** (`requestKind: waiter`):
  *       - Requires `tableNumber`; ignores `items`
@@ -111,6 +112,140 @@
  *                   orderTotal: 0
  *       400:
  *         description: Validation error or delivery not enabled
+ *
+ * /api/public/staff-call/open:
+ *   get:
+ *     tags: [Orders]
+ *     summary: Get open table order for guest
+ *     description: |
+ *       **Public — no JWT.** Returns the live open order for a dine-in table
+ *       (status pending, confirmed, or prepared). Used by the guest menu View
+ *       to show and sync the current table order.
+ *
+ *       When the cashier finishes the table (delivered) or the order is cancelled,
+ *       `call` is null.
+ *     security: []
+ *     parameters:
+ *       - in: query
+ *         name: menuId
+ *         required: true
+ *         schema: { type: integer, minimum: 1 }
+ *         example: 42
+ *       - in: query
+ *         name: tableNumber
+ *         required: true
+ *         schema: { type: string, maxLength: 50 }
+ *         example: "T-5"
+ *     responses:
+ *       200:
+ *         description: Open call or null
+ *         content:
+ *           application/json:
+ *             examples:
+ *               openPending:
+ *                 value:
+ *                   ok: true
+ *                   call:
+ *                     id: 9001
+ *                     menuId: 42
+ *                     tableNumber: "T-5"
+ *                     status: pending
+ *                     requestKind: order
+ *                     orderTotal: 70
+ *                     items:
+ *                       - name: "Orange Juice"
+ *                         menuItemId: 101
+ *                         quantity: 2
+ *                         price: 35
+ *                         total: 70
+ *               none:
+ *                 value:
+ *                   ok: true
+ *                   call: null
+ *       400:
+ *         description: Invalid menuId or tableNumber
+ *       403:
+ *         description: Pro feature required
+ *       404:
+ *         description: Menu not found
+ *   patch:
+ *     tags: [Orders]
+ *     summary: Edit pending open table order (guest)
+ *     description: |
+ *       **Public — no JWT.** Guest replaces the full item list on the open
+ *       table order while status is `pending` only.
+ *
+ *       - Confirmed or prepared orders return 409 NOT_EDITABLE
+ *       - Empty `items` cancels the pending order and returns `cancelled: true`
+ *       - Staff are notified via activity log + socket
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [menuId, tableNumber, items]
+ *             properties:
+ *               menuId: { type: integer, minimum: 1 }
+ *               tableNumber: { type: string, maxLength: 50 }
+ *               items:
+ *                 type: array
+ *                 maxItems: 100
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     menuItemId: { type: integer }
+ *                     quantity: { type: integer, minimum: 1 }
+ *                     price: { type: number }
+ *                     name: { type: string }
+ *                     size: { type: object, nullable: true }
+ *                     variant: { type: object, nullable: true }
+ *           examples:
+ *             updateQty:
+ *               summary: Change quantities while pending
+ *               value:
+ *                 menuId: 42
+ *                 tableNumber: "T-5"
+ *                 items:
+ *                   - menuItemId: 101
+ *                     quantity: 1
+ *                     price: 35
+ *             cancelPending:
+ *               summary: Remove all items (cancels pending order)
+ *               value:
+ *                 menuId: 42
+ *                 tableNumber: "T-5"
+ *                 items: []
+ *     responses:
+ *       200:
+ *         description: Updated or cancelled
+ *         content:
+ *           application/json:
+ *             examples:
+ *               updated:
+ *                 value:
+ *                   ok: true
+ *                   cancelled: false
+ *                   call:
+ *                     id: 9001
+ *                     menuId: 42
+ *                     tableNumber: "T-5"
+ *                     status: pending
+ *                     orderTotal: 35
+ *               cancelled:
+ *                 value:
+ *                   ok: true
+ *                   cancelled: true
+ *                   call: null
+ *       400:
+ *         description: Invalid payload or table
+ *       403:
+ *         description: Pro feature required
+ *       404:
+ *         description: No open order for this table
+ *       409:
+ *         description: Order is confirmed and no longer guest-editable
  *
  * /api/staff-auth/table-calls:
  *   get:

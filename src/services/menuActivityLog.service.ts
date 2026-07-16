@@ -550,6 +550,7 @@ export async function getMenuActivityLogById(
   sourceMenuNameAr?: string | null;
   sourceMenuNameEn?: string | null;
   storageMenuId?: number;
+  pendingGuestAddition?: boolean;
 } | null> {
   try {
     const pool = await getPool();
@@ -715,6 +716,7 @@ export async function getMenuActivityLogById(
       sourceMenuNameEn: order.sourceMenuNameEn ?? null,
       storageMenuId:
         r.storageMenuId != null ? Number(r.storageMenuId) : menuId,
+      pendingGuestAddition: order.pendingGuestAddition === true,
     };
   } catch (error) {
     logger.error("getMenuActivityLogById error:", error);
@@ -1322,10 +1324,16 @@ export async function applyMenuOrderAction(
       return { ok: false, error: "FORBIDDEN" };
     }
 
-    /** Reject/prepare stay blocked while guest additions await review. Finish may auto-clear. */
+    /** Reject/prepare/finish stay blocked while guest additions await review. */
     if (
       pendingGuestAddition &&
-      (action === "TABLE_CALL_CANCELLED" || action === "TABLE_CALL_PREPARED")
+      (action === "TABLE_CALL_CANCELLED" ||
+        action === "TABLE_CALL_PREPARED" ||
+        action === "TABLE_CALL_COMPLETED" ||
+        (action === "TABLE_CALL_DELIVERED" &&
+          snapBefore.type !== "delivery" &&
+          String(snapBefore.tableNumber ?? "").trim().toLowerCase() !==
+            "delivery"))
     ) {
       return { ok: false, error: "INVALID_STATE" };
     }
@@ -1339,12 +1347,30 @@ export async function applyMenuOrderAction(
         if (currentStatus === "cancelled" || currentStatus === "delivered") {
           return { ok: false, error: "INVALID_STATE" };
         }
-        applied = await clearMenuOrderPendingGuestAddition(
-          storageMenuId,
-          callId,
-          existingOrder,
-        );
-        nextStatus = currentStatus;
+        // Pending + new guest lines: accept confirms the whole order in one step.
+        if (currentStatus === "pending") {
+          applied = await setStaffTableCallStatus(
+            callId,
+            storageMenuId,
+            "confirmed",
+          );
+          if (applied) {
+            await clearMenuOrderPendingGuestAddition(
+              storageMenuId,
+              callId,
+              existingOrder,
+            );
+          }
+          nextStatus = "confirmed";
+        } else {
+          // Already confirmed/prepared: accept only acknowledges guest additions.
+          applied = await clearMenuOrderPendingGuestAddition(
+            storageMenuId,
+            callId,
+            existingOrder,
+          );
+          nextStatus = currentStatus;
+        }
       } else if (currentStatus !== "pending") {
         return { ok: false, error: "INVALID_STATE" };
       } else {
@@ -1367,25 +1393,11 @@ export async function applyMenuOrderAction(
       if (currentStatus !== "confirmed" && currentStatus !== "prepared") {
         return { ok: false, error: "INVALID_STATE" };
       }
-      if (pendingGuestAddition) {
-        await clearMenuOrderPendingGuestAddition(
-          storageMenuId,
-          callId,
-          existingOrder,
-        );
-      }
       applied = await completeStaffTableCall(callId, storageMenuId);
     } else if (action === "TABLE_CALL_DELIVERED") {
       if (isTableOrder) {
         if (currentStatus !== "confirmed" && currentStatus !== "prepared") {
           return { ok: false, error: "INVALID_STATE" };
-        }
-        if (pendingGuestAddition) {
-          await clearMenuOrderPendingGuestAddition(
-            storageMenuId,
-            callId,
-            existingOrder,
-          );
         }
         applied = await completeStaffTableCall(callId, storageMenuId);
       } else {

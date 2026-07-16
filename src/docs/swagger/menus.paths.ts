@@ -49,12 +49,16 @@
  * /api/menus/{menuId}/copy:
  *   post:
  *     tags: [Menus]
- *     summary: Copy menu shape and settings
+ *     summary: Copy menu with selectable sections
  *     description: |
  *       Creates a new menu from an existing one. Requires Arabic/English names
- *       and a new slug. Copies design (theme, customizations), settings (wifi,
- *       tax, service, social, hours, delivery flags/zones), descriptions, and logo.
- *       Does not copy categories, items, staff, tables, ads, or group membership.
+ *       and a new slug. Optional boolean flags select what to copy
+ *       (defaults: products false; settings/design/media/address true).
+ *       Logo is always copied when present (required to create a menu).
+ *       copyProducts copies categories and items; copySettings covers wifi/tax/
+ *       service/social/hours/delivery; copyDesign covers theme and customizations;
+ *       copyMedia covers footer logo; copyAddress covers address and phone.
+ *       Does not copy staff, tables, ads, or group membership.
  *       Subject to the same active menu plan limit as create.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
@@ -80,10 +84,30 @@
  *                 minLength: 3
  *                 maxLength: 100
  *                 example: my-new-branch
+ *               copyProducts:
+ *                 type: boolean
+ *                 default: false
+ *               copySettings:
+ *                 type: boolean
+ *                 default: true
+ *               copyDesign:
+ *                 type: boolean
+ *                 default: true
+ *               copyMedia:
+ *                 type: boolean
+ *                 default: true
+ *               copyAddress:
+ *                 type: boolean
+ *                 default: true
  *           example:
  *             nameAr: فرع جديد
  *             nameEn: New Branch
  *             slug: my-new-branch
+ *             copyProducts: true
+ *             copySettings: true
+ *             copyDesign: true
+ *             copyMedia: true
+ *             copyAddress: false
  *     responses:
  *       201:
  *         description: Menu copied
@@ -100,6 +124,11 @@
  *               theme: default
  *               currency: EGP
  *               isActive: true
+ *               copyProducts: true
+ *               copySettings: true
+ *               copyDesign: true
+ *               copyMedia: true
+ *               copyAddress: false
  *       400:
  *         description: Missing names, invalid slug, or source menu has no logo
  *       403:

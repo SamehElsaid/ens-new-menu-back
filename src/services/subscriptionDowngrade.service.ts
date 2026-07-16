@@ -1,6 +1,7 @@
 import { getPool, sql } from '../config/database';
 import { logger } from '../utils/logger';
 import { getFreePlanCapabilities } from './planCapabilities.service';
+import { clearStaffTableAndDeliveryCallsForUser } from './staffTableCall.service';
 
 /**
  * Service to handle subscription downgrades
@@ -131,6 +132,9 @@ export class SubscriptionDowngradeService {
           );
         }
       }
+
+      // Clear table/delivery order notifications — Free has no live table/delivery inbox
+      await clearStaffTableAndDeliveryCallsForUser(userId);
 
       // Pro-only data (branches, distance delivery mode, etc.) is kept in DB — access is locked via requireProPlan at runtime.
 

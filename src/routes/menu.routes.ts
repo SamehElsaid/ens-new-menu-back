@@ -59,7 +59,7 @@ router.post(
   menuController.createMenu,
 );
 
-// POST /api/menus/:menuId/copy — Copy menu shape & settings (names + slug)
+// POST /api/menus/:menuId/copy — Copy menu with optional sections
 router.post(
   "/:menuId/copy",
   checkMenuLimit,
@@ -68,6 +68,11 @@ router.post(
     body("nameAr").notEmpty().trim().isLength({ max: 255 }),
     body("nameEn").notEmpty().trim().isLength({ max: 255 }),
     body("slug").notEmpty().trim().isLength({ min: 3, max: 100 }),
+    body("copyProducts").optional().isBoolean(),
+    body("copySettings").optional().isBoolean(),
+    body("copyDesign").optional().isBoolean(),
+    body("copyMedia").optional().isBoolean(),
+    body("copyAddress").optional().isBoolean(),
   ]),
   menuController.copyMenu,
 );

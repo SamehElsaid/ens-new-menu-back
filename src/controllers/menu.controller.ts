@@ -325,12 +325,19 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
   }
 }
 
+function parseCopyFlag(raw: unknown, defaultValue: boolean): boolean {
+  if (typeof raw === "boolean") return raw;
+  if (raw === 1 || raw === "1" || raw === "true") return true;
+  if (raw === 0 || raw === "0" || raw === "false") return false;
+  return defaultValue;
+}
+
 /**
- * Copy menu shape & settings into a new menu. Body requires `slug`, `nameAr`, `nameEn`.
- * Copies: theme, branding, wifi/tax/service, social, hours,
- * delivery flags/phone/mode, customizations, and delivery zones.
- * Descriptions are copied from the source; names come from the request.
- * Does not copy categories, items, staff, tables, ads, or group membership.
+ * Copy a menu into a new one. Body requires `slug`, `nameAr`, `nameEn`.
+ * Optional flags (default: products false; settings/design/media/address true):
+ * `copyProducts`, `copySettings`, `copyDesign`, `copyMedia`, `copyAddress`.
+ * Logo is always copied when present (required to create a menu).
+ * Does not copy staff, tables, ads, or group membership.
  */
 export async function copyMenu(req: Request, res: Response): Promise<void> {
   try {
@@ -347,6 +354,12 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
     const rawSlug = req.body?.slug;
     const rawNameAr = req.body?.nameAr;
     const rawNameEn = req.body?.nameEn;
+
+    const copyProducts = parseCopyFlag(req.body?.copyProducts, false);
+    const copySettings = parseCopyFlag(req.body?.copySettings, true);
+    const copyDesign = parseCopyFlag(req.body?.copyDesign, true);
+    const copyMedia = parseCopyFlag(req.body?.copyMedia, true);
+    const copyAddress = parseCopyFlag(req.body?.copyAddress, true);
 
     const nameAr =
       typeof rawNameAr === "string" ? rawNameAr.trim() : "";
@@ -431,17 +444,25 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
     }
 
     const descriptionAr =
-      typeof source.descriptionAr === "string" ? source.descriptionAr : null;
+      copySettings && typeof source.descriptionAr === "string"
+        ? source.descriptionAr
+        : null;
     const descriptionEn =
-      typeof source.descriptionEn === "string" ? source.descriptionEn : null;
-    const theme = normalizeMenuTheme(source.theme as string | null);
+      copySettings && typeof source.descriptionEn === "string"
+        ? source.descriptionEn
+        : null;
+    const theme = copyDesign
+      ? normalizeMenuTheme(source.theme as string | null)
+      : "default";
     const currency =
-      typeof source.currency === "string" && source.currency.trim()
+      copySettings &&
+      typeof source.currency === "string" &&
+      source.currency.trim()
         ? source.currency.trim().toUpperCase().slice(0, 3)
         : "SAR";
 
     let workingHoursValue: string | null = null;
-    if (source.workingHours != null) {
+    if (copySettings && source.workingHours != null) {
       workingHoursValue =
         typeof source.workingHours === "string"
           ? source.workingHours
@@ -464,6 +485,13 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
     );
 
     const newMenuUuid = generateMenuUuid();
+    const copyFlags = {
+      copyProducts,
+      copySettings,
+      copyDesign,
+      copyMedia,
+      copyAddress,
+    };
 
     const menuId = await executeTransaction(async (transaction) => {
       let newMenuId: string | number;
@@ -539,111 +567,124 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
         settingsRequest.input("menuId", sql.Int, newMenuId);
       }
 
+      const strOrNull = (value: unknown): string | null =>
+        typeof value === "string" ? value : null;
+
       await settingsRequest
-        .input("chatbotEnabled", sql.Bit, source.chatbotEnabled ? 1 : 0)
-        .input("wifiEnabled", sql.Bit, source.wifiEnabled ? 1 : 0)
+        .input(
+          "chatbotEnabled",
+          sql.Bit,
+          copySettings ? (source.chatbotEnabled ? 1 : 0) : 1,
+        )
+        .input(
+          "wifiEnabled",
+          sql.Bit,
+          copySettings && source.wifiEnabled ? 1 : 0,
+        )
         .input(
           "wifiName",
           sql.NVarChar(255),
-          typeof source.wifiName === "string" ? source.wifiName : null,
+          copySettings ? strOrNull(source.wifiName) : null,
         )
         .input(
           "wifiPassword",
           sql.NVarChar(255),
-          typeof source.wifiPassword === "string" ? source.wifiPassword : null,
+          copySettings ? strOrNull(source.wifiPassword) : null,
         )
-        .input("taxEnabled", sql.Bit, source.taxEnabled ? 1 : 0)
+        .input(
+          "taxEnabled",
+          sql.Bit,
+          copySettings && source.taxEnabled ? 1 : 0,
+        )
         .input(
           "taxPercent",
           sql.Decimal(5, 2),
-          source.taxPercent == null ? null : Number(source.taxPercent),
+          copySettings && source.taxPercent != null
+            ? Number(source.taxPercent)
+            : null,
         )
-        .input("serviceEnabled", sql.Bit, source.serviceEnabled ? 1 : 0)
+        .input(
+          "serviceEnabled",
+          sql.Bit,
+          copySettings && source.serviceEnabled ? 1 : 0,
+        )
         .input(
           "servicePercent",
           sql.Decimal(5, 2),
-          source.servicePercent == null ? null : Number(source.servicePercent),
+          copySettings && source.servicePercent != null
+            ? Number(source.servicePercent)
+            : null,
         )
         .input(
           "footerLogo",
           sql.NVarChar,
-          typeof source.footerLogo === "string" ? source.footerLogo : null,
+          copyMedia ? strOrNull(source.footerLogo) : null,
         )
         .input(
           "footerDescriptionEn",
           sql.NVarChar,
-          typeof source.footerDescriptionEn === "string"
-            ? source.footerDescriptionEn
-            : null,
+          copySettings ? strOrNull(source.footerDescriptionEn) : null,
         )
         .input(
           "footerDescriptionAr",
           sql.NVarChar,
-          typeof source.footerDescriptionAr === "string"
-            ? source.footerDescriptionAr
-            : null,
+          copySettings ? strOrNull(source.footerDescriptionAr) : null,
         )
         .input(
           "socialFacebook",
           sql.NVarChar,
-          typeof source.socialFacebook === "string"
-            ? source.socialFacebook
-            : null,
+          copySettings ? strOrNull(source.socialFacebook) : null,
         )
         .input(
           "socialInstagram",
           sql.NVarChar,
-          typeof source.socialInstagram === "string"
-            ? source.socialInstagram
-            : null,
+          copySettings ? strOrNull(source.socialInstagram) : null,
         )
         .input(
           "socialTwitter",
           sql.NVarChar,
-          typeof source.socialTwitter === "string"
-            ? source.socialTwitter
-            : null,
+          copySettings ? strOrNull(source.socialTwitter) : null,
         )
         .input(
           "socialWhatsapp",
           sql.NVarChar,
-          typeof source.socialWhatsapp === "string"
-            ? source.socialWhatsapp
-            : null,
+          copySettings ? strOrNull(source.socialWhatsapp) : null,
         )
         .input(
           "addressEn",
           sql.NVarChar,
-          typeof source.addressEn === "string" ? source.addressEn : null,
+          copyAddress ? strOrNull(source.addressEn) : null,
         )
         .input(
           "addressAr",
           sql.NVarChar,
-          typeof source.addressAr === "string" ? source.addressAr : null,
+          copyAddress ? strOrNull(source.addressAr) : null,
         )
         .input(
           "phone",
           sql.NVarChar,
-          typeof source.phone === "string" ? source.phone : null,
+          copyAddress ? strOrNull(source.phone) : null,
         )
         .input("workingHours", sql.NVarChar(sql.MAX), workingHoursValue)
-        .input("deliveryOn", sql.Bit, source.deliveryOn ? 1 : 0)
+        .input(
+          "deliveryOn",
+          sql.Bit,
+          copySettings && source.deliveryOn ? 1 : 0,
+        )
         .input(
           "deliveryPhone",
           sql.NVarChar(50),
-          typeof source.deliveryPhone === "string"
-            ? source.deliveryPhone
-            : null,
+          copySettings ? strOrNull(source.deliveryPhone) : null,
         )
         .input(
           "deliveryWhatsAppOn",
           sql.Bit,
-          source.deliveryWhatsAppOn ? 1 : 0,
+          copySettings ? (source.deliveryWhatsAppOn ? 1 : 0) : 1,
         )
         .input(
           "deliveryMode",
           sql.NVarChar(20),
-          typeof source.deliveryMode === "string"
+          copySettings && typeof source.deliveryMode === "string"
             ? source.deliveryMode
             : "governorates",
         ).query(`
@@ -694,108 +735,379 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
           `);
       }
 
-      const customResult = await transaction
-        .request()
-        .input("sourceMenuId", sql.Int, sourceMenuId).query(`
-          SELECT primaryColor, secondaryColor, backgroundColor, textColor,
-                 heroTitleAr, heroSubtitleAr, heroTitleEn, heroSubtitleEn
-          FROM MenuCustomizations
-          WHERE menuId = @sourceMenuId
-        `);
-
-      if (customResult.recordset.length > 0) {
-        const c = customResult.recordset[0] as Record<string, unknown>;
-        const customInsert = transaction.request();
-        if (isIdString) {
-          customInsert.input("menuId", sql.NVarChar, newMenuId);
-        } else {
-          customInsert.input("menuId", sql.Int, newMenuId);
-        }
-        await customInsert
-          .input(
-            "primaryColor",
-            sql.NVarChar(20),
-            typeof c.primaryColor === "string" ? c.primaryColor : null,
-          )
-          .input(
-            "secondaryColor",
-            sql.NVarChar(20),
-            typeof c.secondaryColor === "string" ? c.secondaryColor : null,
-          )
-          .input(
-            "backgroundColor",
-            sql.NVarChar(20),
-            typeof c.backgroundColor === "string" ? c.backgroundColor : null,
-          )
-          .input(
-            "textColor",
-            sql.NVarChar(20),
-            typeof c.textColor === "string" ? c.textColor : null,
-          )
-          .input(
-            "heroTitleAr",
-            sql.NVarChar(200),
-            typeof c.heroTitleAr === "string" ? c.heroTitleAr : null,
-          )
-          .input(
-            "heroSubtitleAr",
-            sql.NVarChar(500),
-            typeof c.heroSubtitleAr === "string" ? c.heroSubtitleAr : null,
-          )
-          .input(
-            "heroTitleEn",
-            sql.NVarChar(200),
-            typeof c.heroTitleEn === "string" ? c.heroTitleEn : null,
-          )
-          .input(
-            "heroSubtitleEn",
-            sql.NVarChar(500),
-            typeof c.heroSubtitleEn === "string" ? c.heroSubtitleEn : null,
-          ).query(`
-            INSERT INTO MenuCustomizations (
-              menuId, primaryColor, secondaryColor, backgroundColor, textColor,
-              heroTitleAr, heroSubtitleAr, heroTitleEn, heroSubtitleEn
-            )
-            VALUES (
-              @menuId, @primaryColor, @secondaryColor, @backgroundColor, @textColor,
-              @heroTitleAr, @heroSubtitleAr, @heroTitleEn, @heroSubtitleEn
-            )
+      if (copyDesign) {
+        const customResult = await transaction
+          .request()
+          .input("sourceMenuId", sql.Int, sourceMenuId).query(`
+            SELECT primaryColor, secondaryColor, backgroundColor, textColor,
+                   heroTitleAr, heroSubtitleAr, heroTitleEn, heroSubtitleEn
+            FROM MenuCustomizations
+            WHERE menuId = @sourceMenuId
           `);
+
+        if (customResult.recordset.length > 0) {
+          const c = customResult.recordset[0] as Record<string, unknown>;
+          const customInsert = transaction.request();
+          if (isIdString) {
+            customInsert.input("menuId", sql.NVarChar, newMenuId);
+          } else {
+            customInsert.input("menuId", sql.Int, newMenuId);
+          }
+          await customInsert
+            .input(
+              "primaryColor",
+              sql.NVarChar(20),
+              typeof c.primaryColor === "string" ? c.primaryColor : null,
+            )
+            .input(
+              "secondaryColor",
+              sql.NVarChar(20),
+              typeof c.secondaryColor === "string" ? c.secondaryColor : null,
+            )
+            .input(
+              "backgroundColor",
+              sql.NVarChar(20),
+              typeof c.backgroundColor === "string" ? c.backgroundColor : null,
+            )
+            .input(
+              "textColor",
+              sql.NVarChar(20),
+              typeof c.textColor === "string" ? c.textColor : null,
+            )
+            .input(
+              "heroTitleAr",
+              sql.NVarChar(200),
+              typeof c.heroTitleAr === "string" ? c.heroTitleAr : null,
+            )
+            .input(
+              "heroSubtitleAr",
+              sql.NVarChar(500),
+              typeof c.heroSubtitleAr === "string" ? c.heroSubtitleAr : null,
+            )
+            .input(
+              "heroTitleEn",
+              sql.NVarChar(200),
+              typeof c.heroTitleEn === "string" ? c.heroTitleEn : null,
+            )
+            .input(
+              "heroSubtitleEn",
+              sql.NVarChar(500),
+              typeof c.heroSubtitleEn === "string" ? c.heroSubtitleEn : null,
+            ).query(`
+              INSERT INTO MenuCustomizations (
+                menuId, primaryColor, secondaryColor, backgroundColor, textColor,
+                heroTitleAr, heroSubtitleAr, heroTitleEn, heroSubtitleEn
+              )
+              VALUES (
+                @menuId, @primaryColor, @secondaryColor, @backgroundColor, @textColor,
+                @heroTitleAr, @heroSubtitleAr, @heroTitleEn, @heroSubtitleEn
+              )
+            `);
+        }
       }
 
-      const zonesResult = await transaction
-        .request()
-        .input("sourceMenuId", sql.Int, sourceMenuId).query(`
-          SELECT nameAr, nameEn, price, lat, lan
-          FROM MenuDeliveryGovernorates
-          WHERE menuId = @sourceMenuId
-          ORDER BY id
-        `);
-
-      for (const zone of zonesResult.recordset as Record<string, unknown>[]) {
-        const zoneInsert = transaction.request();
-        if (isIdString) {
-          zoneInsert.input("menuId", sql.NVarChar, newMenuId);
-        } else {
-          zoneInsert.input("menuId", sql.Int, newMenuId);
-        }
-        await zoneInsert
-          .input("nameAr", sql.NVarChar(255), zone.nameAr ?? "")
-          .input("nameEn", sql.NVarChar(255), zone.nameEn ?? "")
-          .input("price", sql.Decimal(10, 2), Number(zone.price ?? 0))
-          .input(
-            "lat",
-            sql.Decimal(10, 8),
-            zone.lat == null ? null : Number(zone.lat),
-          )
-          .input(
-            "lan",
-            sql.Decimal(11, 8),
-            zone.lan == null ? null : Number(zone.lan),
-          ).query(`
-            INSERT INTO MenuDeliveryGovernorates (menuId, nameAr, nameEn, price, lat, lan)
-            VALUES (@menuId, @nameAr, @nameEn, @price, @lat, @lan)
+      if (copySettings) {
+        const zonesResult = await transaction
+          .request()
+          .input("sourceMenuId", sql.Int, sourceMenuId).query(`
+            SELECT nameAr, nameEn, price, lat, lan
+            FROM MenuDeliveryGovernorates
+            WHERE menuId = @sourceMenuId
+            ORDER BY id
           `);
+
+        for (const zone of zonesResult.recordset as Record<
+          string,
+          unknown
+        >[]) {
+          const zoneInsert = transaction.request();
+          if (isIdString) {
+            zoneInsert.input("menuId", sql.NVarChar, newMenuId);
+          } else {
+            zoneInsert.input("menuId", sql.Int, newMenuId);
+          }
+          await zoneInsert
+            .input("nameAr", sql.NVarChar(255), zone.nameAr ?? "")
+            .input("nameEn", sql.NVarChar(255), zone.nameEn ?? "")
+            .input("price", sql.Decimal(10, 2), Number(zone.price ?? 0))
+            .input(
+              "lat",
+              sql.Decimal(10, 8),
+              zone.lat == null ? null : Number(zone.lat),
+            )
+            .input(
+              "lan",
+              sql.Decimal(11, 8),
+              zone.lan == null ? null : Number(zone.lan),
+            ).query(`
+              INSERT INTO MenuDeliveryGovernorates (menuId, nameAr, nameEn, price, lat, lan)
+              VALUES (@menuId, @nameAr, @nameEn, @price, @lat, @lan)
+            `);
+        }
+      }
+
+      if (copyProducts) {
+        const categoryColCheck = await transaction.request().query(`
+          SELECT COLUMN_NAME
+          FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_NAME = 'Categories' AND COLUMN_NAME = 'isActive'
+        `);
+        const hasCategoryIsActive =
+          categoryColCheck.recordset.length > 0;
+
+        const itemColCheck = await transaction.request().query(`
+          SELECT COLUMN_NAME
+          FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_NAME = 'MenuItems'
+          AND COLUMN_NAME IN (
+            'categoryId', 'originalPrice', 'discountPercent', 'sizes', 'variants'
+          )
+        `);
+        const itemColumns = new Set(
+          (
+            itemColCheck.recordset as Array<{ COLUMN_NAME: string }>
+          ).map((r) => r.COLUMN_NAME),
+        );
+        const hasCategoryId = itemColumns.has("categoryId");
+        const hasOriginalPrice = itemColumns.has("originalPrice");
+        const hasDiscountPercent = itemColumns.has("discountPercent");
+        const hasSizes = itemColumns.has("sizes");
+        const hasVariants = itemColumns.has("variants");
+
+        const categoriesResult = await transaction
+          .request()
+          .input("sourceMenuId", sql.Int, sourceMenuId).query(`
+            SELECT
+              c.id, c.image, c.sortOrder,
+              ${hasCategoryIsActive ? "ISNULL(c.isActive, 1) as isActive," : "1 as isActive,"}
+              ar.name as nameAr, en.name as nameEn
+            FROM Categories c
+            LEFT JOIN CategoryTranslations ar ON c.id = ar.categoryId AND ar.locale = 'ar'
+            LEFT JOIN CategoryTranslations en ON c.id = en.categoryId AND en.locale = 'en'
+            WHERE c.menuId = @sourceMenuId
+            ORDER BY c.sortOrder, c.id
+          `);
+
+        const categoryIdMap = new Map<number, number>();
+
+        for (const cat of categoriesResult.recordset as Record<
+          string,
+          unknown
+        >[]) {
+          const oldCategoryId = Number(cat.id);
+          const categoryInsert = transaction.request();
+          if (isIdString) {
+            categoryInsert.input("menuId", sql.NVarChar, newMenuId);
+          } else {
+            categoryInsert.input("menuId", sql.Int, newMenuId);
+          }
+
+          const catResult = await categoryInsert
+            .input(
+              "image",
+              sql.NVarChar,
+              typeof cat.image === "string" ? cat.image : null,
+            )
+            .input("sortOrder", sql.Int, Number(cat.sortOrder ?? 0)).query(`
+              INSERT INTO Categories (menuId, image, sortOrder)
+              OUTPUT INSERTED.id
+              VALUES (@menuId, @image, @sortOrder)
+            `);
+
+          const newCategoryId = Number(catResult.recordset[0].id);
+          categoryIdMap.set(oldCategoryId, newCategoryId);
+
+          if (hasCategoryIsActive && !cat.isActive) {
+            await transaction
+              .request()
+              .input("categoryId", sql.Int, newCategoryId)
+              .input("isActive", sql.Bit, 0).query(`
+                UPDATE Categories SET isActive = @isActive WHERE id = @categoryId
+              `);
+          }
+
+          for (const [locale, name] of [
+            ["ar", typeof cat.nameAr === "string" ? cat.nameAr : ""],
+            ["en", typeof cat.nameEn === "string" ? cat.nameEn : ""],
+          ] as const) {
+            if (!name) continue;
+            await transaction
+              .request()
+              .input("categoryId", sql.Int, newCategoryId)
+              .input("locale", sql.NVarChar, locale)
+              .input("name", sql.NVarChar, name).query(`
+                INSERT INTO CategoryTranslations (categoryId, locale, name)
+                VALUES (@categoryId, @locale, @name)
+              `);
+          }
+        }
+
+        const itemSelectCols = [
+          "mi.id",
+          "mi.category",
+          hasCategoryId ? "mi.categoryId" : "NULL as categoryId",
+          "mi.price",
+          "mi.image",
+          "ISNULL(mi.available, 1) as available",
+          "mi.sortOrder",
+        ];
+        if (hasOriginalPrice) itemSelectCols.push("mi.originalPrice");
+        if (hasDiscountPercent) itemSelectCols.push("mi.discountPercent");
+        if (hasSizes) itemSelectCols.push("mi.sizes");
+        if (hasVariants) itemSelectCols.push("mi.variants");
+
+        const itemsResult = await transaction
+          .request()
+          .input("sourceMenuId", sql.Int, sourceMenuId).query(`
+            SELECT
+              ${itemSelectCols.join(", ")},
+              ar.name as nameAr, ar.description as descriptionAr,
+              en.name as nameEn, en.description as descriptionEn
+            FROM MenuItems mi
+            LEFT JOIN MenuItemTranslations ar ON mi.id = ar.menuItemId AND ar.locale = 'ar'
+            LEFT JOIN MenuItemTranslations en ON mi.id = en.menuItemId AND en.locale = 'en'
+            WHERE mi.menuId = @sourceMenuId
+            ORDER BY mi.sortOrder, mi.id
+          `);
+
+        for (const item of itemsResult.recordset as Record<
+          string,
+          unknown
+        >[]) {
+          const oldCategoryId =
+            item.categoryId == null ? null : Number(item.categoryId);
+          const newCategoryId =
+            oldCategoryId != null
+              ? (categoryIdMap.get(oldCategoryId) ?? null)
+              : null;
+
+          const itemInsert = transaction.request();
+          if (isIdString) {
+            itemInsert.input("menuId", sql.NVarChar, newMenuId);
+          } else {
+            itemInsert.input("menuId", sql.Int, newMenuId);
+          }
+
+          const insertCols = [
+            "menuId",
+            "category",
+            "price",
+            "image",
+            "available",
+            "sortOrder",
+          ];
+          const insertVals = [
+            "@menuId",
+            "@category",
+            "@price",
+            "@image",
+            "@available",
+            "@sortOrder",
+          ];
+
+          itemInsert
+            .input(
+              "category",
+              sql.NVarChar,
+              typeof item.category === "string" ? item.category : "main",
+            )
+            .input("price", sql.Decimal(10, 2), Number(item.price ?? 0))
+            .input(
+              "image",
+              sql.NVarChar,
+              typeof item.image === "string" ? item.image : null,
+            )
+            .input("available", sql.Bit, item.available ? 1 : 0)
+            .input("sortOrder", sql.Int, Number(item.sortOrder ?? 0));
+
+          if (hasCategoryId) {
+            insertCols.push("categoryId");
+            insertVals.push("@categoryId");
+            itemInsert.input("categoryId", sql.Int, newCategoryId);
+          }
+          if (hasOriginalPrice) {
+            insertCols.push("originalPrice");
+            insertVals.push("@originalPrice");
+            itemInsert.input(
+              "originalPrice",
+              sql.Decimal(10, 2),
+              item.originalPrice == null ? null : Number(item.originalPrice),
+            );
+          }
+          if (hasDiscountPercent) {
+            insertCols.push("discountPercent");
+            insertVals.push("@discountPercent");
+            itemInsert.input(
+              "discountPercent",
+              sql.Int,
+              item.discountPercent == null
+                ? null
+                : Number(item.discountPercent),
+            );
+          }
+          if (hasSizes) {
+            insertCols.push("sizes");
+            insertVals.push("@sizes");
+            itemInsert.input(
+              "sizes",
+              sql.NVarChar(sql.MAX),
+              typeof item.sizes === "string"
+                ? item.sizes
+                : item.sizes == null
+                  ? null
+                  : JSON.stringify(item.sizes),
+            );
+          }
+          if (hasVariants) {
+            insertCols.push("variants");
+            insertVals.push("@variants");
+            itemInsert.input(
+              "variants",
+              sql.NVarChar(sql.MAX),
+              typeof item.variants === "string"
+                ? item.variants
+                : item.variants == null
+                  ? null
+                  : JSON.stringify(item.variants),
+            );
+          }
+
+          const itemResult = await itemInsert.query(`
+            INSERT INTO MenuItems (${insertCols.join(", ")})
+            OUTPUT INSERTED.id
+            VALUES (${insertVals.join(", ")})
+          `);
+
+          const newItemId = Number(itemResult.recordset[0].id);
+
+          for (const [locale, name, description] of [
+            [
+              "ar",
+              typeof item.nameAr === "string" ? item.nameAr : "",
+              typeof item.descriptionAr === "string"
+                ? item.descriptionAr
+                : null,
+            ],
+            [
+              "en",
+              typeof item.nameEn === "string" ? item.nameEn : "",
+              typeof item.descriptionEn === "string"
+                ? item.descriptionEn
+                : null,
+            ],
+          ] as const) {
+            if (!name) continue;
+            await transaction
+              .request()
+              .input("menuItemId", sql.Int, newItemId)
+              .input("locale", sql.NVarChar, locale)
+              .input("name", sql.NVarChar, name)
+              .input("description", sql.NVarChar, description).query(`
+                INSERT INTO MenuItemTranslations (menuItemId, locale, name, description)
+                VALUES (@menuItemId, @locale, @name, @description)
+              `);
+          }
+        }
       }
 
       return newMenuId;
@@ -807,7 +1119,7 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
       targetId: Number(menuId),
       summaryEn: `Menu copied from #${sourceMenuId} with slug ${slug}`,
       summaryAr: `تم نسخ المنيو من #${sourceMenuId} بالرابط ${slug}`,
-      detailJson: JSON.stringify({ sourceMenuId, slug }),
+      detailJson: JSON.stringify({ sourceMenuId, slug, ...copyFlags }),
     });
 
     res.status(201).json({
@@ -823,6 +1135,7 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
       theme,
       currency,
       isActive: true,
+      ...copyFlags,
     });
   } catch (error) {
     logger.error("Copy menu error:", error);

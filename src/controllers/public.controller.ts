@@ -101,10 +101,15 @@ function tableRowId(row: Record<string, unknown>): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function isPublicMenuTableActive(row: Record<string, unknown>): boolean {
+  return row.isActive !== false;
+}
+
 /**
  * Resolve `table` like a row from GET /api/menus/:menuId/tables.
  * - `?tableId=12` → match MenuTables.id
  * - `?table=` / `?tableNumber=` → match tableNumber; if no hit and value is all digits, match id
+ * - Inactive tables → null (guest gets the regular menu; client strips ?table=)
  */
 function resolvePublicMenuTable(
   tables: Record<string, unknown>[],
@@ -114,7 +119,8 @@ function resolvePublicMenuTable(
 
   if (tableId !== null) {
     const hit = tables.find((row) => tableRowId(row) === tableId);
-    return hit ?? null;
+    if (!hit) return null;
+    return isPublicMenuTableActive(hit) ? hit : null;
   }
 
   if (!tableNumber) return null;
@@ -124,12 +130,16 @@ function resolvePublicMenuTable(
     const t = tableRowNumber(row);
     return t !== null && t === needle;
   });
-  if (byLabel) return byLabel;
+  if (byLabel) {
+    return isPublicMenuTableActive(byLabel) ? byLabel : null;
+  }
 
   if (/^\d+$/.test(needle)) {
     const id = parseInt(needle, 10);
     const byId = tables.find((row) => tableRowId(row) === id);
-    if (byId) return byId;
+    if (byId) {
+      return isPublicMenuTableActive(byId) ? byId : null;
+    }
   }
 
   return { tableNumber: needle };
