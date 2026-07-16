@@ -218,7 +218,7 @@ export async function postMenuOrderActionHandler(
         return;
       }
       if (result.error === "FORBIDDEN") {
-        sendApiError(res, req, 403, ApiErrors.staffCashierRequired);
+        sendApiError(res, req, 403, ApiErrors.forbidden);
         return;
       }
       if (
@@ -257,7 +257,7 @@ export async function patchMenuOrderItemsHandler(
       return;
     }
 
-    const access = await getMenuAccessForRequest(req, mid);
+    const access = await getMenuAccessForRequest(req, mid, "orders:edit_items");
     if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;

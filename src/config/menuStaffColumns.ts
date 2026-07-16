@@ -18,6 +18,8 @@ export type MenuStaffColumnMeta = {
   activeColumnQuoted: string | null;
   roleKey: string | null;
   roleColumnQuoted: string | null;
+  roleIdKey: string | null;
+  roleIdColumnQuoted: string | null;
   phoneKey: string | null;
   phoneColumnQuoted: string | null;
   createdAtKey: string | null;
@@ -60,6 +62,7 @@ export async function getMenuStaffColumnMeta(): Promise<MenuStaffColumnMeta> {
   );
   const activeName = pick("isActive", "active", "available", "isAvailable");
   const roleName = pick("role", "staffRole");
+  const roleIdName = pick("roleId");
   const phoneName = pick("phone", "phoneNumber", "mobile", "tel");
   const createdAtKey = pick("createdAt", "CreatedAt", "created_at");
   const expoTokenKey = pick(
@@ -77,6 +80,8 @@ export async function getMenuStaffColumnMeta(): Promise<MenuStaffColumnMeta> {
     activeColumnQuoted: activeName ? quoteIdent(activeName) : null,
     roleKey: roleName,
     roleColumnQuoted: roleName ? quoteIdent(roleName) : null,
+    roleIdKey: roleIdName,
+    roleIdColumnQuoted: roleIdName ? quoteIdent(roleIdName) : null,
     phoneKey: phoneName,
     phoneColumnQuoted: phoneName ? quoteIdent(phoneName) : null,
     createdAtKey,
@@ -131,11 +136,18 @@ export function normalizeStaffRow(
     return k != null ? row[k] : null;
   };
 
+  // roleName is only present when the query LEFT JOINs MenuStaffRoles.
+  const roleNameKey = Object.keys(row).find(
+    (n) => n.toLowerCase() === "rolename",
+  );
+
   return {
     id: row.id,
     menuId: row.menuId,
     name: pick(meta.nameKey),
     role: meta.roleKey ? pick(meta.roleKey) : null,
+    roleId: meta.roleIdKey ? (pick(meta.roleIdKey) ?? null) : null,
+    roleName: roleNameKey != null ? (row[roleNameKey] ?? null) : null,
     phone: meta.phoneKey ? pick(meta.phoneKey) : null,
     email: meta.emailKey ? pick(meta.emailKey) : null,
     isActive: getStaffIsActive(row, meta),

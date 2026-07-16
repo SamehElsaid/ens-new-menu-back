@@ -4,7 +4,10 @@
  *   post:
  *     tags: [Staff Auth]
  *     summary: Staff app login
- *     description: Returns JWT for menu staff (cashier/waiter/kitchen). Use with table-call endpoints under **Orders**.
+ *     description: |
+ *       Returns a JWT for menu staff plus the staff member's role and the
+ *       resolved `permissions` (RBAC) for client-side gating. The token carries
+ *       identity only (`staffRoleId`), not the permission list.
  *     requestBody:
  *       required: true
  *       content:
@@ -23,7 +26,12 @@
  *                 id: 7
  *                 menuId: 42
  *                 name: "Karim"
- *                 role: cashier
+ *                 roleId: 3
+ *                 roleName: "Cashier"
+ *               role:
+ *                 id: 3
+ *                 name: "Cashier"
+ *               permissions: ["dashboard:access", "orders:view", "orders:confirm", "orders:complete"]
  *               accessToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.staff.example"
  *       401:
  *         description: Invalid credentials
@@ -42,8 +50,13 @@
  *                 id: 7
  *                 menuId: 42
  *                 name: "Karim"
- *                 role: cashier
+ *                 roleId: 3
+ *                 roleName: "Cashier"
  *                 email: "karim@restaurant.com"
+ *               role:
+ *                 id: 3
+ *                 name: "Cashier"
+ *               permissions: ["dashboard:access", "orders:view", "orders:confirm", "orders:complete"]
  *
  * /api/staff-auth/logout:
  *   post:

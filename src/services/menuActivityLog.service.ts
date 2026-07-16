@@ -5,7 +5,16 @@ import {
   getMenuStaffColumnMeta,
   quoteMenuStaffIdent,
 } from "../config/menuStaffColumns";
-import { normalizeStaffJobRole, canStaffFinishOrders } from "../config/staffJobRoles";
+/** Legacy `role` text normalizer (transition only; RBAC uses role names). */
+function normalizeLegacyStaffRole(input: unknown): string | null {
+  if (input == null || input === "") return null;
+  const s = String(input).trim().toLowerCase();
+  if (s === "casher") return "cashier";
+  if (s === "cashier" || s === "waiter") return s;
+  return null;
+}
+import { authorization } from "./authorization.service";
+import { actorFromRequest } from "../middleware/requireStaffPermission";
 import { ensureMenuAuditLogSchema } from "../schemas/menuAuditLog.schema";
 import { ensureStaffTableCallsOrderTypeSchema } from "../schemas/staffTableCallsOrderType.schema";
 import type { TokenPayload } from "../utils/tokenHelper";
@@ -205,14 +214,19 @@ export async function resolveActorForLog(req: Request): Promise<{
     if (u.role === ROLES.STAFF) {
       const meta = await getMenuStaffColumnMeta();
       const nameCol = quoteMenuStaffIdent(meta.nameKey);
-      const roleSql = meta.roleColumnQuoted
-        ? `, ${meta.roleColumnQuoted} AS jobRole`
+      // Prefer the RBAC role name; fall back to the legacy `role` text column.
+      const roleNameSql = meta.roleIdColumnQuoted ? `, r.name AS roleName` : "";
+      const legacyRoleSql = meta.roleColumnQuoted
+        ? `, s.${meta.roleColumnQuoted} AS jobRole`
+        : "";
+      const joinRoles = meta.roleIdColumnQuoted
+        ? `LEFT JOIN dbo.MenuStaffRoles r ON r.id = s.${meta.roleIdColumnQuoted}`
         : "";
       const r = await pool
         .request()
         .input("id", sql.Int, u.userId)
         .query(
-          `SELECT ${nameCol} AS displayName${roleSql} FROM MenuStaff WHERE id = @id`,
+          `SELECT s.${nameCol} AS displayName${roleNameSql}${legacyRoleSql} FROM MenuStaff s ${joinRoles} WHERE s.id = @id`,
         );
       const row = r.recordset[0] as Record<string, unknown> | undefined;
       const name = row?.displayName ?? row?.DisplayName;
@@ -220,12 +234,14 @@ export async function resolveActorForLog(req: Request): Promise<{
         name != null && String(name).trim() !== ""
           ? String(name).trim()
           : (u.email ?? "Staff");
-      const jobRaw =
-        row?.jobRole ??
-        row?.JobRole ??
-        (row && meta.roleKey ? row[meta.roleKey] : undefined);
+      const roleName = row?.roleName ?? row?.RoleName;
+      const legacyJob = row?.jobRole ?? row?.JobRole;
       const staffJobRole =
-        jobRaw != null ? normalizeStaffJobRole(jobRaw) : null;
+        roleName != null && String(roleName).trim() !== ""
+          ? String(roleName).trim()
+          : legacyJob != null
+            ? normalizeLegacyStaffRole(legacyJob)
+            : null;
       return { actorRole: ROLES.STAFF, actorName: label, staffJobRole };
     }
 
@@ -1070,12 +1086,22 @@ export type ApplyMenuOrderItemsError =
   | "INVALID_PAYLOAD"
   | "SERVER_ERROR";
 
-function staffOnlyActionRequiresCashier(action: MenuOrderActionType): boolean {
-  return (
-    action === "TABLE_CALL_PREPARED" ||
-    action === "TABLE_CALL_DELIVERED" ||
-    action === "TABLE_CALL_COMPLETED"
-  );
+/** Maps a dashboard order action to the RBAC permission it requires. */
+function orderActionToPermission(action: MenuOrderActionType): string {
+  switch (action) {
+    case "TABLE_CALL_CONFIRMED":
+      return "orders:confirm";
+    case "TABLE_CALL_CANCELLED":
+      return "orders:cancel";
+    case "TABLE_CALL_PREPARED":
+      return "orders:prepare";
+    case "TABLE_CALL_DELIVERED":
+      return "orders:deliver";
+    case "TABLE_CALL_COMPLETED":
+      return "orders:complete";
+    default:
+      return "orders:view";
+  }
 }
 
 function orderActionSummaries(
@@ -1316,11 +1342,11 @@ export async function applyMenuOrderAction(
     let applied = false;
     let nextStatus = actionToStatus(action);
 
-    const actor = await resolveActorForLog(req);
-    if (
-      staffOnlyActionRequiresCashier(action) &&
-      !canStaffFinishOrders(actor.staffJobRole, actor.actorRole)
-    ) {
+    const permActor = actorFromRequest(req);
+    if (!permActor) {
+      return { ok: false, error: "FORBIDDEN" };
+    }
+    if (!(await authorization.can(permActor, orderActionToPermission(action)))) {
       return { ok: false, error: "FORBIDDEN" };
     }
 

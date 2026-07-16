@@ -19,7 +19,8 @@
  *                 - id: 7
  *                   menuId: 42
  *                   name: "Karim"
- *                   role: cashier
+ *                   roleId: 3
+ *                   roleName: "Cashier"
  *                   email: "karim@restaurant.com"
  *                   phone: "+201012345678"
  *                   isActive: true
@@ -27,7 +28,9 @@
  *   post:
  *     tags: [Staff]
  *     summary: Create staff member
- *     description: Optional password (min 6) enables staff app login with email.
+ *     description: |
+ *       `roleId` references a dynamic role from `GET /api/menus/{menuId}/staff-roles`.
+ *       Optional password (min 6) enables staff app login with email.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - $ref: '#/components/parameters/menuId'
@@ -37,7 +40,7 @@
  *         application/json:
  *           example:
  *             name: "Karim"
- *             role: cashier
+ *             roleId: 3
  *             email: "karim@restaurant.com"
  *             phone: "+201012345678"
  *             password: "staff123456"
@@ -47,8 +50,16 @@
  *         content:
  *           application/json:
  *             example:
- *               message: "Staff created successfully"
- *               staffId: 7
+ *               message: "Staff member created successfully"
+ *               staff:
+ *                 id: 7
+ *                 menuId: 42
+ *                 name: "Karim"
+ *                 roleId: 3
+ *                 roleName: "Cashier"
+ *                 email: "karim@restaurant.com"
+ *                 phone: "+201012345678"
+ *                 isActive: true
  *
  * /api/menus/{menuId}/staff/{staffId}:
  *   get:
@@ -69,7 +80,8 @@
  *               staff:
  *                 id: 7
  *                 name: "Karim"
- *                 role: cashier
+ *                 roleId: 3
+ *                 roleName: "Cashier"
  *                 email: "karim@restaurant.com"
  *                 isActive: true
  *   put:
@@ -86,7 +98,7 @@
  *       content:
  *         application/json:
  *           example:
- *             role: waiter
+ *             roleId: 2
  *             isActive: true
  *     responses:
  *       200:

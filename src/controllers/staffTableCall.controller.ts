@@ -8,10 +8,11 @@ import {
   updateStaffTableCallItems,
   updateStaffTableCallItemsAndStatus,
   completeStaffTableCall,
+  advanceStaffTableCallStatus,
 } from "../services/staffTableCall.service";
-import { canStaffFinishOrders } from "../config/staffJobRoles";
-import { resolveActorForLog } from "../services/menuActivityLog.service";
 import { menuOwnerHasCapability } from "../services/planCapabilities.service";
+import { authorization } from "../services/authorization.service";
+import { actorFromRequest } from "../middleware/requireStaffPermission";
 import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
@@ -300,6 +301,21 @@ export async function putStaffTableCall(
     const rawStatus = String(req.body?.status ?? "")
       .trim()
       .toLowerCase();
+
+    // A status change to confirmed/cancelled needs the matching permission
+    // (base gate orders:edit_items already applied at the route).
+    if (rawStatus === "confirmed" || rawStatus === "cancelled") {
+      const putActor = actorFromRequest(req);
+      if (putActor) {
+        const neededPerm =
+          rawStatus === "confirmed" ? "orders:confirm" : "orders:cancel";
+        if (!(await authorization.can(putActor, neededPerm))) {
+          sendApiError(res, req, 403, ApiErrors.forbidden);
+          return;
+        }
+      }
+    }
+
     if (
       rawStatus !== "pending" &&
       rawStatus !== "confirmed" &&
@@ -412,6 +428,17 @@ export async function patchTableCallStatus(
     if (raw !== "confirmed" && raw !== "cancelled") {
       sendApiError(res, req, 400, ApiErrors.validationFailed);
       return;
+    }
+
+    // Precise permission: confirm vs cancel (coarse gate applied at route).
+    const statusActor = actorFromRequest(req);
+    if (statusActor) {
+      const neededPerm =
+        raw === "confirmed" ? "orders:confirm" : "orders:cancel";
+      if (!(await authorization.can(statusActor, neededPerm))) {
+        sendApiError(res, req, 403, ApiErrors.forbidden);
+        return;
+      }
     }
 
     const ok = await setStaffTableCallStatus(
@@ -587,12 +614,7 @@ export async function patchTableCallComplete(
       return;
     }
 
-    const actor = await resolveActorForLog(req);
-    if (!canStaffFinishOrders(actor.staffJobRole, actor.actorRole)) {
-      sendApiError(res, req, 403, ApiErrors.staffCashierRequired);
-      return;
-    }
-
+    // Authorization is enforced at the route via requireStaffPermission("orders:complete").
     const snapBefore = await getStaffTableCallSnapshot(menuId, callId);
     if (!snapBefore) {
       sendApiError(res, req, 404, ApiErrors.tableCallNotFound);
@@ -635,6 +657,83 @@ export async function patchTableCallComplete(
     });
   } catch (error) {
     logger.error("patchTableCallComplete error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedCallStatusUpdate);
+  }
+}
+
+/**
+ * PATCH /api/staff-auth/table-calls/:id/prepare — mark a confirmed order as
+ * prepared (ready). Used by the "food preparer" role from the mobile app.
+ * Authorization enforced at the route via requireStaffPermission("orders:prepare").
+ */
+export async function patchTableCallPrepare(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const staffId = req.user!.userId;
+    const menuId = await getMenuIdForStaff(staffId);
+    if (menuId === null) {
+      sendApiError(res, req, 403, ApiErrors.staffMenuNotFound);
+      return;
+    }
+
+    if (!(await menuOwnerHasCapability(menuId, "tableOrderingQr"))) {
+      sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
+        code: "PLAN_CAPABILITY_REQUIRED",
+        capability: "tableOrderingQr",
+      });
+      return;
+    }
+
+    const callId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(callId) || callId <= 0) {
+      sendApiError(res, req, 400, ApiErrors.invalidCallId);
+      return;
+    }
+
+    const snapBefore = await getStaffTableCallSnapshot(menuId, callId);
+    if (!snapBefore) {
+      sendApiError(res, req, 404, ApiErrors.tableCallNotFound);
+      return;
+    }
+
+    const ok = await advanceStaffTableCallStatus(callId, menuId, "prepared");
+    if (!ok) {
+      sendApiError(res, req, 409, ApiErrors.callNotFoundOrNotPending);
+      return;
+    }
+
+    await emitCallChanged(menuId, callId);
+    const snapAfter = await getStaffTableCallSnapshot(menuId, callId);
+    res.json({ status: "prepared" });
+    void logMenuActivitySafe(req, menuId, {
+      action: "TABLE_CALL_PREPARED",
+      targetType: "table_call",
+      targetId: callId,
+      summaryAr: tableCallSummaries(snapAfter, {
+        type: "status",
+        status: "prepared",
+      }).ar,
+      summaryEn: tableCallSummaries(snapAfter, {
+        type: "status",
+        status: "prepared",
+      }).en,
+      detailJson: JSON.stringify({
+        status: "prepared",
+        order: snapAfter
+          ? {
+              tableNumber: snapAfter.tableNumber,
+              customerName: snapAfter.customerName,
+              items: snapAfter.items,
+              orderTotal: snapAfter.orderTotal,
+              status: snapAfter.status,
+            }
+          : null,
+      }),
+    });
+  } catch (error) {
+    logger.error("patchTableCallPrepare error:", error);
     sendApiError(res, req, 500, ApiErrors.failedCallStatusUpdate);
   }
 }

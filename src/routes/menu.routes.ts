@@ -12,6 +12,7 @@ import menuItemRoutes from "./menuItem.routes";
 import branchRoutes from "./branch.routes";
 import menuCustomizationRoutes from "./menuCustomization.routes";
 import menuStaffRoutes from "./menuStaff.routes";
+import menuStaffRolesRoutes from "./menuStaffRoles.routes";
 import menuTablesRoutes from "./menuTables.routes";
 import menuDeliveryRoutes from "./menuDelivery.routes";
 import {
@@ -273,6 +274,7 @@ router.use("/:menuId/items", menuItemRoutes);
 // Branch CRUD — no dashboard UI yet; Branches data is served via GET /api/public/menu/:slug
 router.use("/:menuId/branches", branchRoutes);
 router.use("/:menuId/customizations", menuCustomizationRoutes);
+router.use("/:menuId/staff-roles", menuStaffRolesRoutes);
 router.use("/:menuId/staff", menuStaffRoutes);
 router.use("/:menuId/tables", menuTablesRoutes);
 router.use("/:menuId/delivery", menuDeliveryRoutes);
