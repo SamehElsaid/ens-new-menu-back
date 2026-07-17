@@ -18,6 +18,7 @@ import {
   getMenuStaffColumnMeta,
   normalizeStaffRow,
 } from "../config/menuStaffColumns";
+import { ensureDefaultRolesForMenu } from "../schemas/menuStaffRoles.schema";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 import { generateMenuUuid } from "../utils/menuIdentifier";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
@@ -319,6 +320,17 @@ export async function createMenu(req: Request, res: Response): Promise<void> {
       uuid: newMenuUuid,
       slug,
     });
+
+    const numericMenuId = Number(menuId);
+    if (Number.isFinite(numericMenuId)) {
+      void ensureDefaultRolesForMenu(numericMenuId).catch((seedError) => {
+        logger.warn("Failed to seed default staff roles for new menu", {
+          menuId: numericMenuId,
+          error:
+            seedError instanceof Error ? seedError.message : String(seedError),
+        });
+      });
+    }
   } catch (error) {
     logger.error("Create menu error:", error);
     sendApiError(res, req, 500, ApiErrors.failedCreateMenu);

@@ -11,6 +11,7 @@ import { ensureMenuAuditLogSchema } from "./menuAuditLog.schema";
 import { ensureMenuChatbotSchema } from "./menuChatbot.schema";
 import { ensureMenuWifiTaxServiceSchema } from "./menuWifiTaxService.schema";
 import { ensureMenuStaffSchema } from "./menuStaff.schema";
+import { ensureMenuStaffRolesSchema } from "./menuStaffRoles.schema";
 import { ensureMenuTablesSchema } from "./menuTables.schema";
 import { ensureMenuUuidSchema } from "./menuUuid.schema";
 import { ensurePhoneVerifiedSchema } from "./phoneVerified.schema";
@@ -41,6 +42,10 @@ export { ensureMenuAuditLogSchema } from "./menuAuditLog.schema";
 export { ensureMenuChatbotSchema } from "./menuChatbot.schema";
 export { ensureMenuWifiTaxServiceSchema } from "./menuWifiTaxService.schema";
 export { ensureMenuStaffSchema } from "./menuStaff.schema";
+export {
+  ensureMenuStaffRolesSchema,
+  ensureDefaultRolesForMenu,
+} from "./menuStaffRoles.schema";
 export { ensureMenuTablesSchema } from "./menuTables.schema";
 export { ensureMenuUuidSchema } from "./menuUuid.schema";
 export { ensurePhoneVerifiedSchema } from "./phoneVerified.schema";
@@ -75,6 +80,7 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "menuUuid", run: ensureMenuUuidSchema },
     { name: "menuTables", run: ensureMenuTablesSchema },
     { name: "menuStaff", run: ensureMenuStaffSchema },
+    { name: "menuStaffRoles", run: ensureMenuStaffRolesSchema },
     { name: "bulkImportUsage", run: ensureBulkImportUsageSchema },
     { name: "homepageFeaturedLogos", run: ensureHomepageFeaturedLogosSchema },
     { name: "adminCustomer", run: ensureAdminCustomerSchema },

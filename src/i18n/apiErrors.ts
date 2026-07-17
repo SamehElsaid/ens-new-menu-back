@@ -288,7 +288,11 @@ export const ApiErrors = {
   },
   staffEmailExists: {
     en: "This email is already used by another staff member",
-    ar: "هذا البريد الإلكتروني مستخدم بالفعل  ",
+    ar: "هذا البريد الإلكتروني مستخدم بالفعل من قبل موظف آخر",
+  },
+  staffPasswordRequiresEmail: {
+    en: "Email is required when setting a staff password",
+    ar: "البريد الإلكتروني مطلوب عند تعيين كلمة مرور للموظف",
   },
   failedUpdateStaffMember: {
     en: "Failed to update staff member",
@@ -1005,5 +1009,70 @@ export const ApiErrors = {
   verifykitAccessTokenFailed: {
     en: "Failed to initialize phone verification widget",
     ar: "فشل تهيئة واجهة التحقق من رقم الهاتف",
+  },
+  // ── Staff RBAC ────────────────────────────────────────────────────
+  forbidden: {
+    en: "You do not have permission to perform this action",
+    ar: "ليس لديك صلاحية لتنفيذ هذا الإجراء",
+  },
+  invalidPermission: {
+    en: "One or more permissions are not recognized",
+    ar: "توجد صلاحية واحدة أو أكثر غير معروفة",
+  },
+  invalidPermissionCombination: {
+    en: "This combination of permissions is not allowed",
+    ar: "هذه التركيبة من الصلاحيات غير مسموح بها",
+  },
+  roleNameRequired: {
+    en: "Role name is required",
+    ar: "اسم الدور مطلوب",
+  },
+  roleNameExists: {
+    en: "A role with this name already exists",
+    ar: "يوجد دور بهذا الاسم بالفعل",
+  },
+  roleNotFound: {
+    en: "Role not found",
+    ar: "لم يُعثر على الدور",
+  },
+  roleInUse: {
+    en: "Cannot delete a role that still has staff assigned to it",
+    ar: "لا يمكن حذف دور مرتبط بموظفين",
+  },
+  lastDashboardAccessRole: {
+    en: "Cannot remove the last role that has dashboard access",
+    ar: "لا يمكن حذف آخر دور يملك صلاحية دخول لوحة التحكم",
+  },
+  invalidRoleId: {
+    en: "A valid role must be selected",
+    ar: "يجب اختيار دور صالح",
+  },
+  failedListRoles: {
+    en: "Failed to get roles",
+    ar: "فشل جلب الأدوار",
+  },
+  failedGetRole: {
+    en: "Failed to get role",
+    ar: "فشل جلب الدور",
+  },
+  failedCreateRole: {
+    en: "Failed to create role",
+    ar: "فشل إنشاء الدور",
+  },
+  failedUpdateRole: {
+    en: "Failed to update role",
+    ar: "فشل تحديث الدور",
+  },
+  failedDeleteRole: {
+    en: "Failed to delete role",
+    ar: "فشل حذف الدور",
+  },
+  staffRoleDeleted: {
+    en: "Your role no longer exists. Please sign in again.",
+    ar: "لم يعد دورك موجوداً. يرجى تسجيل الدخول مجدداً.",
+  },
+  staffNoDashboardAccess: {
+    en: "Your account does not have dashboard access. Use the staff app.",
+    ar: "حسابك لا يملك صلاحية دخول لوحة التحكم. استخدم تطبيق الموظفين.",
   },
 } as const satisfies Record<string, BilingualMessage>;

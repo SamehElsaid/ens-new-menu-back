@@ -35,6 +35,7 @@ import uploadRoutes from "./routes/upload.routes";
 import structureRoutes from "./routes/structure.routes";
 import adsRoutes from "./routes/ads.routes";
 import staffAuthRoutes from "./routes/staffAuth.routes";
+import staffPermissionsRoutes from "./routes/staffPermissions.routes";
 import paymentRoutes from "./routes/paymentRoutes";
 import voucherRoutes from "./routes/voucher.routes";
 import { getPublicAppVersion } from "./controllers/version.controller";
@@ -208,6 +209,7 @@ app.use("/api/verifykit", verifykitRoutes);
 app.use("/api/staff-auth", staffAuthRoutes);
 // Backward-compatible alias for clients that accidentally prefix /api twice.
 app.use("/api/api/staff-auth", staffAuthRoutes);
+app.use("/api/staff-permissions", staffPermissionsRoutes);
 app.use("/api/menus", menuRoutes);
 app.use("/api/menu-groups", menuGroupRoutes);
 // Must be before app.use("/api", categoryRoutes): that router runs requireAuth on all /api/* paths

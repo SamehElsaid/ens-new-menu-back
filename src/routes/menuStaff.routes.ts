@@ -10,52 +10,71 @@ const router = Router({ mergeParams: true });
 router.use(requireAuth);
 router.use(requirePlanCapability("staffAndTables"));
 
+const menuIdParam = param("menuId").isInt().withMessage("menuId must be an integer");
+const staffIdParam = param("staffId")
+  .isInt()
+  .withMessage("staffId must be an integer");
+
+const staffEmailBody = body("email")
+  .optional({ nullable: true, checkFalsy: true })
+  .isEmail()
+  .normalizeEmail();
+
+const staffRoleIdBody = body("roleId")
+  .isInt({ min: 1 })
+  .withMessage("roleId must be a valid role id");
+
+const staffRoleIdOptionalBody = body("roleId")
+  .optional()
+  .isInt({ min: 1 })
+  .withMessage("roleId must be a valid role id");
+
 // GET /api/menus/:menuId/staff
-router.get("/", [param("menuId").isInt()], staffController.getStaff);
+router.get("/", validate([menuIdParam]), staffController.getStaff);
 
 // GET /api/menus/:menuId/staff/:staffId
 router.get(
   "/:staffId",
-  [param("menuId").isInt(), param("staffId").isInt()],
-  staffController.getStaffById
+  validate([menuIdParam, staffIdParam]),
+  staffController.getStaffById,
 );
 
 // POST /api/menus/:menuId/staff
 router.post(
   "/",
   validate([
-    param("menuId").isInt(),
+    menuIdParam,
     body("name").notEmpty().trim().isLength({ max: 255 }),
-    body("role").optional().isString().trim().isLength({ max: 100 }),
+    staffRoleIdBody,
     body("phone").optional().isString().trim().isLength({ max: 50 }),
-    body("email").optional().isEmail().normalizeEmail(),
+    staffEmailBody,
     body("password").optional().isString().isLength({ min: 6, max: 128 }),
     body("isActive").optional().isBoolean(),
   ]),
-  staffController.createStaff
+  staffController.createStaff,
 );
 
 // PUT /api/menus/:menuId/staff/:staffId
 router.put(
   "/:staffId",
   validate([
-    param("menuId").isInt(),
-    param("staffId").isInt(),
+    menuIdParam,
+    staffIdParam,
     body("name").optional().notEmpty().trim().isLength({ max: 255 }),
-    body("role").optional().isString().trim().isLength({ max: 100 }),
+    staffRoleIdOptionalBody,
     body("phone").optional().isString().trim().isLength({ max: 50 }),
-    body("email").optional().isEmail().normalizeEmail(),
+    staffEmailBody,
     body("password").optional().isString().isLength({ min: 6, max: 128 }),
     body("isActive").optional().isBoolean(),
   ]),
-  staffController.updateStaff
+  staffController.updateStaff,
 );
 
 // DELETE /api/menus/:menuId/staff/:staffId
 router.delete(
   "/:staffId",
-  [param("menuId").isInt(), param("staffId").isInt()],
-  staffController.deleteStaff
+  validate([menuIdParam, staffIdParam]),
+  staffController.deleteStaff,
 );
 
 export default router;

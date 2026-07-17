@@ -353,6 +353,9 @@
  *   patch:
  *     tags: [Orders]
  *     summary: Confirm or cancel order
+ *     description: |
+ *       Requires the staff RBAC permission for the target status:
+ *       `orders:confirm` (confirmed) or `orders:cancel` (cancelled).
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -395,10 +398,34 @@
  *       200:
  *         description: Items updated
  *
+ * /api/staff-auth/table-calls/{id}/prepare:
+ *   patch:
+ *     tags: [Orders]
+ *     summary: Mark order prepared
+ *     description: |
+ *       Advances a confirmed order to `prepared`. Requires the `orders:prepare`
+ *       permission — used by the "Food preparer" role from the staff app.
+ *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer, example: 9001 }
+ *     responses:
+ *       200:
+ *         content:
+ *           application/json:
+ *             example:
+ *               message: "Order prepared"
+ *               status: prepared
+ *       403:
+ *         description: Missing orders:prepare permission
+ *
  * /api/staff-auth/table-calls/{id}/complete:
  *   patch:
  *     tags: [Orders]
- *     summary: Mark order complete (cashier)
+ *     summary: Mark order complete
+ *     description: Requires the `orders:complete` permission.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - in: path

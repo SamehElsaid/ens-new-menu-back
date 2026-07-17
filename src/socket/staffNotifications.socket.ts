@@ -13,6 +13,7 @@ import {
 import { menuOwnerHasCapability } from "../services/planCapabilities.service";
 import { notifyStaffOfTableCall } from "../services/staffNotify.service";
 import { verifyMenuAccessForSocket } from "../utils/menuAccess";
+import { authorization } from "../services/authorization.service";
 
 const roomForMenu = (menuId: number) => `menu:${menuId}`;
 
@@ -69,6 +70,26 @@ export function attachStaffNotificationsSocket(
           reply({ ok: false, error: "PRO_REQUIRED" });
           return;
         }
+
+        // RBAC: staff must have orders:view to receive the order feed.
+        if (typeof decoded.staffRoleId !== "number") {
+          reply({ ok: false, error: "ROLE_REQUIRED" });
+          return;
+        }
+        const canView = await authorization.can(
+          {
+            kind: "staff",
+            staffId: decoded.userId,
+            staffRoleId: decoded.staffRoleId,
+            menuId,
+          },
+          "orders:view",
+        );
+        if (!canView) {
+          reply({ ok: false, error: "FORBIDDEN" });
+          return;
+        }
+
         await socket.join(roomForMenu(menuId));
         (socket.data as { staffMenuId?: number }).staffMenuId = menuId;
         reply({ ok: true, menuId });
@@ -130,6 +151,7 @@ export function attachStaffNotificationsSocket(
             decoded.userId,
             decoded.role,
             menuId,
+            "orders:view",
           );
           if (!allowed) {
             reply({ ok: false, error: "FORBIDDEN" });

@@ -65,10 +65,13 @@ async function ensureStaffEmailUniqueIndex(): Promise<void> {
     return;
   }
 
+  // Filtered-index WHERE must use simple comparisons only (no LTRIM/RTRIM).
+  const filterPredicate = `${emailCol} IS NOT NULL AND ${emailCol} <> ''`;
+
   const dupes = await pool.request().query(`
       SELECT LOWER(${emailCol}) AS emailNorm, COUNT(*) AS cnt
       FROM MenuStaff
-      WHERE ${emailCol} IS NOT NULL AND LTRIM(RTRIM(${emailCol})) <> ''
+      WHERE ${filterPredicate}
       GROUP BY LOWER(${emailCol})
       HAVING COUNT(*) > 1
     `);
@@ -84,7 +87,7 @@ async function ensureStaffEmailUniqueIndex(): Promise<void> {
 
   await pool.request().query(`
       CREATE UNIQUE INDEX [${indexName}] ON dbo.MenuStaff (${emailCol})
-      WHERE ${emailCol} IS NOT NULL AND LTRIM(RTRIM(${emailCol})) <> '';
+      WHERE ${filterPredicate};
     `);
   logger.info("MenuStaff email unique index ensured");
 }

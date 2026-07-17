@@ -14,10 +14,6 @@ import {
   generateRefreshToken,
   generateStaffAccessToken,
 } from "../utils/tokenHelper";
-import {
-  normalizeStaffJobRole,
-  STAFF_JOB_WAITER,
-} from "../config/staffJobRoles";
 import { RefreshTokenService } from "../services/refreshToken.service";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { ROLES } from "../config/constants";
@@ -26,6 +22,17 @@ import {
   menuOwnerHasProPlan,
 } from "../services/subscriptionPlan.service";
 import { sendApiError } from "../utils/apiErrorResponse";
+
+function parseRolePermissions(raw: unknown): string[] {
+  if (raw == null) return [];
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === "string");
+  } catch {
+    return [];
+  }
+}
 
 function parseMenuWorkingHours(workingHours: unknown): unknown {
   if (!workingHours) {
@@ -68,6 +75,8 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
       .input("email", sql.NVarChar, email.toLowerCase().trim()).query(`
         SELECT
           s.*,
+          sr.name as staffRoleName,
+          sr.permissionsJson as staffRolePermissions,
           m.id as menuTableId,
           m.uuid as menuUuid,
           m.userId as menuOwnerUserId,
@@ -94,6 +103,7 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
           en.description as menuDescriptionEn
         FROM MenuStaff s
         JOIN Menus m ON s.menuId = m.id
+        LEFT JOIN MenuStaffRoles sr ON sr.id = s.roleId
         LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
         LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
         WHERE ${emailCol} = @email
@@ -208,13 +218,18 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
     }
 
     const norm = normalizeStaffRow(staff, staffMeta);
-    const staffJobRole = normalizeStaffJobRole(norm.role) ?? STAFF_JOB_WAITER;
+    const staffRoleId =
+      norm.roleId != null ? Number(norm.roleId) : null;
+    const staffRoleName =
+      staff.staffRoleName != null ? String(staff.staffRoleName) : null;
+    const permissions = parseRolePermissions(staff.staffRolePermissions);
     const tokenPayload = {
       id: staff.id as number,
       userId: staff.id as number,
       email: norm.email as string,
       role: ROLES.STAFF,
-      staffJobRole,
+      menuId: norm.menuId != null ? Number(norm.menuId) : undefined,
+      staffRoleId: staffRoleId ?? undefined,
     };
 
     const accessToken = generateStaffAccessToken(tokenPayload);
@@ -266,9 +281,16 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
         name: norm.name,
         email: norm.email,
         role: norm.role,
+        roleId: staffRoleId,
+        roleName: staffRoleName,
         phone: norm.phone,
         menuId: norm.menuId,
       },
+      role:
+        staffRoleId != null
+          ? { id: staffRoleId, name: staffRoleName }
+          : null,
+      permissions,
       menu: {
         id: staff.menuTableId,
         uuid: staff.menuUuid,
@@ -319,6 +341,8 @@ export async function getStaffMe(req: Request, res: Response): Promise<void> {
       .query(`
         SELECT
           s.*,
+          sr.name as staffRoleName,
+          sr.permissionsJson as staffRolePermissions,
           m.userId as menuOwnerUserId,
           m.uuid as menuUuid,
           m.slug as menuSlug,
@@ -344,6 +368,7 @@ export async function getStaffMe(req: Request, res: Response): Promise<void> {
           en.description as menuDescriptionEn
         FROM MenuStaff s
         JOIN Menus m ON s.menuId = m.id
+        LEFT JOIN MenuStaffRoles sr ON sr.id = s.roleId
         LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
         LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
         WHERE s.id = @staffId
@@ -374,6 +399,10 @@ export async function getStaffMe(req: Request, res: Response): Promise<void> {
 
     const row = result.recordset[0] as Record<string, unknown>;
     const staff = normalizeStaffRow(row, meta);
+    const staffRoleId = staff.roleId != null ? Number(staff.roleId) : null;
+    const staffRoleName =
+      row.staffRoleName != null ? String(row.staffRoleName) : null;
+    const permissions = parseRolePermissions(row.staffRolePermissions);
 
     const workingHours = parseMenuWorkingHours(row.menuWorkingHours);
 
@@ -383,10 +412,17 @@ export async function getStaffMe(req: Request, res: Response): Promise<void> {
         name: staff.name,
         email: staff.email,
         role: staff.role,
+        roleId: staffRoleId,
+        roleName: staffRoleName,
         phone: staff.phone,
         isActive: staff.isActive,
         createdAt: staff.createdAt,
       },
+      role:
+        staffRoleId != null
+          ? { id: staffRoleId, name: staffRoleName }
+          : null,
+      permissions,
       menu: {
         id: staff.menuId,
         uuid: row.menuUuid,

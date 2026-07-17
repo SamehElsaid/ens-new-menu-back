@@ -90,7 +90,7 @@
  *         id: { type: integer, example: 7 }
  *         menuId: { type: integer, example: 42 }
  *         name: { type: string, example: "Karim" }
- *         role: { type: string, example: cashier, description: "waiter | cashier | kitchen | manager" }
+ *         role: { type: string, example: cashier, description: "waiter | cashier" }
  *         phone: { type: string, nullable: true }
  *         email: { type: string, format: email, nullable: true }
  *         isActive: { type: boolean, example: true }

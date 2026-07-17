@@ -9,11 +9,55 @@ import {
 import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
-import {
-  parseStaffJobRoleOrError,
-  STAFF_JOB_WAITER,
-} from "../config/staffJobRoles";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+
+/** Ensures a roleId exists and belongs to this menu; returns its name/legacy role. */
+async function resolveMenuRole(
+  menuId: number,
+  roleId: unknown,
+): Promise<
+  | { ok: true; roleId: number; roleName: string; legacyRole: string }
+  | { ok: false }
+> {
+  const rid =
+    roleId == null || roleId === "" ? NaN : parseInt(String(roleId), 10);
+  if (!Number.isFinite(rid) || rid <= 0) return { ok: false };
+
+  const pool = await getPool();
+  const check = await pool
+    .request()
+    .input("roleId", sql.Int, rid)
+    .input("menuId", sql.Int, menuId)
+    .query(
+      "SELECT id, name, permissionsJson FROM dbo.MenuStaffRoles WHERE id = @roleId AND menuId = @menuId",
+    );
+  if (check.recordset.length === 0) return { ok: false };
+
+  // Legacy `role` text kept in sync for backward-compatible reads until the
+  // column is dropped in phase 4: dashboard access ⇒ cashier, otherwise waiter.
+  let legacyRole = "waiter";
+  try {
+    const perms = JSON.parse(String(check.recordset[0].permissionsJson ?? "[]"));
+    if (Array.isArray(perms) && perms.includes("dashboard:access")) {
+      legacyRole = "cashier";
+    }
+  } catch {
+    /* keep default */
+  }
+
+  return {
+    ok: true,
+    roleId: rid,
+    roleName: String(check.recordset[0].name),
+    legacyRole,
+  };
+}
+
+function isSqlUniqueViolation(error: unknown): boolean {
+  const err = error as { number?: number };
+  // 2627 unique constraint, 2601 unique index
+  return err?.number === 2627 || err?.number === 2601;
+}
 
 async function isStaffEmailTaken(
   email: string,
@@ -30,6 +74,7 @@ async function isStaffEmailTaken(
   }
 
   const pool = await getPool();
+  const emailCol = quoteMenuStaffIdent(meta.emailKey);
   const request = pool
     .request()
     .input("email", sql.NVarChar, normalizedEmail);
@@ -42,7 +87,7 @@ async function isStaffEmailTaken(
   const dupCheck = await request.query(`
       SELECT TOP 1 id
       FROM MenuStaff
-      WHERE ${quoteMenuStaffIdent(meta.emailKey)} = @email${excludeSql}
+      WHERE LOWER(${emailCol}) = @email${excludeSql}
     `);
 
   return dupCheck.recordset.length > 0;
@@ -71,14 +116,15 @@ export async function getStaff(req: Request, res: Response): Promise<void> {
       .request()
       .input("menuId", sql.Int, parseInt(menuId))
       .query(`
-        SELECT *
-        FROM MenuStaff
-        WHERE menuId = @menuId
-        ORDER BY id DESC
+        SELECT s.*, r.name AS roleName
+        FROM MenuStaff s
+        LEFT JOIN dbo.MenuStaffRoles r ON r.id = s.roleId
+        WHERE s.menuId = @menuId
+        ORDER BY s.id DESC
       `);
 
     const staff = (result.recordset as Record<string, unknown>[]).map((row) =>
-      normalizeStaffRow(row, meta)
+      normalizeStaffRow(row, meta),
     );
 
     res.json({ staff });
@@ -90,7 +136,7 @@ export async function getStaff(req: Request, res: Response): Promise<void> {
 
 export async function getStaffById(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const userId = req.user!.userId;
@@ -105,9 +151,10 @@ export async function getStaffById(
       .input("menuId", sql.Int, parseInt(menuId))
       .input("userId", sql.Int, userId)
       .query(`
-        SELECT s.*
+        SELECT s.*, r.name AS roleName
         FROM MenuStaff s
         JOIN Menus m ON s.menuId = m.id
+        LEFT JOIN dbo.MenuStaffRoles r ON r.id = s.roleId
         WHERE s.id = @staffId AND s.menuId = @menuId AND m.userId = @userId
       `);
 
@@ -119,7 +166,7 @@ export async function getStaffById(
     res.json({
       staff: normalizeStaffRow(
         result.recordset[0] as Record<string, unknown>,
-        meta
+        meta,
       ),
     });
   } catch (error) {
@@ -130,12 +177,12 @@ export async function getStaffById(
 
 export async function createStaff(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const userId = req.user!.userId;
     const { menuId } = req.params;
-    const { name, role, phone, email, password, isActive = true } = req.body;
+    const { name, roleId, phone, email, password, isActive = true } = req.body;
 
     const pool = await getPool();
     const meta = await getMenuStaffColumnMeta();
@@ -151,13 +198,25 @@ export async function createStaff(
       return;
     }
 
+    const resolvedRole = await resolveMenuRole(parseInt(menuId, 10), roleId);
+    if (!resolvedRole.ok) {
+      sendApiError(res, req, 400, ApiErrors.invalidRoleId);
+      return;
+    }
+
     if (password && !meta.passwordKey) {
       sendApiError(res, req, 400, ApiErrors.passwordColumnNotConfigured);
       return;
     }
 
-    if (email && meta.emailKey) {
-      if (await isStaffEmailTaken(String(email))) {
+    const normalizedEmail = email ? String(email).toLowerCase().trim() : null;
+    if (password && !normalizedEmail) {
+      sendApiError(res, req, 400, ApiErrors.staffPasswordRequiresEmail);
+      return;
+    }
+
+    if (normalizedEmail && meta.emailKey) {
+      if (await isStaffEmailTaken(normalizedEmail)) {
         sendApiError(res, req, 400, ApiErrors.staffEmailExists);
         return;
       }
@@ -174,16 +233,16 @@ export async function createStaff(
       .input("menuId", sql.Int, parseInt(menuId))
       .input("name", sql.NVarChar, name);
 
+    if (meta.roleIdColumnQuoted) {
+      cols.push(meta.roleIdColumnQuoted);
+      vals.push("@roleId");
+      insertReq.input("roleId", sql.Int, resolvedRole.roleId);
+    }
+
     if (meta.roleColumnQuoted) {
-      const raw = role ?? STAFF_JOB_WAITER;
-      const parsed = parseStaffJobRoleOrError(raw);
-      if (!parsed.ok) {
-        sendApiError(res, req, 400, ApiErrors.invalidStaffJobRole);
-        return;
-      }
       cols.push(meta.roleColumnQuoted);
-      vals.push("@role");
-      insertReq.input("role", sql.NVarChar, parsed.value);
+      vals.push("@legacyRole");
+      insertReq.input("legacyRole", sql.NVarChar, resolvedRole.legacyRole);
     }
 
     if (meta.phoneColumnQuoted) {
@@ -195,11 +254,7 @@ export async function createStaff(
     if (meta.emailKey) {
       cols.push(quoteMenuStaffIdent(meta.emailKey));
       vals.push("@email");
-      insertReq.input(
-        "email",
-        sql.NVarChar,
-        email ? String(email).toLowerCase() : null
-      );
+      insertReq.input("email", sql.NVarChar, normalizedEmail);
     }
 
     if (meta.passwordKey) {
@@ -229,6 +284,8 @@ export async function createStaff(
       result.recordset[0] as Record<string, unknown>,
       meta,
     );
+    staffOut.roleId = resolvedRole.roleId;
+    staffOut.roleName = resolvedRole.roleName;
     res.status(201).json({
       message: "Staff member created successfully",
       staff: staffOut,
@@ -241,6 +298,10 @@ export async function createStaff(
       summaryEn: `Added staff: ${String(staffOut.name ?? name)}`,
     });
   } catch (error) {
+    if (isSqlUniqueViolation(error)) {
+      sendApiError(res, req, 400, ApiErrors.staffEmailExists);
+      return;
+    }
     logger.error("Create staff error:", error);
     sendApiError(res, req, 500, ApiErrors.failedCreateStaffMember);
   }
@@ -248,12 +309,12 @@ export async function createStaff(
 
 export async function updateStaff(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const userId = req.user!.userId;
     const { menuId, staffId } = req.params;
-    const { name, role, phone, email, password, isActive } = req.body;
+    const { name, roleId, phone, email, password, isActive } = req.body;
 
     const pool = await getPool();
     const meta = await getMenuStaffColumnMeta();
@@ -264,7 +325,7 @@ export async function updateStaff(
       .input("menuId", sql.Int, parseInt(menuId))
       .input("userId", sql.Int, userId)
       .query(`
-        SELECT s.id
+        SELECT s.*
         FROM MenuStaff s
         JOIN Menus m ON s.menuId = m.id
         WHERE s.id = @staffId AND s.menuId = @menuId AND m.userId = @userId
@@ -275,6 +336,7 @@ export async function updateStaff(
       return;
     }
 
+    const existing = checkResult.recordset[0] as Record<string, unknown>;
     const updates: string[] = [];
     const request = pool.request().input("staffId", sql.Int, parseInt(staffId));
 
@@ -282,36 +344,58 @@ export async function updateStaff(
       updates.push(`${quoteMenuStaffIdent(meta.nameKey)} = @name`);
       request.input("name", sql.NVarChar, name);
     }
-    if (role !== undefined && meta.roleColumnQuoted) {
-      const parsed = parseStaffJobRoleOrError(role);
-      if (!parsed.ok) {
-        sendApiError(res, req, 400, ApiErrors.invalidStaffJobRole);
+    if (roleId !== undefined && meta.roleIdColumnQuoted) {
+      const resolvedRole = await resolveMenuRole(parseInt(menuId, 10), roleId);
+      if (!resolvedRole.ok) {
+        sendApiError(res, req, 400, ApiErrors.invalidRoleId);
         return;
       }
-      updates.push(`${meta.roleColumnQuoted} = @role`);
-      request.input("role", sql.NVarChar, parsed.value);
+      updates.push(`${meta.roleIdColumnQuoted} = @roleId`);
+      request.input("roleId", sql.Int, resolvedRole.roleId);
+      if (meta.roleColumnQuoted) {
+        updates.push(`${meta.roleColumnQuoted} = @legacyRole`);
+        request.input("legacyRole", sql.NVarChar, resolvedRole.legacyRole);
+      }
     }
     if (phone !== undefined && meta.phoneColumnQuoted) {
       updates.push(`${meta.phoneColumnQuoted} = @phone`);
       request.input("phone", sql.NVarChar, phone || null);
     }
+
+    let nextEmail: string | null | undefined;
     if (email !== undefined && meta.emailKey) {
-      const normalizedEmail = email ? String(email).toLowerCase().trim() : null;
+      nextEmail = email ? String(email).toLowerCase().trim() : null;
       if (
-        normalizedEmail &&
-        (await isStaffEmailTaken(normalizedEmail, parseInt(staffId, 10)))
+        nextEmail &&
+        (await isStaffEmailTaken(nextEmail, parseInt(staffId, 10)))
       ) {
         sendApiError(res, req, 400, ApiErrors.staffEmailExists);
         return;
       }
       updates.push(`${quoteMenuStaffIdent(meta.emailKey)} = @email`);
-      request.input("email", sql.NVarChar, normalizedEmail);
+      request.input("email", sql.NVarChar, nextEmail);
     }
-    if (password !== undefined && meta.passwordKey) {
+
+    if (password !== undefined) {
+      if (!meta.passwordKey) {
+        sendApiError(res, req, 400, ApiErrors.passwordColumnNotConfigured);
+        return;
+      }
+      const existingEmail =
+        meta.emailKey && existing[meta.emailKey] != null
+          ? String(existing[meta.emailKey]).trim()
+          : "";
+      const emailAfterUpdate =
+        nextEmail !== undefined ? nextEmail : existingEmail || null;
+      if (!emailAfterUpdate) {
+        sendApiError(res, req, 400, ApiErrors.staffPasswordRequiresEmail);
+        return;
+      }
       updates.push(`${quoteMenuStaffIdent(meta.passwordKey)} = @password`);
       const hashed = await bcrypt.hash(password, 12);
       request.input("password", sql.NVarChar, hashed);
     }
+
     if (isActive !== undefined && !meta.activeColumnQuoted) {
       sendApiError(res, req, 500, ApiErrors.staffActiveStatusUnsupported);
       return;
@@ -339,10 +423,11 @@ export async function updateStaff(
       .query(
         `SELECT ${nameCol} AS staffName FROM MenuStaff WHERE id = @staffId`,
       );
-    const staffLabel = String(
-      (nameRes.recordset[0] as { staffName?: unknown } | undefined)
-        ?.staffName ?? "",
-    ).trim() || "موظف";
+    const staffLabel =
+      String(
+        (nameRes.recordset[0] as { staffName?: unknown } | undefined)
+          ?.staffName ?? "",
+      ).trim() || "موظف";
 
     res.json({ message: "Staff member updated successfully" });
     void logMenuActivitySafe(req, parseInt(menuId, 10), {
@@ -353,6 +438,10 @@ export async function updateStaff(
       summaryEn: `Updated staff: ${staffLabel}`,
     });
   } catch (error) {
+    if (isSqlUniqueViolation(error)) {
+      sendApiError(res, req, 400, ApiErrors.staffEmailExists);
+      return;
+    }
     logger.error("Update staff error:", error);
     sendApiError(res, req, 500, ApiErrors.failedUpdateStaffMember);
   }
@@ -360,7 +449,7 @@ export async function updateStaff(
 
 export async function deleteStaff(
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> {
   try {
     const userId = req.user!.userId;
@@ -387,9 +476,10 @@ export async function deleteStaff(
       return;
     }
 
-    const staffLabel = String(
-      (pre.recordset[0] as { staffName?: unknown }).staffName ?? "",
-    ).trim() || "موظف";
+    const staffLabel =
+      String(
+        (pre.recordset[0] as { staffName?: unknown }).staffName ?? "",
+      ).trim() || "موظف";
 
     const result = await pool
       .request()
