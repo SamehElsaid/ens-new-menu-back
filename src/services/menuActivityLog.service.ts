@@ -92,6 +92,9 @@ function inferStatus(action: string, detail: ParsedDetail): string {
   if (action === "TABLE_CALL_DELIVERED") return "delivered";
   if (action === "TABLE_CALL_COMPLETED") return "delivered";
   if (action === "TABLE_CALL_CREATED") return "pending";
+  if (action === "TABLE_CALL_BILL_REQUESTED") {
+    return statusRaw || "updated";
+  }
   if (
     action === "TABLE_CALL_ITEMS_UPDATED" ||
     action === "TABLE_CALL_UPDATED"
@@ -485,6 +488,10 @@ async function menuOrdersTableCallExistsSql(
       AND (
         ISNULL(NULLIF(LTRIM(RTRIM(stc.orderType)), N''), N'table') = N'table'
         AND LOWER(LTRIM(RTRIM(ISNULL(stc.tableNumber, N'')))) <> N'delivery'
+      )
+      AND (
+        stc.requestKind IS NULL
+        OR LOWER(LTRIM(RTRIM(stc.requestKind))) NOT IN (N'bill', N'waiter')
       )`;
   }
 
@@ -551,6 +558,7 @@ export async function getMenuActivityLogById(
   sourceMenuNameEn?: string | null;
   storageMenuId?: number;
   pendingGuestAddition?: boolean;
+  pendingBillRequest?: boolean;
 } | null> {
   try {
     const pool = await getPool();
@@ -717,6 +725,7 @@ export async function getMenuActivityLogById(
       storageMenuId:
         r.storageMenuId != null ? Number(r.storageMenuId) : menuId,
       pendingGuestAddition: order.pendingGuestAddition === true,
+      pendingBillRequest: order.pendingBillRequest === true,
     };
   } catch (error) {
     logger.error("getMenuActivityLogById error:", error);
@@ -933,6 +942,7 @@ export async function listMenuActivityLogs(
             ? Number(order.serviceAmount)
             : null,
         pendingGuestAddition: order.pendingGuestAddition === true,
+        pendingBillRequest: order.pendingBillRequest === true,
       };
     });
 
@@ -1431,6 +1441,11 @@ export async function applyMenuOrderAction(
           ...existingOrder,
           ...(action === "TABLE_CALL_CONFIRMED" && pendingGuestAddition
             ? { pendingGuestAddition: false }
+            : {}),
+          ...(action === "TABLE_CALL_CANCELLED" ||
+          action === "TABLE_CALL_COMPLETED" ||
+          action === "TABLE_CALL_DELIVERED"
+            ? { pendingBillRequest: false }
             : {}),
         },
         nextStatus,

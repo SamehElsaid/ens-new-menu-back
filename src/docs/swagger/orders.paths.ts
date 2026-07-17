@@ -18,6 +18,7 @@
  *
  *       **Bill request** (`requestKind: bill`):
  *       - Requires `tableNumber`; ignores `items`
+ *       - If an open table order exists, attaches a bill flag to that order (no new card)
  *       - Notifies staff that the guest wants the check
  *
  *       **Delivery order** (`type: delivery`):

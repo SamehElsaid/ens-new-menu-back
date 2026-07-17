@@ -1130,6 +1130,23 @@ export async function processGuestStaffCall(
         if (!appended.ok) {
           return { ok: false, error: "SERVER_ERROR" };
         }
+        let existingPendingBill = false;
+        try {
+          const moRow = await pool
+            .request()
+            .input("menuId", sql.Int, storageMenuId)
+            .input("orderId", sql.Int, openCall.id)
+            .query(
+              `SELECT orderJson FROM dbo.MenuOrders WHERE menuId = @menuId AND orderId = @orderId`,
+            );
+          const raw = moRow.recordset[0]?.orderJson;
+          if (raw) {
+            const parsed = JSON.parse(String(raw)) as Record<string, unknown>;
+            existingPendingBill = parsed.pendingBillRequest === true;
+          }
+        } catch {
+          existingPendingBill = false;
+        }
         await logMenuOrderEventSafe(
           storageMenuId,
           openCall.id,
@@ -1158,6 +1175,9 @@ export async function processGuestStaffCall(
                   orderTotal: appended.orderTotal,
                   status: appended.status,
                   pendingGuestAddition: true,
+                  ...(existingPendingBill
+                    ? { pendingBillRequest: true }
+                    : {}),
                 },
               ),
             }),
@@ -1200,6 +1220,107 @@ export async function processGuestStaffCall(
           items: appended.items,
           orderTotal: appended.orderTotal,
           status: appended.status,
+        };
+      }
+    }
+
+    /** Bill request attaches to the open table order — never a standalone card. */
+    if (requestKind === "bill" && !isDeliveryOrder) {
+      const openCall = await findOpenTableCallForTable(
+        storageMenuId,
+        effectiveTable,
+      );
+      if (openCall) {
+        let existingOrder: Record<string, unknown> = {};
+        try {
+          const moRow = await pool
+            .request()
+            .input("menuId", sql.Int, storageMenuId)
+            .input("orderId", sql.Int, openCall.id)
+            .query(
+              `SELECT orderJson FROM dbo.MenuOrders WHERE menuId = @menuId AND orderId = @orderId`,
+            );
+          const raw = moRow.recordset[0]?.orderJson;
+          if (raw) {
+            existingOrder = JSON.parse(String(raw)) as Record<string, unknown>;
+          }
+        } catch {
+          existingOrder = {};
+        }
+
+        const billName = customerName || openCall.customerName;
+        const summaries = serviceRequestSummaries(
+          "bill",
+          effectiveTable,
+          billName,
+        );
+
+        await logMenuOrderEventSafe(
+          storageMenuId,
+          openCall.id,
+          {
+            action: "TABLE_CALL_BILL_REQUESTED",
+            targetType: "order",
+            targetId: openCall.id,
+            summaryAr: summaries.summaryAr,
+            summaryEn: summaries.summaryEn,
+            detailJson: JSON.stringify({
+              status: openCall.status,
+              requestKind: "bill",
+              order: await attachMenuChargeFieldsToOrder(
+                storageMenuId,
+                openCall.items,
+                {
+                  ...existingOrder,
+                  type: "table",
+                  requestKind: "order",
+                  tableNumber: effectiveTable,
+                  customerName: openCall.customerName ?? customerName,
+                  customerPhone: openCall.customerPhone ?? customerPhone,
+                  customerAddress: openCall.customerAddress ?? customerAddress,
+                  orderNotes: openCall.orderNotes ?? orderNotes,
+                  items: openCall.items,
+                  orderTotal: openCall.orderTotal,
+                  status: openCall.status,
+                  pendingGuestAddition:
+                    existingOrder.pendingGuestAddition === true,
+                  pendingBillRequest: true,
+                },
+              ),
+            }),
+          },
+          {
+            actorName: billName || "Guest",
+            actorRole: "guest",
+          },
+        );
+        broadcastMenuActivityUpdated(storageMenuId);
+        broadcastStaffTableCallChanged(storageMenuId, {
+          id: openCall.id,
+          menuId: storageMenuId,
+          tableNumber: effectiveTable,
+          at: openCall.createdAt.toISOString(),
+          customerName: openCall.customerName ?? customerName,
+          items: openCall.items,
+          orderTotal: openCall.orderTotal,
+          status: openCall.status,
+          requestKind: "bill",
+        });
+        return {
+          ok: true,
+          id: openCall.id,
+          menuId: storageMenuId,
+          type: "table",
+          requestKind: "bill",
+          tableNumber: effectiveTable,
+          createdAt: openCall.createdAt,
+          customerName: openCall.customerName ?? customerName,
+          customerPhone: openCall.customerPhone,
+          customerAddress: openCall.customerAddress,
+          orderNotes: openCall.orderNotes,
+          items: openCall.items,
+          orderTotal: openCall.orderTotal,
+          status: openCall.status,
         };
       }
     }
