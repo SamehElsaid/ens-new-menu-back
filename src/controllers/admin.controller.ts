@@ -4,6 +4,11 @@ import { logger } from "../utils/logger";
 import bcrypt from "bcryptjs";
 import * as notificationService from "../services/notificationService";
 import { SubscriptionDowngradeService } from "../services/subscriptionDowngrade.service";
+import {
+  getActiveSubscriptionLimits,
+  setSubscriptionExtraMenus,
+} from "../services/extraMenus.service";
+import { ensureSubscriptionExtrasSchema } from "../schemas/subscriptionExtras.schema";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { adminSetPasswordSchema } from "../validators/auth.validator";
@@ -27,6 +32,18 @@ import {
   logAdminActivity,
   getUserSnapshot,
 } from "../services/adminActivityLog.service";
+import { ensurePlanCapabilitiesSchema } from "../schemas/planCapabilities.schema";
+import {
+  capabilitiesToJson,
+  getCustomPlanDisplay,
+  normalizeCapabilitiesInput,
+  parsePlanCapabilities,
+  updateCustomPlanDisplay,
+} from "../services/planCapabilities.service";
+import {
+  FREE_PLAN_CAPABILITIES_DEFAULT,
+  PRO_PLAN_CAPABILITIES_DEFAULT,
+} from "../types/planCapabilities";
 
 // Get Admin Dashboard Statistics
 export async function getAdminStats(
@@ -398,6 +415,7 @@ export async function getUserDetails(
 ): Promise<void> {
   try {
     const { id } = req.params;
+    await ensureSubscriptionExtrasSchema();
     const pool = await getPool();
 
     const userResult = await pool.request().input("userId", sql.Int, id).query(`
@@ -407,7 +425,10 @@ export async function getUserDetails(
           u.isSuspended, u.suspendedAt, u.suspendedReason,
           u.isBlocked, u.blockedAt, u.blockedReason, u.deletedAt,
           u.isEmailVerified, u.emailVerifiedAt,
-          p.name as planName, s.status as subscriptionStatus,
+          p.name as planName, p.maxMenus,
+          ISNULL(s.extraMenus, 0) as extraMenus,
+          s.id as subscriptionId,
+          s.status as subscriptionStatus,
           s.startDate, s.endDate, s.billingCycle, s.amount
         FROM Users u
         LEFT JOIN Subscriptions s ON u.id = s.userId 
@@ -441,7 +462,8 @@ export async function getUserDetails(
         SELECT 
           s.id, s.billingCycle, s.startDate, s.endDate, s.status,
           s.amount, s.paymentStatus, s.paidAt,
-          p.name as planName
+          ISNULL(s.extraMenus, 0) AS extraMenus,
+          p.name as planName, p.maxMenus
         FROM Subscriptions s
         INNER JOIN Plans p ON s.planId = p.id
         WHERE s.userId = @userId
@@ -451,9 +473,15 @@ export async function getUserDetails(
     const featuredMenuId = await getUserFeaturedMenuId(Number(id));
     const userRow = userResult.recordset[0];
     const accountStatus = resolveAccountStatus(userRow);
+    const maxMenus = Number(userRow.maxMenus ?? 1);
+    const extraMenus = Number(userRow.extraMenus ?? 0);
 
     res.json({
-      user: { ...userRow, accountStatus },
+      user: {
+        ...userRow,
+        accountStatus,
+        effectiveMaxMenus: maxMenus + extraMenus,
+      },
       menus: menusResult.recordset,
       subscriptions: subscriptionsResult.recordset,
       featuredOnHomepage: featuredMenuId !== null,
@@ -711,6 +739,8 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
 // Get All Plans
 export async function getAllPlans(req: Request, res: Response): Promise<void> {
   try {
+    await ensureSubscriptionExtrasSchema();
+    await ensurePlanCapabilitiesSchema();
     const pool = await getPool();
 
     const result = await pool.request().query(`
@@ -721,7 +751,19 @@ export async function getAllPlans(req: Request, res: Response): Promise<void> {
       ORDER BY p.priceMonthly ASC
     `);
 
-    res.json({ plans: result.recordset });
+    const plans = result.recordset.map((row) => {
+      const name = String(row.name ?? "");
+      const fallback =
+        name.trim().toLowerCase() === "free"
+          ? FREE_PLAN_CAPABILITIES_DEFAULT
+          : PRO_PLAN_CAPABILITIES_DEFAULT;
+      return {
+        ...row,
+        capabilities: parsePlanCapabilities(row.capabilities, fallback),
+      };
+    });
+
+    res.json({ plans });
   } catch (error) {
     logger.error("Get all plans error:", error);
     sendApiError(res, req, 500, ApiErrors.failedGetPlans);
@@ -731,25 +773,29 @@ export async function getAllPlans(req: Request, res: Response): Promise<void> {
 // Update Plan
 export async function updatePlan(req: Request, res: Response): Promise<void> {
   try {
+    await ensureSubscriptionExtrasSchema();
+    await ensurePlanCapabilitiesSchema();
     const { id } = req.params;
     const {
       name,
       description,
       priceMonthly,
       priceYearly,
+      extraMenuPrice,
       maxMenus,
       maxProductsPerMenu,
       allowCustomDomain,
       hasAds,
       features,
       isActive,
+      capabilities,
     } = req.body;
 
     const pool = await getPool();
 
     // Check if plan exists
     const planResult = await pool.request().input("planId", sql.Int, id).query(`
-        SELECT id FROM Plans WHERE id = @planId
+        SELECT id, name, capabilities FROM Plans WHERE id = @planId
       `);
 
     if (planResult.recordset.length === 0) {
@@ -757,9 +803,16 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    const existing = planResult.recordset[0];
+    const existingName = String(existing.name ?? "");
+    const existingFallback =
+      existingName.trim().toLowerCase() === "free"
+        ? FREE_PLAN_CAPABILITIES_DEFAULT
+        : PRO_PLAN_CAPABILITIES_DEFAULT;
+
     // Build update query dynamically
     const updates: string[] = [];
-    const inputs: any = { planId: id };
+    const inputs: Record<string, unknown> = { planId: id };
 
     if (name !== undefined) {
       updates.push("name = @name");
@@ -776,6 +829,10 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
     if (priceYearly !== undefined) {
       updates.push("priceYearly = @priceYearly");
       inputs.priceYearly = priceYearly;
+    }
+    if (extraMenuPrice !== undefined) {
+      updates.push("extraMenuPrice = @extraMenuPrice");
+      inputs.extraMenuPrice = extraMenuPrice;
     }
     if (maxMenus !== undefined) {
       updates.push("maxMenus = @maxMenus");
@@ -801,6 +858,14 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
       updates.push("isActive = @isActive");
       inputs.isActive = isActive;
     }
+    if (capabilities !== undefined) {
+      const normalized = normalizeCapabilitiesInput(
+        capabilities,
+        parsePlanCapabilities(existing.capabilities, existingFallback),
+      );
+      updates.push("capabilities = @capabilities");
+      inputs.capabilities = capabilitiesToJson(normalized);
+    }
 
     if (updates.length === 0) {
       sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
@@ -815,7 +880,23 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
 
     const request = pool.request();
     Object.keys(inputs).forEach((key) => {
-      request.input(key, inputs[key]);
+      if (
+        key === "priceMonthly" ||
+        key === "priceYearly" ||
+        key === "extraMenuPrice"
+      ) {
+        request.input(key, sql.Decimal(12, 2), inputs[key]);
+      } else if (
+        key === "planId" ||
+        key === "maxMenus" ||
+        key === "maxProductsPerMenu"
+      ) {
+        request.input(key, sql.Int, inputs[key]);
+      } else if (key === "capabilities" || key === "features") {
+        request.input(key, sql.NVarChar(sql.MAX), inputs[key]);
+      } else {
+        request.input(key, inputs[key] as string | number | boolean);
+      }
     });
 
     await request.query(query);
@@ -827,9 +908,37 @@ export async function updatePlan(req: Request, res: Response): Promise<void> {
   }
 }
 
+export async function getAdminCustomPlanDisplay(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const capabilities = await getCustomPlanDisplay();
+    res.json({ capabilities });
+  } catch (error) {
+    logger.error("Get custom plan display error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedGetPlans);
+  }
+}
+
+export async function putAdminCustomPlanDisplay(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const raw = req.body?.capabilities ?? req.body;
+    const capabilities = await updateCustomPlanDisplay(raw);
+    res.json({ message: "Custom plan display updated", capabilities });
+  } catch (error) {
+    logger.error("Update custom plan display error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedUpdatePlan);
+  }
+}
+
 // Create New Plan
 export async function createPlan(req: Request, res: Response): Promise<void> {
   try {
+    await ensurePlanCapabilitiesSchema();
     const {
       name,
       description,
@@ -841,12 +950,21 @@ export async function createPlan(req: Request, res: Response): Promise<void> {
       hasAds = true,
       features = [],
       isActive = true,
+      capabilities,
     } = req.body;
 
     if (!name || priceMonthly === undefined || priceYearly === undefined) {
       sendApiError(res, req, 400, ApiErrors.missingRequiredFields);
       return;
     }
+
+    const fallback =
+      String(name).trim().toLowerCase() === "free"
+        ? FREE_PLAN_CAPABILITIES_DEFAULT
+        : PRO_PLAN_CAPABILITIES_DEFAULT;
+    const capsJson = capabilitiesToJson(
+      normalizeCapabilitiesInput(capabilities ?? fallback, fallback),
+    );
 
     const pool = await getPool();
 
@@ -861,15 +979,16 @@ export async function createPlan(req: Request, res: Response): Promise<void> {
       .input("allowCustomDomain", sql.Bit, allowCustomDomain)
       .input("hasAds", sql.Bit, hasAds)
       .input("features", sql.NVarChar, JSON.stringify(features))
+      .input("capabilities", sql.NVarChar(sql.MAX), capsJson)
       .input("isActive", sql.Bit, isActive).query(`
         INSERT INTO Plans (
           name, description, priceMonthly, priceYearly, maxMenus, 
-          maxProductsPerMenu, allowCustomDomain, hasAds, features, isActive
+          maxProductsPerMenu, allowCustomDomain, hasAds, features, capabilities, isActive
         )
         OUTPUT INSERTED.id
         VALUES (
           @name, @description, @priceMonthly, @priceYearly, @maxMenus,
-          @maxProductsPerMenu, @allowCustomDomain, @hasAds, @features, @isActive
+          @maxProductsPerMenu, @allowCustomDomain, @hasAds, @features, @capabilities, @isActive
         )
       `);
 
@@ -1482,6 +1601,22 @@ export async function updateUserSubscription(
       return;
     }
 
+    // Preserve extra menus when switching paid plans; reset on Free
+    await ensureSubscriptionExtrasSchema();
+    const prevExtraResult = await pool.request().input("userId", sql.Int, id).query(`
+      SELECT TOP 1 ISNULL(extraMenus, 0) AS extraMenus
+      FROM Subscriptions
+      WHERE userId = @userId AND status = 'active'
+      ORDER BY id DESC
+    `);
+    const planNameForExtra = planResult.recordset[0].name;
+    const isFreePlanEarly =
+      typeof planNameForExtra === "string" &&
+      planNameForExtra.toLowerCase() === "free";
+    const preservedExtraMenus = isFreePlanEarly
+      ? 0
+      : Number(prevExtraResult.recordset[0]?.extraMenus ?? 0);
+
     // Expire current active subscriptions
     await pool.request().input("userId", sql.Int, id).query(`
       UPDATE Subscriptions
@@ -1510,15 +1645,16 @@ export async function updateUserSubscription(
       .input("billingCycle", sql.NVarChar, billingCycle)
       .input("startDate", sql.DateTime2, subscriptionStartDate)
       .input("endDate", sql.DateTime2, subscriptionEndDate)
-      .input("status", sql.NVarChar, status).query(`
+      .input("status", sql.NVarChar, status)
+      .input("extraMenus", sql.Int, preservedExtraMenus).query(`
         INSERT INTO Subscriptions (
           userId, planId, billingCycle, startDate, endDate, status,
-          notificationSent, paymentStatus, paidAt, amount
+          notificationSent, paymentStatus, paidAt, amount, extraMenus
         )
         OUTPUT INSERTED.id
         VALUES (
           @userId, @planId, @billingCycle, @startDate, @endDate, @status,
-          1, 'completed', GETDATE(), 0
+          1, 'completed', GETDATE(), 0, @extraMenus
         )
       `);
 
@@ -1595,6 +1731,84 @@ export async function updateUserSubscription(
   } catch (error) {
     logger.error("Update user subscription error:", error);
     sendApiError(res, req, 500, ApiErrors.failedUpdateUserSubscription);
+  }
+}
+
+// Set extra menu slots on user's active subscription (admin)
+export async function updateUserExtraMenus(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const extraMenusRaw = req.body?.extraMenus;
+
+    if (
+      extraMenusRaw === undefined ||
+      extraMenusRaw === null ||
+      !Number.isFinite(Number(extraMenusRaw))
+    ) {
+      sendApiError(res, req, 400, ApiErrors.invalidExtraMenusCount);
+      return;
+    }
+
+    const extraMenus = Math.floor(Number(extraMenusRaw));
+    if (extraMenus < 0 || extraMenus > 100) {
+      sendApiError(res, req, 400, ApiErrors.invalidExtraMenusCount);
+      return;
+    }
+
+    const pool = await getPool();
+    const userResult = await pool.request().input("userId", sql.Int, id).query(`
+      SELECT id, name, email, role FROM Users WHERE id = @userId
+    `);
+
+    if (userResult.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
+      return;
+    }
+
+    if (userResult.recordset[0].role === "admin") {
+      sendApiError(res, req, 403, ApiErrors.cannotModifyAdminSubscriptions);
+      return;
+    }
+
+    const limits = await getActiveSubscriptionLimits(Number(id));
+    if (!limits) {
+      sendApiError(res, req, 404, ApiErrors.noActiveSubscription);
+      return;
+    }
+
+    await setSubscriptionExtraMenus(limits.subscriptionId, extraMenus);
+
+    const actorAdminId = req.user?.userId ?? null;
+    const actorAdminName = actorAdminId
+      ? await getAdminDisplayName(actorAdminId)
+      : "Admin";
+    await logAdminActivity({
+      actorAdminId,
+      actorAdminName,
+      action: "user_extra_menus_updated",
+      targetType: "user",
+      targetId: Number(id),
+      targetName: String(userResult.recordset[0].name),
+      targetEmail: String(userResult.recordset[0].email),
+      details: JSON.stringify({
+        subscriptionId: limits.subscriptionId,
+        extraMenus,
+        effectiveMaxMenus: limits.maxMenus + extraMenus,
+      }),
+    });
+
+    res.json({
+      message: "Extra menus updated successfully",
+      extraMenus,
+      maxMenus: limits.maxMenus,
+      effectiveMaxMenus: limits.maxMenus + extraMenus,
+    });
+  } catch (error) {
+    logger.error("Update user extra menus error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedUpdateExtraMenus);
   }
 }
 

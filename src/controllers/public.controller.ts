@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
-import { getActivePlansForDisplay } from "../services/plans.service";
+import { getPlansWithCustomDisplay } from "../services/plans.service";
 import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
@@ -16,67 +16,39 @@ import { getImageUrl } from "../utils/urlHelper";
 import { attachParsedMenuItemOptionsList } from "../utils/menuItemVariants";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
+import { ensureMenuWifiTaxServiceSchema } from "../schemas/menuWifiTaxService.schema";
+import { ensureRatingsSchema } from "../schemas/ratings.schema";
 import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
+import {
+  normalizeOptionalEnabled,
+  normalizePercent,
+} from "../utils/normalizeOptionalEnabled";
 import { normalizeMenuTheme } from "../constants/menuThemes";
-
-const DELIVERY_GOVERNORATE_COLUMNS =
-  "id, nameAr, nameEn, price, lat, lan, createdAt, updatedAt";
+import { fetchMenuDeliverySettings } from "../services/menuDelivery.service";
+import {
+  findNearestBranchMenu,
+  MIN_BRANCH_REDIRECT_IMPROVEMENT_KM,
+} from "../services/menuGeoRedirect.service";
+import {
+  getEffectiveMenuDeliveryMode,
+  resolveBranchDeliveryQuote,
+} from "../services/menuDelivery.service";
 
 export type PublicDeliverySettings = {
   deliveryOn: boolean;
+  deliveryMode: "governorates" | "distance";
   deliveryPhone: string | null;
   phoneNumber: string | null;
   deliveryWhatsAppOn: boolean;
   governorates: Record<string, unknown>[];
 };
 
-async function fetchPublicDeliveryForUser(
-  pool: Awaited<ReturnType<typeof getPool>>,
-  userId: number,
+async function fetchPublicDeliveryForMenu(
+  menuId: number,
 ): Promise<PublicDeliverySettings> {
-  await ensureDeliverySchema();
-
-  const userResult = await pool.request().input("userId", sql.Int, userId)
-    .query(`
-      SELECT deliveryOn, deliveryPhone, phoneNumber, deliveryWhatsAppOn
-      FROM Users
-      WHERE id = @userId
-    `);
-
-  if (userResult.recordset.length === 0) {
-    return {
-      deliveryOn: false,
-      deliveryPhone: null,
-      phoneNumber: null,
-      deliveryWhatsAppOn: true,
-      governorates: [],
-    };
-  }
-
-  const user = userResult.recordset[0] as {
-    deliveryOn: boolean | number;
-    deliveryPhone: string | null;
-    phoneNumber: string | null;
-    deliveryWhatsAppOn?: boolean | number | null;
-  };
-
-  const governoratesResult = await pool
-    .request()
-    .input("userId", sql.Int, userId).query(`
-        SELECT ${DELIVERY_GOVERNORATE_COLUMNS}
-        FROM UserDeliveryGovernorates
-        WHERE userId = @userId
-        ORDER BY id
-      `);
-
-  return {
-    deliveryOn: Boolean(user.deliveryOn),
-    deliveryPhone: user.deliveryPhone ?? null,
-    phoneNumber: user.phoneNumber ?? null,
-    deliveryWhatsAppOn:
-      user.deliveryWhatsAppOn == null ? true : Boolean(user.deliveryWhatsAppOn),
-    governorates: governoratesResult.recordset as Record<string, unknown>[],
-  };
+  const settings = await fetchMenuDeliverySettings(menuId);
+  const effectiveMode = await getEffectiveMenuDeliveryMode(menuId);
+  return { ...settings, deliveryMode: effectiveMode };
 }
 
 /** Optional table from QR: `?tableNumber=` or `?table=` (max 50 chars). */
@@ -129,10 +101,15 @@ function tableRowId(row: Record<string, unknown>): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function isPublicMenuTableActive(row: Record<string, unknown>): boolean {
+  return row.isActive !== false;
+}
+
 /**
  * Resolve `table` like a row from GET /api/menus/:menuId/tables.
  * - `?tableId=12` → match MenuTables.id
  * - `?table=` / `?tableNumber=` → match tableNumber; if no hit and value is all digits, match id
+ * - Inactive tables → null (guest gets the regular menu; client strips ?table=)
  */
 function resolvePublicMenuTable(
   tables: Record<string, unknown>[],
@@ -142,7 +119,8 @@ function resolvePublicMenuTable(
 
   if (tableId !== null) {
     const hit = tables.find((row) => tableRowId(row) === tableId);
-    return hit ?? null;
+    if (!hit) return null;
+    return isPublicMenuTableActive(hit) ? hit : null;
   }
 
   if (!tableNumber) return null;
@@ -152,12 +130,16 @@ function resolvePublicMenuTable(
     const t = tableRowNumber(row);
     return t !== null && t === needle;
   });
-  if (byLabel) return byLabel;
+  if (byLabel) {
+    return isPublicMenuTableActive(byLabel) ? byLabel : null;
+  }
 
   if (/^\d+$/.test(needle)) {
     const id = parseInt(needle, 10);
     const byId = tables.find((row) => tableRowId(row) === id);
-    if (byId) return byId;
+    if (byId) {
+      return isPublicMenuTableActive(byId) ? byId : null;
+    }
   }
 
   return { tableNumber: needle };
@@ -214,6 +196,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     const tableId = parsePublicMenuTableId(req);
 
     await ensureMenuChatbotSchema();
+    await ensureMenuWifiTaxServiceSchema();
 
     const pool = await getPool();
 
@@ -230,6 +213,13 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           ISNULL(m.currency, 'SAR') as currency,
           m.isActive,
           ISNULL(m.chatbotEnabled, 1) as chatbotEnabled,
+          ISNULL(m.wifiEnabled, 0) as wifiEnabled,
+          m.wifiName,
+          m.wifiPassword,
+          ISNULL(m.taxEnabled, 0) as taxEnabled,
+          m.taxPercent,
+          ISNULL(m.serviceEnabled, 0) as serviceEnabled,
+          m.servicePercent,
           m.userId,
           m.footerLogo,
           m.footerDescriptionEn,
@@ -267,7 +257,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
     }
 
     const menu = menuResult.recordset[0];
-    const delivery = await fetchPublicDeliveryForUser(pool, menu.userId);
+    const delivery = await fetchPublicDeliveryForMenu(menu.id);
 
     // إذا كانت القائمة غير نشطة، أرسل بيانات محدودة لصفحة الصيانة فقط
     if (!menu.isActive) {
@@ -289,6 +279,13 @@ export const getPublicMenu = async (req: Request, res: Response) => {
             slug: menu.slug,
             isActive: menu.isActive,
             chatbotEnabled: normalizeChatbotEnabled(menu.chatbotEnabled),
+            wifiEnabled: normalizeOptionalEnabled(menu.wifiEnabled),
+            wifiName: menu.wifiName ?? null,
+            wifiPassword: menu.wifiPassword ?? null,
+            taxEnabled: normalizeOptionalEnabled(menu.taxEnabled),
+            taxPercent: normalizePercent(menu.taxPercent),
+            serviceEnabled: normalizeOptionalEnabled(menu.serviceEnabled),
+            servicePercent: normalizePercent(menu.servicePercent),
             locale: menu.locale,
             ownerPlanType: menu.ownerPlanType || "free",
             footerLogo: getImageUrl(menu.footerLogo),
@@ -446,9 +443,8 @@ export const getPublicMenu = async (req: Request, res: Response) => {
       .input("limit", sql.Int, PUBLIC_MENU_INITIAL_ITEMS_LIMIT)
       .query(itemsQuery);
 
-    const countResult = await pool
-      .request()
-      .input("menuId", sql.Int, menu.id).query(`
+    const countResult = await pool.request().input("menuId", sql.Int, menu.id)
+      .query(`
         SELECT COUNT(*) as total
         FROM MenuItems mi
         WHERE mi.menuId = @menuId AND mi.available = 1
@@ -465,6 +461,9 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           b.phone,
           b.latitude,
           b.longitude,
+          b.deliveryBasePrice,
+          b.deliveryPricePerKm,
+          b.maxDeliveryRadiusKm,
           bt.name,
           bt.address,
           bt.locale
@@ -588,6 +587,13 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           slug: menu.slug,
           isActive: menu.isActive,
           chatbotEnabled: normalizeChatbotEnabled(menu.chatbotEnabled),
+          wifiEnabled: normalizeOptionalEnabled(menu.wifiEnabled),
+          wifiName: menu.wifiName ?? null,
+          wifiPassword: menu.wifiPassword ?? null,
+          taxEnabled: normalizeOptionalEnabled(menu.taxEnabled),
+          taxPercent: normalizePercent(menu.taxPercent),
+          serviceEnabled: normalizeOptionalEnabled(menu.serviceEnabled),
+          servicePercent: normalizePercent(menu.servicePercent),
           locale: menu.locale,
           ownerPlanType: menu.ownerPlanType || "free", // Add owner's plan type
           footerLogo: getImageUrl(menu.footerLogo),
@@ -718,7 +724,8 @@ export const postMenuItemView = async (
 export const submitRating = async (req: Request, res: Response) => {
   try {
     const { slug } = req.params;
-    const { stars, comment, customerName } = req.body;
+    const { stars, comment, customerName, customerPhone, customerEmail } =
+      req.body;
 
     // Validation
     if (!stars || stars < 1 || stars > 5) {
@@ -728,6 +735,7 @@ export const submitRating = async (req: Request, res: Response) => {
       });
     }
 
+    await ensureRatingsSchema();
     const pool = await getPool();
 
     // Get menu ID from slug
@@ -746,35 +754,37 @@ export const submitRating = async (req: Request, res: Response) => {
 
     const menuId = menuResult.recordset[0].id;
     const ipAddress = req.ip || req.socket.remoteAddress || "";
-
-    // Check if IP already rated in the last 24 hours
-    const rateCheckResult = await pool
-      .request()
-      .input("menuId", sql.Int, menuId)
-      .input("ipAddress", sql.NVarChar, ipAddress).query(`
-        SELECT id FROM Ratings 
-        WHERE menuId = @menuId 
-        AND ipAddress = @ipAddress 
-        AND createdAt > DATEADD(hour, -24, GETDATE())
-      `);
-
-    if (rateCheckResult.recordset.length > 0) {
-      return res.status(429).json({
-        success: false,
-        message: "You can only rate once every 24 hours",
-      });
-    }
+    const normalizedName =
+      typeof customerName === "string" && customerName.trim()
+        ? customerName.trim()
+        : null;
+    const normalizedPhone =
+      typeof customerPhone === "string" && customerPhone.trim()
+        ? customerPhone.trim()
+        : null;
+    const normalizedEmail =
+      typeof customerEmail === "string" && customerEmail.trim()
+        ? customerEmail.trim()
+        : null;
+    const normalizedComment =
+      typeof comment === "string" && comment.trim() ? comment.trim() : null;
 
     // Insert rating
     await pool
       .request()
       .input("menuId", sql.Int, menuId)
       .input("stars", sql.Int, stars)
-      .input("comment", sql.NVarChar, comment || null)
-      .input("customerName", sql.NVarChar, customerName || null)
+      .input("comment", sql.NVarChar, normalizedComment)
+      .input("customerName", sql.NVarChar, normalizedName)
+      .input("customerPhone", sql.NVarChar(50), normalizedPhone)
+      .input("customerEmail", sql.NVarChar(255), normalizedEmail)
       .input("ipAddress", sql.NVarChar, ipAddress).query(`
-        INSERT INTO Ratings (menuId, stars, comment, customerName, ipAddress)
-        VALUES (@menuId, @stars, @comment, @customerName, @ipAddress)
+        INSERT INTO Ratings (
+          menuId, stars, comment, customerName, customerPhone, customerEmail, ipAddress
+        )
+        VALUES (
+          @menuId, @stars, @comment, @customerName, @customerPhone, @customerEmail, @ipAddress
+        )
       `);
 
     res.status(201).json({
@@ -794,10 +804,11 @@ export const submitRating = async (req: Request, res: Response) => {
 // Get all active plans for public display (landing page)
 export const getPublicPlans = async (req: Request, res: Response) => {
   try {
-    const plans = await getActivePlansForDisplay(null);
+    const { plans, customDisplay } = await getPlansWithCustomDisplay(null);
     res.json({
       success: true,
       plans,
+      customDisplay,
     });
   } catch (error: any) {
     console.error("Error fetching public plans:", error);
@@ -1243,7 +1254,9 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
     if (hasSizes) optionSelectParts.push("mi.sizes");
     if (hasVariants) optionSelectParts.push("mi.variants");
     const optionSelect =
-      optionSelectParts.length > 0 ? `,\n          ${optionSelectParts.join(",\n          ")}` : "";
+      optionSelectParts.length > 0
+        ? `,\n          ${optionSelectParts.join(",\n          ")}`
+        : "";
 
     const countRequest = pool.request().input("menuId", sql.Int, menuId);
     if (hasCategoryFilter && hasCategoryId) {
@@ -1339,3 +1352,135 @@ export const getPublicMenuCatalog = async (req: Request, res: Response) => {
     });
   }
 };
+
+/** GET /api/public/menu/:slug/nearby-branch — closest linked branch for geo redirect. */
+export async function getNearbyBranchMenu(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const slug = String(req.params.slug ?? "").trim();
+    const { lat, lng } = req.query;
+
+    if (!slug) {
+      res.status(400).json({ success: false, message: "Invalid slug" });
+      return;
+    }
+
+    const pool = await getPool();
+    const menuResult = await pool
+      .request()
+      .input("slug", sql.NVarChar, slug)
+      .query(`SELECT id, slug FROM Menus WHERE slug = @slug`);
+
+    if (menuResult.recordset.length === 0) {
+      res.status(404).json({ success: false, message: "Menu not found" });
+      return;
+    }
+
+    const menu = menuResult.recordset[0] as { id: number; slug: string };
+    const nearest = await findNearestBranchMenu(menu.id, lat, lng);
+
+    res.json({
+      success: true,
+      data: {
+        currentSlug: menu.slug,
+        redirect: nearest
+          ? {
+              menuId: nearest.menuId,
+              slug: nearest.slug,
+              distanceKm: nearest.distanceKm,
+            }
+          : null,
+        minImprovementKm: MIN_BRANCH_REDIRECT_IMPROVEMENT_KM,
+      },
+    });
+  } catch (error) {
+    console.error("Error resolving nearby branch menu:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to resolve nearby branch",
+    });
+  }
+}
+
+/** GET /api/public/menu/:slug/branches/:branchId/delivery-quote — distance-based delivery fee. */
+export async function getBranchDeliveryQuote(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const slug = String(req.params.slug ?? "").trim();
+    const branchId = parseInt(String(req.params.branchId), 10);
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+
+    if (!slug || !Number.isFinite(branchId) || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      res.status(400).json({ success: false, message: "Invalid parameters" });
+      return;
+    }
+
+    const pool = await getPool();
+    const menuResult = await pool
+      .request()
+      .input("slug", sql.NVarChar, slug)
+      .query(`SELECT id FROM Menus WHERE slug = @slug`);
+
+    if (menuResult.recordset.length === 0) {
+      res.status(404).json({ success: false, message: "Menu not found" });
+      return;
+    }
+
+    const menuId = menuResult.recordset[0].id as number;
+    const deliveryMode = await getEffectiveMenuDeliveryMode(menuId);
+    if (deliveryMode !== "distance") {
+      sendApiError(res, req, 400, ApiErrors.deliveryModeNotDistance);
+      return;
+    }
+
+    const resolved = await resolveBranchDeliveryQuote(menuId, branchId, lat, lng);
+    if (!resolved.ok) {
+      if (resolved.reason === "branch_not_found") {
+        sendApiError(res, req, 404, ApiErrors.branchNotFound);
+        return;
+      }
+      if (resolved.reason === "not_configured") {
+        sendApiError(res, req, 400, ApiErrors.branchDeliveryNotConfigured);
+        return;
+      }
+      res.json({
+        success: true,
+        data: {
+          ...(resolved.quote ?? {
+            inRange: false,
+            distanceKm: 0,
+            deliveryFee: null,
+            maxDeliveryRadiusKm: null,
+          }),
+          message: ApiErrors.deliveryOutOfRange,
+        },
+      });
+      return;
+    }
+
+    const { quote } = resolved.delivery;
+    if (!quote.inRange) {
+      res.json({
+        success: true,
+        data: {
+          ...quote,
+          message: ApiErrors.deliveryOutOfRange,
+        },
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: quote,
+    });
+  } catch (error) {
+    console.error("Error calculating branch delivery quote:", error);
+    sendApiError(res, req, 500, ApiErrors.failedGetBranchDeliveryQuote);
+  }
+}

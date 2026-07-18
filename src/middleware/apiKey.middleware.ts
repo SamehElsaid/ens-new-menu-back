@@ -3,7 +3,7 @@ import { decryptDataApi } from "../utils/decrypt";
 import { logger } from "../utils/logger";
 import { pickLocalized, sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
-import { isPaymentTestRoutesEnabled, isApiKeyValidationSkipped } from "../utils/devFlags";
+import { isPaymentTestRoutesEnabled, isApiKeyValidationSkipped, isSwaggerEnabled } from "../utils/devFlags";
 
 require("dotenv").config();
 
@@ -12,6 +12,7 @@ require("dotenv").config();
  */
 const publicRoutes = [
   "/health",
+  ...(isSwaggerEnabled() ? ["/api-docs"] : []),
   "/api/verifykit",
   "/api/public",
   "/api/public/app-version",
@@ -66,7 +67,13 @@ function isFullyOpenPath(req: Request): boolean {
     .map((v) => normalizePath(String(v ?? "")))
     .filter(Boolean);
 
-  return paths.some((p) => p === "/health" || p.startsWith("/api/public"));
+  return paths.some(
+    (p) =>
+      p === "/health" ||
+      p.startsWith("/api/public") ||
+      (isSwaggerEnabled() &&
+        (p === "/api-docs" || p.startsWith("/api-docs/"))),
+  );
 }
 
 export function decryptApiKey(req: Request, res: Response, next: NextFunction) {

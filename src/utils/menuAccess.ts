@@ -1,14 +1,41 @@
 import type { Request } from "express";
 import { getPool, sql } from "../config/database";
 import { ROLES } from "../config/constants";
+import { authorization } from "../services/authorization.service";
+
+/** Staff row (menu + roleId) for a staff id, or null if not on this menu. */
+async function getStaffMenuRole(
+  staffId: number,
+  menuId: number,
+): Promise<{ ownerUserId: number; roleId: number | null } | null> {
+  const pool = await getPool();
+  const r = await pool
+    .request()
+    .input("menuId", sql.Int, menuId)
+    .input("staffId", sql.Int, staffId)
+    .query(`
+      SELECT m.userId AS ownerUserId, s.roleId AS roleId
+      FROM Menus m
+      INNER JOIN MenuStaff s ON s.menuId = m.id AND s.id = @staffId
+      WHERE m.id = @menuId
+    `);
+  if (r.recordset.length === 0) return null;
+  return {
+    ownerUserId: r.recordset[0].ownerUserId as number,
+    roleId:
+      r.recordset[0].roleId != null ? Number(r.recordset[0].roleId) : null,
+  };
+}
 
 /**
  * Owner: menu.userId === JWT userId.
- * Staff cashier: JWT role staff, MenuStaff row for this menu with cashier job role.
+ * Staff: MenuStaff row for this menu whose role grants `requiredPermission`
+ * (default `dashboard:access`).
  */
 export async function getMenuAccessForRequest(
   req: Request,
   menuId: number,
+  requiredPermission = "dashboard:access",
 ): Promise<{ ok: true; ownerUserId: number } | { ok: false }> {
   const auth = req.user!;
   const pool = await getPool();
@@ -25,29 +52,30 @@ export async function getMenuAccessForRequest(
     return { ok: true, ownerUserId: auth.userId };
   }
 
-  const r = await pool
-    .request()
-    .input("menuId", sql.Int, menuId)
-    .input("staffId", sql.Int, auth.userId)
-    .query(`
-      SELECT m.userId AS ownerUserId
-      FROM Menus m
-      INNER JOIN MenuStaff s ON s.menuId = m.id AND s.id = @staffId
-      WHERE m.id = @menuId
-        AND LOWER(LTRIM(RTRIM(ISNULL(s.role, '')))) IN ('cashier', 'casher')
-    `);
+  const staff = await getStaffMenuRole(auth.userId, menuId);
+  if (!staff || staff.roleId == null) return { ok: false };
 
-  if (r.recordset.length === 0) return { ok: false };
-  return { ok: true, ownerUserId: r.recordset[0].ownerUserId as number };
+  const allowed = await authorization.can(
+    {
+      kind: "staff",
+      staffId: auth.userId,
+      staffRoleId: staff.roleId,
+      menuId,
+    },
+    requiredPermission,
+  );
+  if (!allowed) return { ok: false };
+  return { ok: true, ownerUserId: staff.ownerUserId };
 }
 
 /**
- * Same rules as getMenuAccessForRequest, for Socket.IO subscribe (no Request object).
+ * Same rules as getMenuAccessForRequest, for Socket.IO subscribe (no Request).
  */
 export async function verifyMenuAccessForSocket(
   userId: number,
   role: string,
   menuId: number,
+  requiredPermission = "dashboard:access",
 ): Promise<boolean> {
   if (!Number.isFinite(menuId) || menuId <= 0) return false;
   if (!Number.isFinite(userId) || userId <= 0) return false;
@@ -65,19 +93,18 @@ export async function verifyMenuAccessForSocket(
     return r.recordset.length > 0;
   }
 
-  const r = await pool
-    .request()
-    .input("menuId", sql.Int, menuId)
-    .input("staffId", sql.Int, userId)
-    .query(`
-      SELECT 1 AS x
-      FROM Menus m
-      INNER JOIN MenuStaff s ON s.menuId = m.id AND s.id = @staffId
-      WHERE m.id = @menuId
-        AND LOWER(LTRIM(RTRIM(ISNULL(s.role, '')))) IN ('cashier', 'casher')
-    `);
+  const staff = await getStaffMenuRole(userId, menuId);
+  if (!staff || staff.roleId == null) return false;
 
-  return r.recordset.length > 0;
+  return authorization.can(
+    {
+      kind: "staff",
+      staffId: userId,
+      staffRoleId: staff.roleId,
+      menuId,
+    },
+    requiredPermission,
+  );
 }
 
 /** Throws if the user does not own the menu (staff cannot access owner analytics). */

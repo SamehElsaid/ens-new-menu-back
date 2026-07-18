@@ -6,8 +6,10 @@ export interface TokenPayload {
   userId: number;
   email: string;
   role: string;
-  /** When `role` is `staff`: `waiter` | `cashier` (see `staffJobRoles`). */
-  staffJobRole?: string;
+  /** When `role` is `staff`: the dynamic MenuStaffRoles.id used for RBAC. */
+  staffRoleId?: number;
+  /** When `role` is `staff`: the menu the staff belongs to. */
+  menuId?: number;
 }
 
 // Validate JWT secrets on startup

@@ -78,6 +78,10 @@ export const ApiErrors = {
     en: "You have reached the maximum number of ads (1) for the Free plan. Upgrade to add more.",
     ar: "لقد وصلت للحد الأقصى من الإعلانات (1) في الخطة المجانية. قم بالترقية لإضافة المزيد.",
   },
+  activeAdLimitExceeded: {
+    en: "You have reached the maximum number of active ads for your plan. Pause another ad first, or upgrade.",
+    ar: "وصلت للحد الأقصى من الإعلانات النشطة في خطتك. أوقف إعلاناً آخر أولاً، أو قم بالترقية.",
+  },
   menuNotFound: {
     en: "Menu not found",
     ar: "المنيو غير موجود",
@@ -97,6 +101,38 @@ export const ApiErrors = {
   failedCreateMenu: {
     en: "Failed to create menu",
     ar: "فشل إنشاء المنيو",
+  },
+  failedCopyMenu: {
+    en: "Failed to copy menu",
+    ar: "فشل نسخ المنيو",
+  },
+  slugAlreadyTaken: {
+    en: "This slug is already taken. Please choose another one.",
+    ar: "هذا الـ slug مستخدم بالفعل. اختر واحداً آخر.",
+  },
+  invalidPrimaryMenuLink: {
+    en: "The selected primary menu is invalid or cannot be used for linking.",
+    ar: "المنيو الأساسي المحدد غير صالح أو لا يمكن ربط المنيو به.",
+  },
+  menuGroupNotFound: {
+    en: "Menu group not found.",
+    ar: "مجموعة المنيوهات غير موجودة.",
+  },
+  menuGroupMenusRequired: {
+    en: "Select at least two menus for the group.",
+    ar: "اختر منيوين على الأقل للمجموعة.",
+  },
+  menuGroupMenuNotFound: {
+    en: "One or more selected menus were not found.",
+    ar: "واحد أو أكثر من المنيوهات المحددة غير موجود.",
+  },
+  menuGroupMenuInOtherGroup: {
+    en: "One or more menus already belong to another group.",
+    ar: "واحد أو أكثر من المنيوهات ينتمي لمجموعة أخرى بالفعل.",
+  },
+  deliverySettingsPrimaryOnly: {
+    en: "Delivery settings can only be edited from the primary menu.",
+    ar: "إعدادات الدلفري تُعدَّل من المنيو الأساسي فقط.",
   },
   failedGetMenu: {
     en: "Failed to get menu",
@@ -252,7 +288,11 @@ export const ApiErrors = {
   },
   staffEmailExists: {
     en: "This email is already used by another staff member",
-    ar: "هذا البريد الإلكتروني مستخدم بالفعل  ",
+    ar: "هذا البريد الإلكتروني مستخدم بالفعل من قبل موظف آخر",
+  },
+  staffPasswordRequiresEmail: {
+    en: "Email is required when setting a staff password",
+    ar: "البريد الإلكتروني مطلوب عند تعيين كلمة مرور للموظف",
   },
   failedUpdateStaffMember: {
     en: "Failed to update staff member",
@@ -370,6 +410,22 @@ export const ApiErrors = {
     en: "Failed to delete branch",
     ar: "فشل حذف الفرع",
   },
+  failedGetBranchDeliveryQuote: {
+    en: "Failed to calculate delivery quote",
+    ar: "فشل حساب سعر التوصيل",
+  },
+  deliveryOutOfRange: {
+    en: "Out of delivery range",
+    ar: "خارج نطاق التوصيل",
+  },
+  deliveryModeNotDistance: {
+    en: "Distance-based delivery is not enabled for this menu",
+    ar: "التوصيل حسب المسافة غير مفعّل لهذه القائمة",
+  },
+  branchDeliveryNotConfigured: {
+    en: "Branch delivery settings are incomplete",
+    ar: "إعدادات توصيل الفرع غير مكتملة",
+  },
   deliveryPhoneRequired: {
     en: "Delivery phone number is required to enable delivery",
     ar: "رقم هاتف التوصيل مطلوب لتفعيل الدلفري",
@@ -425,6 +481,10 @@ export const ApiErrors = {
   failedGetStatistics: {
     en: "Failed to get statistics",
     ar: "فشل جلب الإحصائيات",
+  },
+  failedGetRatings: {
+    en: "Failed to get ratings",
+    ar: "فشل جلب التقييمات",
   },
   invalidPlanType: {
     en: "Invalid plan type",
@@ -858,6 +918,14 @@ export const ApiErrors = {
     en: "Failed to update user subscription",
     ar: "فشل تحديث اشتراك المستخدم",
   },
+  invalidExtraMenusCount: {
+    en: "Extra menus count must be between 0 and 100",
+    ar: "عدد المنيوهات الإضافية يجب أن يكون بين 0 و 100",
+  },
+  failedUpdateExtraMenus: {
+    en: "Failed to update extra menus",
+    ar: "فشل تحديث المنيوهات الإضافية",
+  },
   failedApplyFreePlanLimits: {
     en: "Failed to apply free plan limits",
     ar: "فشل تطبيق حدود الخطة المجانية",
@@ -941,5 +1009,70 @@ export const ApiErrors = {
   verifykitAccessTokenFailed: {
     en: "Failed to initialize phone verification widget",
     ar: "فشل تهيئة واجهة التحقق من رقم الهاتف",
+  },
+  // ── Staff RBAC ────────────────────────────────────────────────────
+  forbidden: {
+    en: "You do not have permission to perform this action",
+    ar: "ليس لديك صلاحية لتنفيذ هذا الإجراء",
+  },
+  invalidPermission: {
+    en: "One or more permissions are not recognized",
+    ar: "توجد صلاحية واحدة أو أكثر غير معروفة",
+  },
+  invalidPermissionCombination: {
+    en: "This combination of permissions is not allowed",
+    ar: "هذه التركيبة من الصلاحيات غير مسموح بها",
+  },
+  roleNameRequired: {
+    en: "Role name is required",
+    ar: "اسم الدور مطلوب",
+  },
+  roleNameExists: {
+    en: "A role with this name already exists",
+    ar: "يوجد دور بهذا الاسم بالفعل",
+  },
+  roleNotFound: {
+    en: "Role not found",
+    ar: "لم يُعثر على الدور",
+  },
+  roleInUse: {
+    en: "Cannot delete a role that still has staff assigned to it",
+    ar: "لا يمكن حذف دور مرتبط بموظفين",
+  },
+  lastDashboardAccessRole: {
+    en: "Cannot remove the last role that has dashboard access",
+    ar: "لا يمكن حذف آخر دور يملك صلاحية دخول لوحة التحكم",
+  },
+  invalidRoleId: {
+    en: "A valid role must be selected",
+    ar: "يجب اختيار دور صالح",
+  },
+  failedListRoles: {
+    en: "Failed to get roles",
+    ar: "فشل جلب الأدوار",
+  },
+  failedGetRole: {
+    en: "Failed to get role",
+    ar: "فشل جلب الدور",
+  },
+  failedCreateRole: {
+    en: "Failed to create role",
+    ar: "فشل إنشاء الدور",
+  },
+  failedUpdateRole: {
+    en: "Failed to update role",
+    ar: "فشل تحديث الدور",
+  },
+  failedDeleteRole: {
+    en: "Failed to delete role",
+    ar: "فشل حذف الدور",
+  },
+  staffRoleDeleted: {
+    en: "Your role no longer exists. Please sign in again.",
+    ar: "لم يعد دورك موجوداً. يرجى تسجيل الدخول مجدداً.",
+  },
+  staffNoDashboardAccess: {
+    en: "Your account does not have dashboard access. Use the staff app.",
+    ar: "حسابك لا يملك صلاحية دخول لوحة التحكم. استخدم تطبيق الموظفين.",
   },
 } as const satisfies Record<string, BilingualMessage>;

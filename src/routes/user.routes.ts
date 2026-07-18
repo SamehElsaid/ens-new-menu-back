@@ -8,6 +8,7 @@ import {
   postUserDomainTransferCancel,
 } from "../controllers/domainTransfer.controller";
 import * as pushTokenController from "../controllers/pushToken.controller";
+import * as notificationController from "../controllers/notification.controller";
 import * as deliveryController from "../controllers/delivery.controller";
 import { validate } from "../middleware/validation";
 import { requireAuth } from "../middleware/auth.middleware";
@@ -21,6 +22,22 @@ router.use(requireAuth);
 
 router.post("/fcm-token", pushTokenController.registerFcmToken);
 router.get("/fcm-token/status", pushTokenController.getFcmTokenStatus);
+
+router.get("/notifications", notificationController.getNotifications);
+router.patch(
+  "/notifications/:id/read",
+  validate([param("id").isInt({ min: 1 })]),
+  notificationController.markNotificationRead,
+);
+router.post(
+  "/notifications/read-all",
+  notificationController.markAllNotificationsRead,
+);
+router.delete(
+  "/notifications/:id",
+  validate([param("id").isInt({ min: 1 })]),
+  notificationController.removeNotification,
+);
 
 // Multer only for multipart (so Form Data is parsed into req.body + req.file)
 const optionalMultipartProfile = (req: any, res: any, next: any) => {

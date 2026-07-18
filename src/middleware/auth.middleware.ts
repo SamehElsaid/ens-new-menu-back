@@ -5,7 +5,6 @@ import { ROLES } from "../config/constants";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
-import { getPool } from "../config/database";
 import { logger } from "../utils/logger";
 
 // Extend Express Request type
@@ -61,29 +60,13 @@ export async function verifyToken(
  */
 async function checkAndExpireUserSubscription(userId: number): Promise<void> {
   try {
-    const pool = await getPool();
-
-    // Update expired subscriptions for current user only (lightweight check)
-    const result = await pool.request().query(`
-      UPDATE Subscriptions
-      SET status = 'expired'
-      OUTPUT DELETED.id, DELETED.userId
-      WHERE userId = ${userId}
-        AND status = 'active'
-        AND endDate IS NOT NULL
-        AND endDate <= GETDATE()
-    `);
-
-    // If any subscription was expired, apply downgrade limits
-    if (result.recordset.length > 0) {
-      // Import dynamically to avoid circular dependencies
-      const { SubscriptionDowngradeService } =
-        await import("../services/subscriptionDowngrade.service");
-      await SubscriptionDowngradeService.checkAndApplyDowngrade(userId);
-    }
+    const { SubscriptionDowngradeService } =
+      await import("../services/subscriptionDowngrade.service");
+    await SubscriptionDowngradeService.expireAndDowngradePaidSubscriptionsForUser(
+      userId,
+    );
   } catch (error) {
     logger.error("Check expired subscription error:", error);
-    // Don't block the request if subscription check fails
   }
 }
 

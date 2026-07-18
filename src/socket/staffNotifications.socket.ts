@@ -10,9 +10,10 @@ import {
   getPendingStaffTableCalls,
   processGuestStaffCall,
 } from "../services/staffTableCall.service";
-import { menuOwnerHasProPlan } from "../services/subscriptionPlan.service";
+import { menuOwnerHasCapability } from "../services/planCapabilities.service";
 import { notifyStaffOfTableCall } from "../services/staffNotify.service";
 import { verifyMenuAccessForSocket } from "../utils/menuAccess";
+import { authorization } from "../services/authorization.service";
 
 const roomForMenu = (menuId: number) => `menu:${menuId}`;
 
@@ -63,10 +64,32 @@ export function attachStaffNotificationsSocket(
           reply({ ok: false, error: "STAFF_NOT_FOUND" });
           return;
         }
-        if (!(await menuOwnerHasProPlan(menuId))) {
+        if (
+          !(await menuOwnerHasCapability(menuId, "liveOrderNotifications"))
+        ) {
           reply({ ok: false, error: "PRO_REQUIRED" });
           return;
         }
+
+        // RBAC: staff must have orders:view to receive the order feed.
+        if (typeof decoded.staffRoleId !== "number") {
+          reply({ ok: false, error: "ROLE_REQUIRED" });
+          return;
+        }
+        const canView = await authorization.can(
+          {
+            kind: "staff",
+            staffId: decoded.userId,
+            staffRoleId: decoded.staffRoleId,
+            menuId,
+          },
+          "orders:view",
+        );
+        if (!canView) {
+          reply({ ok: false, error: "FORBIDDEN" });
+          return;
+        }
+
         await socket.join(roomForMenu(menuId));
         (socket.data as { staffMenuId?: number }).staffMenuId = menuId;
         reply({ ok: true, menuId });
@@ -128,6 +151,7 @@ export function attachStaffNotificationsSocket(
             decoded.userId,
             decoded.role,
             menuId,
+            "orders:view",
           );
           if (!allowed) {
             reply({ ok: false, error: "FORBIDDEN" });
@@ -157,6 +181,7 @@ export function attachStaffNotificationsSocket(
           customerAddress?: string;
           orderNotes?: string;
           type?: "table" | "delivery";
+          requestKind?: "order" | "waiter" | "bill";
         },
         cb,
       ) => {
@@ -177,6 +202,7 @@ export function attachStaffNotificationsSocket(
             customerAddress: payload?.customerAddress,
             orderNotes: payload?.orderNotes,
             type: payload?.type,
+            requestKind: payload?.requestKind,
             items: payload?.items,
             status: payload?.status,
             governorateId: payload?.governorateId,
@@ -196,8 +222,9 @@ export function attachStaffNotificationsSocket(
             items: result.items,
             orderTotal: result.orderTotal,
             status: result.status,
+            requestKind: result.requestKind,
           });
-          reply({ ok: true });
+          reply({ ok: true, id: result.id, requestKind: result.requestKind });
         } catch (e) {
           logger.error("guest:call_staff error:", e);
           reply({ ok: false, error: "SERVER_ERROR" });

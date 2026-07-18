@@ -2,8 +2,96 @@ import { Request, Response, NextFunction } from "express";
 import { getPool, sql } from "../config/database";
 import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
 import { canUserBulkImport } from "../services/bulkImportUsage.service";
+import { getActiveSubscriptionLimits } from "../services/extraMenus.service";
+import { hasCapability } from "../services/planCapabilities.service";
+import type { BooleanCapabilityKey } from "../types/planCapabilities";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+
+export type ActiveMenuLimitCheck = {
+  allowed: boolean;
+  effectiveMaxMenus: number;
+  activeCount: number;
+  maxMenus: number;
+  extraMenus: number;
+  planName: string;
+  isPro: boolean;
+};
+
+/** Whether activating `menuId` would exceed the user's active-menu allowance. */
+export async function checkActiveMenuLimitForActivation(
+  userId: number,
+  menuId: number,
+): Promise<ActiveMenuLimitCheck> {
+  const limits = await getActiveSubscriptionLimits(userId);
+  const pool = await getPool();
+  const countResult = await pool
+    .request()
+    .input("userId", sql.Int, userId)
+    .input("menuId", sql.Int, menuId)
+    .query(`
+      SELECT COUNT(*) AS count
+      FROM Menus
+      WHERE userId = @userId AND isActive = 1 AND id <> @menuId
+    `);
+
+  const otherActiveCount = Number(countResult.recordset[0]?.count ?? 0);
+
+  if (!limits) {
+    return {
+      allowed: false,
+      effectiveMaxMenus: 1,
+      activeCount: otherActiveCount,
+      maxMenus: 1,
+      extraMenus: 0,
+      planName: "Free",
+      isPro: false,
+    };
+  }
+
+  return {
+    allowed: otherActiveCount < limits.effectiveMaxMenus,
+    effectiveMaxMenus: limits.effectiveMaxMenus,
+    activeCount: otherActiveCount,
+    maxMenus: limits.maxMenus,
+    extraMenus: limits.extraMenus,
+    planName: limits.planName,
+    isPro: limits.isPro,
+  };
+}
+
+/** Reject menu activation when the active-menu limit is already reached. */
+export async function enforceActiveMenuLimitOnActivation(
+  req: Request,
+  res: Response,
+  userId: number,
+  menuId: number,
+): Promise<boolean> {
+  const check = await checkActiveMenuLimitForActivation(userId, menuId);
+
+  if (check.allowed) {
+    return true;
+  }
+
+  const en = `You have reached the maximum number of active menus (${check.effectiveMaxMenus}) for your ${check.planName} plan.`;
+  const ar = `لقد وصلت للحد الأقصى من القوائم النشطة (${check.effectiveMaxMenus}) لخطة ${check.planName}.`;
+  sendApiError(
+    res,
+    req,
+    403,
+    { en, ar },
+    {
+      code: "ACTIVE_MENU_LIMIT_REACHED",
+      currentCount: check.activeCount,
+      maxMenus: check.maxMenus,
+      extraMenus: check.extraMenus,
+      effectiveMaxMenus: check.effectiveMaxMenus,
+      planName: check.planName,
+      canBuyExtraMenus: check.isPro,
+    },
+  );
+  return false;
+}
 
 export async function checkMenuLimit(
   req: Request,
@@ -12,28 +100,16 @@ export async function checkMenuLimit(
 ): Promise<void> {
   try {
     const userId = req.user!.userId;
-    const pool = await getPool();
+    const limits = await getActiveSubscriptionLimits(userId);
 
-    // Get user's subscription (get the most recent active subscription by id)
-    const subResult = await pool.request().input("userId", sql.Int, userId)
-      .query(`
-        SELECT TOP 1 s.planId, p.maxMenus, p.name as planName
-        FROM Subscriptions s
-        JOIN Plans p ON s.planId = p.id
-        WHERE s.userId = @userId 
-          AND s.status = 'active' 
-          AND (s.endDate IS NULL OR s.endDate > GETDATE())
-        ORDER BY s.id DESC
-      `);
-
-    if (subResult.recordset.length === 0) {
+    if (!limits) {
       sendApiError(res, req, 403, ApiErrors.noActiveSubscription);
       return;
     }
 
-    const { maxMenus, planName } = subResult.recordset[0];
+    const { effectiveMaxMenus, maxMenus, extraMenus, planName, isPro } = limits;
 
-    // Count user's active menus only (inactive menus don't count towards limit)
+    const pool = await getPool();
     const countResult = await pool
       .request()
       .input("userId", sql.Int, userId)
@@ -43,18 +119,22 @@ export async function checkMenuLimit(
 
     const currentCount = countResult.recordset[0].count;
 
-    if (currentCount >= maxMenus) {
-      const en = `You have reached the maximum number of menus (${maxMenus}) for your ${planName} plan.`;
-      const ar = `لقد وصلت للحد الأقصى من القوائم (${maxMenus}) لخطة ${planName}.`;
+    if (currentCount >= effectiveMaxMenus) {
+      const en = `You have reached the maximum number of menus (${effectiveMaxMenus}) for your ${planName} plan.`;
+      const ar = `لقد وصلت للحد الأقصى من القوائم (${effectiveMaxMenus}) لخطة ${planName}.`;
       sendApiError(
         res,
         req,
         403,
         { en, ar },
         {
+          code: "MENU_LIMIT_REACHED",
           currentCount,
           maxMenus,
+          extraMenus,
+          effectiveMaxMenus,
           planName,
+          canBuyExtraMenus: isPro,
         },
       );
       return;
@@ -102,7 +182,36 @@ export async function requireProPlan(
   }
 }
 
-/** Bulk import — Free: 1 use per user; Pro: unlimited. */
+/** Require a specific boolean capability from the user's active plan. */
+export function requirePlanCapability(key: BooleanCapabilityKey) {
+  return async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
+    try {
+      const userId = req.user!.userId;
+      if (!(await hasCapability(userId, key))) {
+        sendApiError(
+          res,
+          req,
+          403,
+          {
+            en: ApiErrors.proFeatureOnly.en,
+            ar: ApiErrors.proFeatureOnly.ar,
+          },
+          { code: "PLAN_CAPABILITY_REQUIRED", capability: key },
+        );
+        return;
+      }
+      next();
+    } catch {
+      sendApiError(res, req, 500, ApiErrors.failedVerifySubscription);
+    }
+  };
+}
+
+/** Bulk import — gated by plan `aiMenuImport` capability. */
 export async function checkBulkImportLimit(
   req: Request,
   res: Response,

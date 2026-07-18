@@ -3,7 +3,7 @@ export const PLANS = {
     id: 1,
     name: "Free",
     maxMenus: 1,
-    maxProductsPerMenu: 20,
+    maxProductsPerMenu: -1,
     hasAds: true,
     allowCustomDomain: false,
   },
@@ -11,7 +11,7 @@ export const PLANS = {
     id: 2,
     name: "Monthly",
     maxMenus: 3,
-    maxProductsPerMenu: 100,
+    maxProductsPerMenu: -1,
     hasAds: false,
     allowCustomDomain: false,
   },
@@ -30,6 +30,12 @@ export const FREE_BULK_IMPORT_MAX = -1;
 
 /** Free plan: max custom menu ads per menu. Paid plans: unlimited (-1). */
 export const FREE_MAX_ADS_PER_MENU = 1;
+
+/** Pro plan: price per extra menu per 30-day month (EGP). */
+export const EXTRA_MENU_PRICE_EGP = 20;
+
+/** Days used to prorate extra-menu purchase until subscription end (20 EGP / 30 days). */
+export const EXTRA_MENU_BILLING_DAYS = 30;
 
 export const RATE_LIMITS = {
   AUTH: {

@@ -27,6 +27,7 @@ import googleAuthRoutes from "./routes/google-auth.routes";
 import verifykitRoutes from "./routes/verifykit.routes";
 import publicRoutes from "./routes/public.routes";
 import menuRoutes from "./routes/menu.routes";
+import menuGroupRoutes from "./routes/menuGroup.routes";
 import categoryRoutes from "./routes/category.routes";
 import userRoutes from "./routes/user.routes";
 import adminRoutes from "./routes/admin.routes";
@@ -34,6 +35,7 @@ import uploadRoutes from "./routes/upload.routes";
 import structureRoutes from "./routes/structure.routes";
 import adsRoutes from "./routes/ads.routes";
 import staffAuthRoutes from "./routes/staffAuth.routes";
+import staffPermissionsRoutes from "./routes/staffPermissions.routes";
 import paymentRoutes from "./routes/paymentRoutes";
 import voucherRoutes from "./routes/voucher.routes";
 import { getPublicAppVersion } from "./controllers/version.controller";
@@ -57,6 +59,8 @@ import {
   deleteMetaDataHandler,
 } from "./controllers/metaData.controller";
 import { requireAdmin } from "./middleware/auth.middleware";
+import { isSwaggerEnabled } from "./utils/devFlags";
+import { getSwaggerSpec } from "./config/swagger";
 
 // ------------------------------------------------------------------
 
@@ -160,6 +164,22 @@ app.get("/health", (req, res) => {
   });
 });
 
+if (isSwaggerEnabled()) {
+  const swaggerUi = require("swagger-ui-express");
+  const swaggerSpec = getSwaggerSpec();
+  if (swaggerSpec) {
+    app.use(
+      "/api-docs",
+      swaggerUi.serve,
+      swaggerUi.setup(swaggerSpec, { customSiteTitle: "EnsMenu API Docs" }),
+    );
+    app.get("/api-docs.json", (_req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      res.send(swaggerSpec);
+    });
+  }
+}
+
 // Mobile app version — fully open (no x-api-key, no JWT, no rate limit)
 
 app.get("/api/public/app-version/latest", getPublicAppVersion);
@@ -189,7 +209,9 @@ app.use("/api/verifykit", verifykitRoutes);
 app.use("/api/staff-auth", staffAuthRoutes);
 // Backward-compatible alias for clients that accidentally prefix /api twice.
 app.use("/api/api/staff-auth", staffAuthRoutes);
+app.use("/api/staff-permissions", staffPermissionsRoutes);
 app.use("/api/menus", menuRoutes);
+app.use("/api/menu-groups", menuGroupRoutes);
 // Must be before app.use("/api", categoryRoutes): that router runs requireAuth on all /api/* paths
 app.use("/api/payment", paymentRoutes);
 app.use("/api/vouchers", voucherRoutes);
@@ -253,6 +275,9 @@ async function startServer() {
     httpServer.listen(PORT, () => {
       logger.info(`🚀 Server running on port ${PORT}`);
       logger.info(`🌍 Environment: ${process.env.NODE_ENV}`);
+      if (isSwaggerEnabled()) {
+        logger.info(`📖 Swagger UI: http://localhost:${PORT}/api-docs`);
+      }
     });
   } catch (err) {
     logger.error("❌ Server failed to start:", err);

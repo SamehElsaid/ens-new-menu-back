@@ -3,7 +3,7 @@ import { body, param } from "express-validator";
 import * as tablesController from "../controllers/menuTables.controller";
 import { validate } from "../middleware/validation";
 import { requireAuth } from "../middleware/auth.middleware";
-import { requireProPlan } from "../middleware/planLimits";
+import { requirePlanCapability } from "../middleware/planLimits";
 
 const router = Router({ mergeParams: true });
 
@@ -27,7 +27,7 @@ const tableNumberBodyOptionalRule = body("tableNumber")
   );
 
 router.use(requireAuth);
-router.use(requireProPlan);
+router.use(requirePlanCapability("staffAndTables"));
 
 // GET /api/menus/:menuId/tables
 router.get("/", [param("menuId").isInt()], tablesController.getTables);

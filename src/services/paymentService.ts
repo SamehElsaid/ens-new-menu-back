@@ -11,6 +11,18 @@ import {
   recordDiscountVoucherRedemption,
   normalizeCode,
 } from "./voucher.service";
+import {
+  applyExtraMenusPurchase,
+  getActiveSubscriptionLimits,
+  getExtraMenusPurchaseAmount,
+  getExtraMenusRenewalAmount,
+} from "./extraMenus.service";
+import { getProExtraMenuPriceEgp } from "./subscriptionPricing.service";
+import {
+  getProRenewalInfo,
+  renewProSubscriptionForUser,
+} from "./subscriptionRenewal.service";
+import { ensureSubscriptionExtrasSchema } from "../schemas/subscriptionExtras.schema";
 import crypto from "crypto";
 
 export interface InitiatePaymentData {
@@ -257,6 +269,7 @@ export class PaymentService {
         await trx.rollback();
         if (existingStatus === "completed") {
           await this.tryActivateSubscriptionForPayment(paymentId);
+          await this.tryApplyExtraMenusForPayment(paymentId);
         }
         return;
       }
@@ -302,6 +315,7 @@ export class PaymentService {
     }
 
     await this.tryActivateSubscriptionForPayment(paymentId);
+    await this.tryApplyExtraMenusForPayment(paymentId);
   }
 
   /**
@@ -627,7 +641,34 @@ export class PaymentService {
     billingCycle: "monthly" | "yearly",
     paidAmount: number,
     paidAt: Date,
+    options?: { renew?: boolean; extraMenus?: number },
   ): Promise<{ subscriptionId: number; endDate: Date }> {
+    if (options?.renew) {
+      const renewed = await renewProSubscriptionForUser(
+        userId,
+        planId,
+        billingCycle,
+        paidAmount,
+        paidAt,
+        options.extraMenus,
+      );
+      if (renewed) {
+        return renewed;
+      }
+    }
+
+    await ensureSubscriptionExtrasSchema();
+
+    const prevExtraResult = await pool
+      .request()
+      .input("userId", sql.Int, userId).query(`
+        SELECT TOP 1 ISNULL(extraMenus, 0) AS extraMenus
+        FROM Subscriptions
+        WHERE userId = @userId AND status = 'active'
+        ORDER BY id DESC
+      `);
+    const extraMenus = Number(prevExtraResult.recordset[0]?.extraMenus ?? 0);
+
     await pool.request().input("userId", sql.Int, userId).query(`
       UPDATE Subscriptions
       SET status = 'expired', endDate = GETDATE()
@@ -652,15 +693,16 @@ export class PaymentService {
       .input("status", sql.NVarChar(20), "active")
       .input("paymentStatus", sql.NVarChar(50), "completed")
       .input("paidAt", sql.DateTime2, paidAt)
-      .input("amount", sql.Decimal(12, 2), paidAmount).query(`
+      .input("amount", sql.Decimal(12, 2), paidAmount)
+      .input("extraMenus", sql.Int, extraMenus).query(`
         INSERT INTO Subscriptions (
           userId, planId, billingCycle, startDate, endDate, status,
-          notificationSent, paymentStatus, paidAt, amount
+          notificationSent, paymentStatus, paidAt, amount, extraMenus
         )
         OUTPUT INSERTED.id
         VALUES (
           @userId, @planId, @billingCycle, @startDate, @endDate, @status,
-          1, @paymentStatus, @paidAt, @amount
+          1, @paymentStatus, @paidAt, @amount, @extraMenus
         )
       `);
 
@@ -680,6 +722,8 @@ export class PaymentService {
       currency?: string;
       redirectUrl?: string;
       voucherCode?: string;
+      renew?: boolean;
+      extraMenus?: number;
     },
   ): Promise<{
     paymentId: string;
@@ -692,6 +736,23 @@ export class PaymentService {
   }> {
     const pool = await getPool();
     const plan = await this.fetchActiveProPlan(pool);
+
+    let renewalExtraMenus: number | undefined;
+    if (data.renew) {
+      const renewalInfo = await getProRenewalInfo(ownerUserId);
+      if (!renewalInfo.canRenew) {
+        throw new ApiError(
+          400,
+          "No active Pro subscription to renew",
+          true,
+          "لا يوجد اشتراك Pro نشط للتجديد",
+        );
+      }
+      renewalExtraMenus =
+        data.extraMenus !== undefined && data.extraMenus !== null
+          ? Math.max(0, Math.min(100, Math.floor(Number(data.extraMenus))))
+          : renewalInfo.extraMenus;
+    }
 
     let price: number;
     if (billing === "monthly") {
@@ -749,6 +810,21 @@ export class PaymentService {
       appliedVoucherCode = normalizeCode(data.voucherCode);
     }
 
+    if (data.renew && renewalExtraMenus != null) {
+      const extraMenuUnitPrice = await getProExtraMenuPriceEgp();
+      const extraRenewal = getExtraMenusRenewalAmount(
+        renewalExtraMenus,
+        billing,
+        extraMenuUnitPrice,
+      );
+      if (extraRenewal > 0) {
+        price += extraRenewal;
+        console.log(
+          `💰 Pro ${billing} renewal includes ${renewalExtraMenus} extra menu(s): +${extraRenewal} ${PRO_YEARLY_CURRENCY}`,
+        );
+      }
+    }
+
     const orderId = crypto.randomUUID();
     try {
       await this.insertProSubscriptionOrder(
@@ -775,6 +851,10 @@ export class PaymentService {
       kind,
       userId: ownerUserId,
       planId: plan.id,
+      ...(data.renew ? { renew: true } : {}),
+      ...(data.renew && renewalExtraMenus != null
+        ? { extraMenus: renewalExtraMenus }
+        : {}),
       ...(voucherId != null ? { voucherId } : {}),
     });
 
@@ -806,6 +886,7 @@ export class PaymentService {
         billing,
         0,
         paidAt,
+        { renew: data.renew === true, extraMenus: renewalExtraMenus },
       );
 
       if (voucherId != null) {
@@ -869,6 +950,8 @@ export class PaymentService {
       currency?: string;
       redirectUrl?: string;
       voucherCode?: string;
+      renew?: boolean;
+      extraMenus?: number;
     },
   ) {
     return this.initiateProSubscriptionCheckout(ownerUserId, "yearly", data);
@@ -884,9 +967,113 @@ export class PaymentService {
       currency?: string;
       redirectUrl?: string;
       voucherCode?: string;
+      renew?: boolean;
+      extraMenus?: number;
     },
   ) {
     return this.initiateProSubscriptionCheckout(ownerUserId, "monthly", data);
+  }
+
+  /** Pro plan — purchase additional menu slots (20 EGP each). */
+  static async initiateExtraMenusPurchase(
+    ownerUserId: number,
+    quantity: number,
+    data: {
+      customer_name: string;
+      customer_email?: string;
+      customer_phone: string;
+      currency?: string;
+      redirectUrl?: string;
+    },
+  ): Promise<{
+    paymentId: string;
+    paymentUrl: string;
+    orderId: string;
+    amount: number;
+    quantity: number;
+    pricePerMenu: number;
+    subscriptionDaysRemaining: number;
+    subscriptionMonthsRemaining: number;
+    extraMenuMonthlyPrice: number;
+  }> {
+    const qty = Math.floor(Number(quantity));
+    if (!Number.isFinite(qty) || qty < 1 || qty > 50) {
+      throw new ApiError(
+        400,
+        "quantity must be between 1 and 50",
+        true,
+        "عدد المنيوهات يجب أن يكون بين 1 و 50",
+      );
+    }
+
+    const limits = await getActiveSubscriptionLimits(ownerUserId);
+    if (!limits?.isPro) {
+      throw new ApiError(
+        403,
+        "Extra menus are available on Pro plans only",
+        true,
+        "المنيوهات الإضافية متاحة لخطط Pro فقط",
+      );
+    }
+
+    const remainingDays = limits.subscriptionDaysRemaining;
+    if (remainingDays <= 0) {
+      throw new ApiError(
+        400,
+        "Subscription has no remaining billing period",
+        true,
+        "انتهت مدة الاشتراك — جدّد الاشتراك أولاً",
+      );
+    }
+
+    const extraMenuUnitPrice = await getProExtraMenuPriceEgp();
+    const price = getExtraMenusPurchaseAmount(qty, extraMenuUnitPrice);
+    const pool = await getPool();
+    const orderId = crypto.randomUUID();
+
+    try {
+      await this.insertProSubscriptionOrder(
+        pool,
+        orderId,
+        ownerUserId,
+        price,
+        data.customer_phone,
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new ApiError(500, `Could not create checkout row: ${msg}`);
+    }
+
+    const ref = JSON.stringify({
+      orderId,
+      kind: "extra_menus",
+      userId: ownerUserId,
+      subscriptionId: limits.subscriptionId,
+      quantity: qty,
+    });
+
+    const out = await this.initiatePayment(String(ownerUserId), {
+      order_id: orderId,
+      amount: price,
+      currency: PRO_YEARLY_CURRENCY,
+      customer_name: data.customer_name,
+      customer_email: data.customer_email,
+      customer_phone: data.customer_phone,
+      redirectUrl: data.redirectUrl,
+      customerReference: ref,
+    });
+
+    return {
+      paymentId: out.paymentId,
+      paymentUrl: out.paymentUrl,
+      orderId,
+      amount: price,
+      quantity: qty,
+      pricePerMenu: price / qty,
+      subscriptionDaysRemaining: remainingDays,
+      subscriptionMonthsRemaining: limits.subscriptionMonthsRemaining,
+      extraMenuMonthlyPrice: extraMenuUnitPrice,
+    };
   }
 
   /**
@@ -894,6 +1081,76 @@ export class PaymentService {
    */
   static async syncProYearlyFromPaymentId(paymentId: string): Promise<void> {
     return this.tryActivateSubscriptionForPayment(paymentId);
+  }
+
+  /** Apply extra menu purchase after EasyKash payment completes. */
+  static async syncExtraMenusFromPaymentId(paymentId: string): Promise<void> {
+    return this.tryApplyExtraMenusForPayment(paymentId);
+  }
+
+  private static async tryApplyExtraMenusForPayment(
+    paymentId: string,
+  ): Promise<void> {
+    try {
+      const pool = await getPool();
+      const row = await pool
+        .request()
+        .input("id", sql.UniqueIdentifier, paymentId)
+        .query(`
+          SELECT customer_reference, amount, payment_status
+          FROM payments WHERE id = @id
+        `);
+      if (row.recordset.length === 0) {
+        return;
+      }
+
+      const paymentStatus = String(
+        row.recordset[0].payment_status ?? "",
+      ).toLowerCase();
+      if (paymentStatus !== "completed") {
+        return;
+      }
+
+      const cr = row.recordset[0].customer_reference;
+      if (cr == null || String(cr).trim() === "") {
+        return;
+      }
+
+      let meta: {
+        kind?: string;
+        userId?: number;
+        subscriptionId?: number;
+        quantity?: number;
+      } = {};
+      try {
+        meta = JSON.parse(String(cr));
+      } catch {
+        return;
+      }
+
+      if (
+        meta.kind !== "extra_menus" ||
+        !meta.userId ||
+        !meta.subscriptionId ||
+        !meta.quantity
+      ) {
+        return;
+      }
+
+      const paidAmount = Number(row.recordset[0].amount ?? 0);
+      await applyExtraMenusPurchase(
+        paymentId,
+        meta.userId,
+        meta.subscriptionId,
+        meta.quantity,
+        paidAmount,
+      );
+      console.log(
+        `✅ Added ${meta.quantity} extra menu(s) for user ${meta.userId} (payment ${paymentId})`,
+      );
+    } catch (err) {
+      console.error("tryApplyExtraMenusForPayment:", err);
+    }
   }
 
   private static async tryActivateSubscriptionForPayment(
@@ -922,10 +1179,15 @@ export class PaymentService {
         planId?: number;
         voucherId?: number;
         orderId?: string;
+        renew?: boolean;
+        extraMenus?: number;
       } = {};
       try {
         meta = JSON.parse(String(cr));
       } catch {
+        return;
+      }
+      if (meta.kind === "extra_menus") {
         return;
       }
       const isYearly = meta.kind === "pro_yearly";
@@ -984,6 +1246,7 @@ export class PaymentService {
           billingCycle,
           paidAmount,
           paidAt instanceof Date ? paidAt : new Date(paidAt),
+          { renew: meta.renew === true, extraMenus: meta.extraMenus },
         );
 
       if (meta.voucherId != null && meta.orderId) {

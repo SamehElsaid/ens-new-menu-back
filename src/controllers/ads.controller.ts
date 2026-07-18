@@ -1,10 +1,46 @@
 import { Request, Response } from "express";
 import { getPool, sql } from "../config/database";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
-import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
-import { FREE_MAX_ADS_PER_MENU } from "../config/constants";
+import { getMaxAdsPerMenuForUser } from "../services/planCapabilities.service";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+
+/** Reject activating an ad when the plan's active-ad quota is already full. */
+async function assertCanActivateMenuAd(
+  req: Request,
+  res: Response,
+  userId: number,
+  menuId: number,
+  adId: number,
+): Promise<boolean> {
+  const maxAds = await getMaxAdsPerMenuForUser(userId);
+  if (maxAds === -1) return true;
+
+  const pool = await getPool();
+  const countResult = await pool
+    .request()
+    .input("menuId", sql.Int, menuId)
+    .input("adId", sql.Int, adId)
+    .query(`
+      SELECT COUNT(*) as total
+      FROM Ads
+      WHERE menuId = @menuId
+        AND adType = 'menu'
+        AND ISNULL(isActive, 0) = 1
+        AND id <> @adId
+    `);
+
+  const otherActiveCount = Number(countResult.recordset[0]?.total ?? 0);
+  if (otherActiveCount >= maxAds) {
+    sendApiError(res, req, 403, ApiErrors.activeAdLimitExceeded, {
+      code: "ACTIVE_AD_LIMIT",
+      currentCount: otherActiveCount,
+      maxAds,
+    });
+    return false;
+  }
+  return true;
+}
 
 // Create menu ad
 export const createMenuAd = async (req: Request, res: Response) => {
@@ -41,8 +77,7 @@ export const createMenuAd = async (req: Request, res: Response) => {
       `);
 
     const currentCount = countResult.recordset[0]?.total ?? 0;
-    const onFreePlan = await isUserOnFreePlan(userId);
-    const maxAds = onFreePlan ? FREE_MAX_ADS_PER_MENU : -1;
+    const maxAds = await getMaxAdsPerMenuForUser(userId);
 
     if (maxAds !== -1 && currentCount >= maxAds) {
       sendApiError(res, req, 403, ApiErrors.adLimitExceeded, {
@@ -249,8 +284,16 @@ export const updateAd = async (req: Request, res: Response) => {
       inputs.position = position;
     }
     if (isActive !== undefined) {
+      const wantsActive =
+        isActive === true || isActive === 1 || isActive === "1" || isActive === "true";
+      if (
+        wantsActive &&
+        !(await assertCanActivateMenuAd(req, res, userId, menuIdForLog, parseInt(String(adId), 10)))
+      ) {
+        return;
+      }
       updates.push("isActive = @isActive");
-      inputs.isActive = isActive;
+      inputs.isActive = wantsActive ? 1 : 0;
     }
 
     if (updates.length === 0) {
@@ -413,7 +456,7 @@ export const toggleAdStatus = async (req: Request, res: Response) => {
       title?: string | null;
       titleAr?: string | null;
     };
-    const currentStatus = rowT.isActive;
+    const currentStatus = Boolean(rowT.isActive);
     const menuIdForLog = rowT.menuId as number;
     const adLabelAr =
       String(rowT.titleAr ?? "").trim() ||
@@ -424,18 +467,29 @@ export const toggleAdStatus = async (req: Request, res: Response) => {
       String(rowT.titleAr ?? "").trim() ||
       "Ad";
 
-    // Toggle status
+    const newActive = !currentStatus;
+    if (
+      newActive &&
+      !(await assertCanActivateMenuAd(
+        req,
+        res,
+        userId,
+        menuIdForLog,
+        parseInt(String(adId), 10),
+      ))
+    ) {
+      return;
+    }
+
     await pool
       .request()
       .input("adId", sql.Int, adId)
-      .input("newStatus", sql.Bit, !currentStatus)
+      .input("newStatus", sql.Bit, newActive ? 1 : 0)
       .query(`
         UPDATE Ads
         SET isActive = @newStatus
         WHERE id = @adId
       `);
-
-    const newActive = !currentStatus;
     res.json({
       success: true,
       message: "Ad status updated successfully",

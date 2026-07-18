@@ -9,6 +9,14 @@ export function isPaymentTestRoutesEnabled(): boolean {
   );
 }
 
+/** Swagger UI + OpenAPI spec — local dev, or deployed dev when ENABLE_SWAGGER=true. */
+export function isSwaggerEnabled(): boolean {
+  return (
+    process.env.NODE_ENV === "development" ||
+    process.env.ENABLE_SWAGGER === "true"
+  );
+}
+
 /** Skip x-api-key validation in local dev, tests, or when explicitly enabled (e.g. devapi deploy). */
 export function isApiKeyValidationSkipped(): boolean {
   return (

@@ -13,13 +13,19 @@ import {
   postAdClick,
   getHomepageFeaturedLogos,
   getPublicMenuCatalog,
+  getNearbyBranchMenu,
+  getBranchDeliveryQuote,
 } from "../controllers/public.controller";
 import {
   postAppVersion,
   getLatestVersion,
   getPublicAppVersion,
 } from "../controllers/version.controller";
-import { postGuestStaffCall } from "../controllers/guestStaffCall.controller";
+import {
+  getGuestOpenStaffCall,
+  patchGuestOpenStaffCall,
+  postGuestStaffCall,
+} from "../controllers/guestStaffCall.controller";
 import { postMenuBrandingEvent } from "../controllers/brandingEvent.controller";
 import { validate } from "../middleware/validation";
 import { publicLimiter } from "../middleware/rateLimiter";
@@ -30,24 +36,50 @@ const router = Router();
 router.get("/app-version", getPublicAppVersion);
 router.get("/app-version/latest", getPublicAppVersion);
 
-// POST /api/public/staff-call — بدون publicLimiter (طلب نداء الطاقم فقط)
+// Public staff-call routes — بدون publicLimiter (نداء الطاقم / طلب الترابيزة)
 router.post(
   "/staff-call",
   validate([
     body("menuId").isInt({ min: 1 }).toInt(),
     body("type").optional().isIn(["table", "delivery"]),
+    body("requestKind")
+      .optional()
+      .isIn(["order", "waiter", "bill"])
+      .withMessage("requestKind must be order, waiter, or bill"),
     body("tableNumber").optional().isString().trim().isLength({ max: 50 }),
     body("customerName").optional().isString().trim().isLength({ max: 200 }),
     body("customerPhone").optional().isString().trim().isLength({ max: 50 }),
     body("customerAddress").optional().isString().trim().isLength({ max: 500 }),
     body("orderNotes").optional().isString().trim().isLength({ max: 500 }),
     body("governorateId").optional().isInt({ min: 1 }).toInt(),
+    body("branchId").optional().isInt({ min: 1 }).toInt(),
+    body("customerLat").optional().isFloat({ min: -90, max: 90 }),
+    body("customerLng").optional().isFloat({ min: -180, max: 180 }),
     body("status")
       .optional()
       .isIn(["pending", "confirmed", "cancelled"])
       .withMessage("status must be pending, confirmed, or cancelled"),
   ]),
   postGuestStaffCall,
+);
+
+router.get(
+  "/staff-call/open",
+  validate([
+    query("menuId").isInt({ min: 1 }).toInt(),
+    query("tableNumber").isString().trim().notEmpty().isLength({ max: 50 }),
+  ]),
+  getGuestOpenStaffCall,
+);
+
+router.patch(
+  "/staff-call/open",
+  validate([
+    body("menuId").isInt({ min: 1 }).toInt(),
+    body("tableNumber").isString().trim().notEmpty().isLength({ max: 50 }),
+    body("items").isArray({ max: 100 }),
+  ]),
+  patchGuestOpenStaffCall,
 );
 
 // Apply rate limiting to the rest of public routes
@@ -93,6 +125,28 @@ router.get(
       .withMessage("categoryId must be a positive integer"),
   ],
   getPublicMenuCatalog,
+);
+
+// GET /api/public/menu/:slug/nearby-branch — geo-based linked menu redirect
+router.get(
+  "/menu/:slug/nearby-branch",
+  validate([
+    query("lat").notEmpty().isFloat({ min: -90, max: 90 }).toFloat(),
+    query("lng").notEmpty().isFloat({ min: -180, max: 180 }).toFloat(),
+  ]),
+  getNearbyBranchMenu,
+);
+
+// GET /api/public/menu/:slug/branches/:branchId/delivery-quote — distance-based fee
+router.get(
+  "/menu/:slug/branches/:branchId/delivery-quote",
+  validate([
+    param("slug").notEmpty().trim(),
+    param("branchId").isInt({ min: 1 }).toInt(),
+    query("lat").notEmpty().isFloat({ min: -90, max: 90 }).toFloat(),
+    query("lng").notEmpty().isFloat({ min: -180, max: 180 }).toFloat(),
+  ]),
+  getBranchDeliveryQuote,
 );
 
 // GET /api/public/menu/:slug - Get menu by slug
@@ -155,6 +209,12 @@ router.post(
       .withMessage("Stars must be between 1 and 5"),
     body("comment").optional().isString().trim().isLength({ max: 1000 }),
     body("customerName").optional().isString().trim().isLength({ max: 255 }),
+    body("customerPhone").optional().isString().trim().isLength({ max: 50 }),
+    body("customerEmail")
+      .optional({ nullable: true, checkFalsy: true })
+      .isEmail()
+      .withMessage("Invalid email")
+      .isLength({ max: 255 }),
   ]),
   submitRating,
 );

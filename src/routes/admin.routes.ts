@@ -10,6 +10,8 @@ import {
   getAllPlans,
   updatePlan,
   createPlan,
+  getAdminCustomPlanDisplay,
+  putAdminCustomPlanDisplay,
   getGlobalAds,
   createGlobalAd,
   updateGlobalAd,
@@ -19,6 +21,7 @@ import {
   getAllAdmins,
   getAdAnalytics,
   updateUserSubscription,
+  updateUserExtraMenus,
   getPlansForSubscription,
   applyFreePlanLimits,
   patchAdminPermissions,
@@ -116,6 +119,7 @@ router.get("/users/:id", getUserDetails);
 router.put("/users/:id/suspend", toggleUserSuspension);
 router.put("/users/:id/password", adminSetUserPassword);
 router.put("/users/:id/subscription", updateUserSubscription);
+router.put("/users/:id/extra-menus", updateUserExtraMenus);
 router.post("/users/:id/apply-free-limits", applyFreePlanLimits);
 router.post("/users/:id/feature-on-homepage", featureUserOnHomepage);
 router.delete("/users/:id/feature-on-homepage", unfeatureUserOnHomepage);
@@ -147,9 +151,12 @@ router.put("/users/:id/support/:caseId", patchAdminUserSupportStatus);
 
 // Plans Management
 router.get("/plans/subscription", getPlansForSubscription);
+router.get("/plans/custom-display", getAdminCustomPlanDisplay);
+router.put("/plans/custom-display", putAdminCustomPlanDisplay);
 router.get("/plans", getAllPlans);
 router.post("/plans", createPlan);
 router.put("/plans/:id", updatePlan);
+router.patch("/plans/:id", updatePlan);
 
 // Ads Management
 router.get("/ads", getGlobalAds);
