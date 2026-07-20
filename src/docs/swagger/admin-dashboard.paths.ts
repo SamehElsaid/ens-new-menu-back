@@ -311,46 +311,70 @@
  * /api/admin/broadcast/preview:
  *   get:
  *     tags: [Admin]
- *     summary: Preview email broadcast
- *     description: Renders HTML preview before sending mass email to users.
+ *     summary: Preview email broadcast recipients
+ *     description: |
+ *       Returns recipient count and sample users for a broadcast audience.
+ *       Admin only. Does not send email.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - in: query
- *         name: subject
- *         schema: { type: string, example: "New Pro features" }
+ *         name: audience
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [all, selected, pro, free, no-menu, with-menu, products-no-image]
+ *           example: products-no-image
  *       - in: query
- *         name: body
- *         schema: { type: string }
+ *         name: userIds
+ *         schema: { type: string, example: "12,45,90" }
+ *         description: Comma-separated user ids when audience is selected
  *     responses:
  *       200:
+ *         description: Recipient preview
  *         content:
  *           application/json:
  *             example:
- *               html: "<html>...</html>"
- *               recipientCount: 1180
+ *               count: 42
+ *               sample:
+ *                 - id: 12
+ *                   name: "Ahmed"
+ *                   email: "ahmed@example.com"
+ *               capped: false
+ *               maxRecipients: 500
  *
  * /api/admin/broadcast/send:
  *   post:
  *     tags: [Admin]
  *     summary: Send email broadcast
- *     description: Sends email to filtered user segment (all, pro, free, etc.).
+ *     description: |
+ *       Sends an email to a filtered user segment. The message field is the full
+ *       HTML email document written by the admin (no server-side brand template).
+ *       Use double-brace name in the HTML to insert the recipient name.
+ *       Admin only. Max 500 recipients per send.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     requestBody:
+ *       required: true
  *       content:
  *         application/json:
  *           example:
- *             subject: "New Pro features"
- *             subjectAr: "ميزات Pro الجديدة"
- *             body: "We added menu groups..."
- *             bodyAr: "أضفنا مجموعات المنيو..."
- *             segment: pro
+ *             audience: products-no-image
+ *             subject: "Add images to your menu items"
+ *             message: "<!DOCTYPE html><html><body><p>Hello {{name}},</p><p>Add photos from Products.</p></body></html>"
+ *             locale: ar
+ *             userIds: [12, 45]
  *     responses:
  *       200:
+ *         description: Broadcast completed
  *         content:
  *           application/json:
  *             example:
- *               success: true
- *               sentCount: 320
+ *               message: "Broadcast completed"
+ *               total: 42
+ *               sent: 41
+ *               failed: 1
+ *               failures: ["bad@example.com"]
+ *               capped: false
+ *               maxRecipients: 500
  *
  * /api/admin/activity-log:
  *   get:
