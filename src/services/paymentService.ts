@@ -93,6 +93,63 @@ export class PaymentService {
     return `${b}${p}`;
   }
 
+  private static normalizePublicHost(urlOrHost: string): string {
+    try {
+      const host = urlOrHost.includes("://")
+        ? new URL(urlOrHost).hostname
+        : urlOrHost;
+      return host.replace(/^www\./i, "").toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * EasyKash webhook URL (server-to-server). Must hit the API host, never the marketing site —
+   * wallet payments often never return via redirectUrl, so a wrong callback leaves status pending.
+   */
+  private static getEasyKashCallbackUrl(): string {
+    const fallback = this.joinPublicUrl(
+      this.getBackendPublicBase(),
+      "/api/payment/easykash/callback",
+    );
+    const explicit = (process.env.EASYKASH_CALLBACK_URL || "")
+      .trim()
+      .replace(/\/+$/, "");
+    if (!explicit) {
+      return fallback;
+    }
+
+    const callbackHost = this.normalizePublicHost(explicit);
+    const frontendHost = this.normalizePublicHost(this.getFrontendPublicBase());
+    const backendHost = this.normalizePublicHost(this.getBackendPublicBase());
+
+    if (!callbackHost) {
+      console.warn(
+        "⚠️ Invalid EASYKASH_CALLBACK_URL; using backend webhook URL:",
+        fallback,
+      );
+      return fallback;
+    }
+
+    if (frontendHost && callbackHost === frontendHost) {
+      console.warn(
+        "⚠️ EASYKASH_CALLBACK_URL points at the website host, not the API webhook. Using:",
+        fallback,
+      );
+      return fallback;
+    }
+
+    if (backendHost && callbackHost !== backendHost) {
+      console.warn(
+        "⚠️ EASYKASH_CALLBACK_URL host differs from API_URL; still using explicit callback:",
+        explicit,
+      );
+    }
+
+    return explicit;
+  }
+
   /**
    * Query params on EasyKash return URL (e.g. status=PAID). Webhook may be late or fail to reach the server.
    */
@@ -445,23 +502,20 @@ export class PaymentService {
         `);
 
       // Prepare EasyKash API request
-      // Use redirectUrl from request or default to frontend callback page
+      // redirectUrl = browser return; callbackUrl = server webhook (required for wallets)
       const redirectUrl =
         data.redirectUrl ||
+        (process.env.EASYKASH_REDIRECT_URL || "").trim() ||
         this.joinPublicUrl(this.getFrontendPublicBase(), "/payment/callback");
-      const callbackUrl = this.joinPublicUrl(
-        this.getBackendPublicBase(),
-        "/api/payment/easykash/callback",
-      );
+      const callbackUrl = this.getEasyKashCallbackUrl();
 
       console.log("═══════════════════════════════════════");
       console.log("🔧 EasyKash Payment Configuration");
       console.log("═══════════════════════════════════════");
       console.log("📍 Redirect URL:", redirectUrl);
-      console.log("📞 Callback URL:", callbackUrl);
-      console.log("⚠️  IMPORTANT: Callback URL must be publicly accessible!");
-      console.log("   If using localhost, EasyKash CANNOT send callbacks.");
-      console.log("   Use ngrok or deploy to production.");
+      console.log("📞 Callback URL (webhook):", callbackUrl);
+      console.log("⚠️  IMPORTANT: callbackUrl must be the public API webhook, not the website.");
+      console.log("   If using localhost, EasyKash CANNOT send callbacks — use ngrok or production.");
       console.log("═══════════════════════════════════════");
 
       // Prepare custom data for customerReference
@@ -487,7 +541,7 @@ export class PaymentService {
         email: data.customer_email || "",
         mobile: data.customer_phone || "",
         redirectUrl: redirectUrl,
-        callbackUrl: callbackUrl, // Webhook URL for EasyKash to send payment status
+        callbackUrl: callbackUrl, // Server webhook — not the website redirect URL
         customerReference: customerReference,
       };
 
