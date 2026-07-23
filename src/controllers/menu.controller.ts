@@ -1744,6 +1744,39 @@ export async function toggleMenuStatus(
 }
 
 // Delete menu
+// export async function deleteMenu(req: Request, res: Response): Promise<void> {
+//   try {
+//     if (req.user?.role === ROLES.STAFF) {
+//       sendApiError(res, req, 403, {
+//         en: "Only the menu owner can delete this menu.",
+//         ar: "يستطيع مالك القائمة فقط حذفها.",
+//       });
+//       return;
+//     }
+
+//     const userId = req.user!.userId;
+//     const { id } = req.params;
+
+//     const pool = await getPool();
+
+//     const result = await pool
+//       .request()
+//       .input("id", sql.Int, parseInt(id))
+//       .input("userId", sql.Int, userId)
+//       .query("DELETE FROM Menus WHERE id = @id AND userId = @userId");
+
+//     if (result.rowsAffected[0] === 0) {
+//       sendApiError(res, req, 404, ApiErrors.menuNotFound);
+//       return;
+//     }
+
+//     res.json({ message: "Menu deleted successfully" });
+//   } catch (error) {
+//     logger.error("Delete menu error:", error);
+//     sendApiError(res, req, 500, ApiErrors.failedDeleteMenu);
+//   }
+// }
+
 export async function deleteMenu(req: Request, res: Response): Promise<void> {
   try {
     if (req.user?.role === ROLES.STAFF) {
@@ -1755,20 +1788,39 @@ export async function deleteMenu(req: Request, res: Response): Promise<void> {
     }
 
     const userId = req.user!.userId;
-    const { id } = req.params;
-
+    const menuId = parseInt(req.params.id, 10);
     const pool = await getPool();
 
-    const result = await pool
+    // تأكد إن المنيو ملك اليوزر
+    const owned = await pool
       .request()
-      .input("id", sql.Int, parseInt(id))
+      .input("id", sql.Int, menuId)
       .input("userId", sql.Int, userId)
-      .query("DELETE FROM Menus WHERE id = @id AND userId = @userId");
+      .query(`SELECT id FROM Menus WHERE id = @id AND userId = @userId`);
 
-    if (result.rowsAffected[0] === 0) {
+    if (!owned.recordset.length) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
+
+    // 1) امسح الموظفين الأول (بيفك FK_MenuStaff_Role)
+    await pool
+      .request()
+      .input("id", sql.Int, menuId)
+      .query(`DELETE FROM MenuStaff WHERE menuId = @id`);
+
+    // 2) اختياري صريح — أو سيبه للـ CASCADE
+    await pool
+      .request()
+      .input("id", sql.Int, menuId)
+      .query(`DELETE FROM MenuStaffRoles WHERE menuId = @id`);
+
+    // 3) امسح المنيو
+    await pool
+      .request()
+      .input("id", sql.Int, menuId)
+      .input("userId", sql.Int, userId)
+      .query(`DELETE FROM Menus WHERE id = @id AND userId = @userId`);
 
     res.json({ message: "Menu deleted successfully" });
   } catch (error) {
@@ -1776,7 +1828,6 @@ export async function deleteMenu(req: Request, res: Response): Promise<void> {
     sendApiError(res, req, 500, ApiErrors.failedDeleteMenu);
   }
 }
-
 // Check slug availability and get similar suggestions
 export async function checkSlugAvailability(
   req: Request,

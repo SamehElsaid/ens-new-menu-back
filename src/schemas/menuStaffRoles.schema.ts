@@ -120,39 +120,41 @@ async function migrateLegacyStaffRoles(): Promise<void> {
     await ensureDefaultRolesForMenu(menuId);
   }
 
-  // Nothing to map onto if there is no legacy text role column.
-  if (!meta.roleColumnQuoted) return;
+  // Map legacy text roles when the old `role` column still exists.
+  // (If it was already dropped in cleanup, skip straight to the fallback.)
+  if (meta.roleColumnQuoted) {
+    const roleCol = meta.roleColumnQuoted;
 
-  const roleCol = meta.roleColumnQuoted;
+    for (const def of DEFAULT_STAFF_ROLES) {
+      if (def.legacyRoleValues.length === 0) continue;
+      const inList = def.legacyRoleValues
+        .map((_, i) => `@legacy${i}`)
+        .join(", ");
+      const request = pool
+        .request()
+        .input("roleName", sql.NVarChar(100), def.nameAr);
+      def.legacyRoleValues.forEach((val, i) => {
+        request.input(`legacy${i}`, sql.NVarChar(100), val);
+      });
 
-  // Map each legacy role value to its seeded role per menu.
-  for (const def of DEFAULT_STAFF_ROLES) {
-    if (def.legacyRoleValues.length === 0) continue;
-    const inList = def.legacyRoleValues
-      .map((_, i) => `@legacy${i}`)
-      .join(", ");
-    const request = pool
-      .request()
-      .input("roleName", sql.NVarChar(100), def.nameAr);
-    def.legacyRoleValues.forEach((val, i) => {
-      request.input(`legacy${i}`, sql.NVarChar(100), val);
-    });
-
-    await request.query(`
-      UPDATE s
-      SET s.roleId = r.id
-      FROM dbo.MenuStaff s
-      INNER JOIN dbo.MenuStaffRoles r
-        ON r.menuId = s.menuId AND r.name = @roleName
-      WHERE s.roleId IS NULL
-        AND LOWER(LTRIM(RTRIM(ISNULL(${roleCol}, '')))) IN (${inList})
-    `);
+      await request.query(`
+        UPDATE s
+        SET s.roleId = r.id
+        FROM dbo.MenuStaff s
+        INNER JOIN dbo.MenuStaffRoles r
+          ON r.menuId = s.menuId AND r.name = @roleName
+        WHERE s.roleId IS NULL
+          AND LOWER(LTRIM(RTRIM(ISNULL(${roleCol}, '')))) IN (${inList})
+      `);
+    }
   }
 
-  // Any remaining staff without a role → fall back to the waiter role.
+  // Any remaining staff without a roleId → fall back to the waiter role.
+  // Must always run (even when legacy `role` column is gone) so old accounts
+  // created before RBAC are not left with NULL and zero permissions.
   const waiterDef = DEFAULT_STAFF_ROLES.find((d) => d.slug === "waiter");
   if (waiterDef) {
-    await pool
+    const result = await pool
       .request()
       .input("roleName", sql.NVarChar(100), waiterDef.nameAr)
       .query(`
@@ -163,6 +165,12 @@ async function migrateLegacyStaffRoles(): Promise<void> {
           ON r.menuId = s.menuId AND r.name = @roleName
         WHERE s.roleId IS NULL
       `);
+    const assigned = Number(result.rowsAffected?.[0] ?? 0);
+    if (assigned > 0) {
+      logger.info("Backfilled staff with missing roleId to default waiter role", {
+        assigned,
+      });
+    }
   }
 }
 

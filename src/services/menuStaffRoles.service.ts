@@ -259,12 +259,7 @@ export async function updateRole(
     if (
       before.permissions.includes("dashboard:access") &&
       !nextPermissions.includes("dashboard:access")
-    ) {
-      const others = await countDashboardAccessRoles(menuId, roleId);
-      if (others === 0) {
-        throw new StaffRoleError("last_dashboard_access_role");
-      }
-    }
+    ) 
     updates.push("permissionsJson = @permissionsJson");
     request.input(
       "permissionsJson",
@@ -302,12 +297,7 @@ export async function deleteRole(
   if (role.staffCount > 0) {
     throw new StaffRoleError("role_in_use");
   }
-  if (role.permissions.includes("dashboard:access")) {
-    const others = await countDashboardAccessRoles(menuId, roleId);
-    if (others === 0) {
-      throw new StaffRoleError("last_dashboard_access_role");
-    }
-  }
+  
 
   const pool = await getPool();
   await pool
