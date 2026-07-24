@@ -878,6 +878,14 @@ export const ApiErrors = {
     en: "Select at least one customer",
     ar: "اختر عميلاً واحداً على الأقل",
   },
+  broadcastEmailsRequired: {
+    en: "Enter at least one test email",
+    ar: "أدخل بريداً إلكترونياً واحداً على الأقل للاختبار",
+  },
+  broadcastEmailsInvalid: {
+    en: "One or more test emails are invalid",
+    ar: "يوجد بريد إلكتروني غير صالح في قائمة الاختبار",
+  },
   broadcastSubjectRequired: {
     en: "Email subject is required",
     ar: "عنوان الرسالة مطلوب",

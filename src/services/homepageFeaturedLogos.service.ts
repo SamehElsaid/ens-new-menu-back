@@ -7,6 +7,7 @@ export type HomepageFeaturedLogo = {
   menuId: number;
   userId: number;
   logo: string;
+  slug: string;
   countryCode: string | null;
   sortOrder: number;
   createdAt: string;
@@ -15,6 +16,7 @@ export type HomepageFeaturedLogo = {
 type MenuCandidate = {
   id: number;
   logo: string | null;
+  slug: string;
   isActive: boolean;
   currency: string | null;
 };
@@ -31,6 +33,7 @@ export async function listHomepageFeaturedLogos(): Promise<
       hfl.menuId,
       hfl.userId,
       hfl.logo,
+      m.slug,
       hfl.countryCode,
       hfl.sortOrder,
       hfl.createdAt,
@@ -47,6 +50,7 @@ export async function listHomepageFeaturedLogos(): Promise<
     menuId: row.menuId,
     userId: row.userId,
     logo: row.logo,
+    slug: row.slug,
     countryCode: resolveFeaturedLogoCountryCode({
       currency: row.menuCurrency,
       country: row.userCountry,
@@ -91,7 +95,7 @@ async function pickMenuForUser(userId: number): Promise<MenuCandidate | null> {
   const pool = await getPool();
 
   const result = await pool.request().input("userId", sql.Int, userId).query(`
-    SELECT id, logo, isActive, ISNULL(currency, 'SAR') AS currency
+    SELECT id, logo, slug, isActive, ISNULL(currency, 'SAR') AS currency
     FROM Menus
     WHERE userId = @userId
     ORDER BY
@@ -159,7 +163,11 @@ export async function addUserMenuToHomepageFeatured(
       VALUES (@menuId, @userId, @logo, @countryCode, @sortOrder)
     `);
 
-  return insertResult.recordset[0];
+  const inserted = insertResult.recordset[0];
+  return {
+    ...inserted,
+    slug: menu.slug,
+  };
 }
 
 export async function removeUserFromHomepageFeatured(

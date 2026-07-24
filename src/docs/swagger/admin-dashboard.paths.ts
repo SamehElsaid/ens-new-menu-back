@@ -314,6 +314,7 @@
  *     summary: Preview email broadcast recipients
  *     description: |
  *       Returns recipient count and sample users for a broadcast audience.
+ *       For audience=test, pass emails (comma or space separated) instead of user ids.
  *       Admin only. Does not send email.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
@@ -322,12 +323,16 @@
  *         required: true
  *         schema:
  *           type: string
- *           enum: [all, selected, pro, free, no-menu, with-menu, products-no-image]
+ *           enum: [all, selected, test, pro, free, no-menu, with-menu, products-no-image]
  *           example: products-no-image
  *       - in: query
  *         name: userIds
  *         schema: { type: string, example: "12,45,90" }
  *         description: Comma-separated user ids when audience is selected
+ *       - in: query
+ *         name: emails
+ *         schema: { type: string, example: "you@example.com,other@example.com" }
+ *         description: Test emails when audience is test (comma, space, or semicolon separated). Max 20.
  *     responses:
  *       200:
  *         description: Recipient preview
@@ -350,7 +355,8 @@
  *       Sends an email to a filtered user segment. The message field is the full
  *       HTML email document written by the admin (no server-side brand template).
  *       Use double-brace name in the HTML to insert the recipient name.
- *       Admin only. Max 500 recipients per send.
+ *       For audience=test, send to the provided emails list (max 20) without querying users.
+ *       Admin only. Max 500 recipients per send for normal audiences.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     requestBody:
  *       required: true
@@ -362,6 +368,7 @@
  *             message: "<!DOCTYPE html><html><body><p>Hello {{name}},</p><p>Add photos from Products.</p></body></html>"
  *             locale: ar
  *             userIds: [12, 45]
+ *             emails: ["you@example.com", "other@example.com"]
  *     responses:
  *       200:
  *         description: Broadcast completed
