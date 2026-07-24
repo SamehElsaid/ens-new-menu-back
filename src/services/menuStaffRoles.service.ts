@@ -3,7 +3,17 @@ import {
   expandPermissionsWithDependencies,
   partitionPermissionKeys,
 } from "../config/staffPermissions.catalog";
+import type { StaffLoginPortal } from "../config/staffRoleDefaults";
 import { permissionCache } from "./permissionCache";
+
+export const STAFF_LOGIN_PORTALS: readonly StaffLoginPortal[] = [
+  "staff_app",
+  "dashboard",
+];
+
+export function normalizeLoginPortal(raw: unknown): StaffLoginPortal {
+  return raw === "dashboard" ? "dashboard" : "staff_app";
+}
 
 export interface StaffRole {
   id: number;
@@ -11,6 +21,7 @@ export interface StaffRole {
   name: string;
   permissions: string[];
   isDefault: boolean;
+  loginPortal: StaffLoginPortal;
   staffCount: number;
   createdAt?: Date;
   updatedAt?: Date;
@@ -85,7 +96,7 @@ export async function listRolesForMenu(menuId: number): Promise<StaffRole[]> {
     .input("menuId", sql.Int, menuId)
     .query(`
       SELECT
-        r.id, r.menuId, r.name, r.permissionsJson, r.isDefault,
+        r.id, r.menuId, r.name, r.permissionsJson, r.isDefault, r.loginPortal,
         r.createdAt, r.updatedAt,
         (SELECT COUNT(*) FROM dbo.MenuStaff s WHERE s.roleId = r.id) AS staffCount
       FROM dbo.MenuStaffRoles r
@@ -107,7 +118,7 @@ export async function getRoleForMenu(
     .input("roleId", sql.Int, roleId)
     .query(`
       SELECT
-        r.id, r.menuId, r.name, r.permissionsJson, r.isDefault,
+        r.id, r.menuId, r.name, r.permissionsJson, r.isDefault, r.loginPortal,
         r.createdAt, r.updatedAt,
         (SELECT COUNT(*) FROM dbo.MenuStaff s WHERE s.roleId = r.id) AS staffCount
       FROM dbo.MenuStaffRoles r
@@ -125,6 +136,7 @@ function mapRoleRow(row: Record<string, unknown>): StaffRole {
     name: String(row.name),
     permissions: parsePermissionsJson(row.permissionsJson),
     isDefault: Boolean(row.isDefault),
+    loginPortal: normalizeLoginPortal(row.loginPortal),
     staffCount: Number(row.staffCount ?? 0),
     createdAt: row.createdAt as Date | undefined,
     updatedAt: row.updatedAt as Date | undefined,
@@ -182,12 +194,14 @@ export async function createRole(
   menuId: number,
   name: string,
   permissionsInput: unknown,
+  loginPortalInput?: unknown,
 ): Promise<StaffRole> {
   const trimmedName = typeof name === "string" ? name.trim() : "";
   if (!trimmedName) {
     throw new StaffRoleError("role_name_required");
   }
   const permissions = resolvePermissions(permissionsInput);
+  const loginPortal = normalizeLoginPortal(loginPortalInput);
 
   if (await roleNameExists(menuId, trimmedName)) {
     throw new StaffRoleError("role_name_exists");
@@ -203,10 +217,11 @@ export async function createRole(
       sql.NVarChar(sql.MAX),
       JSON.stringify(permissions),
     )
+    .input("loginPortal", sql.NVarChar(20), loginPortal)
     .query(`
-      INSERT INTO dbo.MenuStaffRoles (menuId, name, permissionsJson, isDefault)
+      INSERT INTO dbo.MenuStaffRoles (menuId, name, permissionsJson, isDefault, loginPortal)
       OUTPUT INSERTED.id
-      VALUES (@menuId, @name, @permissionsJson, 0)
+      VALUES (@menuId, @name, @permissionsJson, 0, @loginPortal)
     `);
 
   const roleId = Number(result.recordset[0].id);
@@ -220,6 +235,7 @@ export async function createRole(
 export interface UpdateRoleInput {
   name?: string;
   permissions?: unknown;
+  loginPortal?: unknown;
 }
 
 export async function updateRole(
@@ -255,16 +271,20 @@ export async function updateRole(
   let nextPermissions = before.permissions;
   if (input.permissions !== undefined) {
     nextPermissions = resolvePermissions(input.permissions);
-    // Guard: do not let this edit remove the last dashboard-access role.
-    if (
-      before.permissions.includes("dashboard:access") &&
-      !nextPermissions.includes("dashboard:access")
-    ) 
     updates.push("permissionsJson = @permissionsJson");
     request.input(
       "permissionsJson",
       sql.NVarChar(sql.MAX),
       JSON.stringify(nextPermissions),
+    );
+  }
+
+  if (input.loginPortal !== undefined) {
+    updates.push("loginPortal = @loginPortal");
+    request.input(
+      "loginPortal",
+      sql.NVarChar(20),
+      normalizeLoginPortal(input.loginPortal),
     );
   }
 

@@ -154,8 +154,13 @@ async function requireMenuAccess(
   req: Request,
   res: Response,
   menuId: string,
+  permission = "menu:categories",
 ): Promise<boolean> {
-  const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+  const access = await getMenuAccessForRequest(
+    req,
+    parseInt(menuId, 10),
+    permission,
+  );
   if (!access.ok) {
     sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
     return false;
@@ -643,14 +648,21 @@ export async function bulkImportCategories(
       return;
     }
 
-    if (!(await requireMenuAccess(req, res, menuId))) return;
-
-    const userId = req.user!.userId;
+    const access = await getMenuAccessForRequest(
+      req,
+      menuIdNum,
+      "menu:import",
+    );
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
+      return;
+    }
+    const ownerUserId = access.ownerUserId;
 
     const result = await executeTransaction(async (transaction) => {
       await assertAndRecordBulkImportUsage(
         transaction,
-        userId,
+        ownerUserId,
         menuIdNum,
       );
 
@@ -841,7 +853,7 @@ export async function bulkImportCategories(
       0,
     );
 
-    const bulkImportUsage = await canUserBulkImport(userId);
+    const bulkImportUsage = await canUserBulkImport(ownerUserId);
 
     res.status(201).json({
       message: "Bulk import completed successfully",
@@ -886,10 +898,17 @@ export async function checkBulkImportCanUse(
 ): Promise<void> {
   try {
     const { menuId } = req.params;
-    if (!(await requireMenuAccess(req, res, menuId))) return;
+    const access = await getMenuAccessForRequest(
+      req,
+      parseInt(menuId, 10),
+      "menu:import",
+    );
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
+      return;
+    }
 
-    const userId = req.user!.userId;
-    const { allowed, used, limit } = await canUserBulkImport(userId);
+    const { allowed, used, limit } = await canUserBulkImport(access.ownerUserId);
     res.json({
       canuse: allowed,
       used,

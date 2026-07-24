@@ -77,6 +77,7 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
           s.*,
           sr.name as staffRoleName,
           sr.permissionsJson as staffRolePermissions,
+          sr.loginPortal as staffRoleLoginPortal,
           m.id as menuTableId,
           m.uuid as menuUuid,
           m.userId as menuOwnerUserId,
@@ -168,6 +169,16 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
     }
 
     const staff = matchedRow;
+
+    // Portal gate: dashboard-portal roles (cashier / accountant / manager) must
+    // sign in from the dashboard login page, not the staff app.
+    if (staff.staffRoleLoginPortal === "dashboard") {
+      sendApiError(res, req, 403, {
+        en: "This account signs in from the dashboard login, not the staff app.",
+        ar: "هذا الحساب يسجّل الدخول من صفحة لوحة التحكم، وليس من تطبيق الطاقم.",
+      });
+      return;
+    }
 
     if (!staff.menuIsActive) {
       sendApiError(res, req, 403, {

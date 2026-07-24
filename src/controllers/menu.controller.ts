@@ -19,6 +19,7 @@ import {
   normalizeStaffRow,
 } from "../config/menuStaffColumns";
 import { ensureDefaultRolesForMenu } from "../schemas/menuStaffRoles.schema";
+import { DEFAULT_STAFF_ROLES } from "../config/staffRoleDefaults";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 import { generateMenuUuid } from "../utils/menuIdentifier";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
@@ -349,7 +350,8 @@ function parseCopyFlag(raw: unknown, defaultValue: boolean): boolean {
  * Optional flags (default: products false; settings/design/media/address true):
  * `copyProducts`, `copySettings`, `copyDesign`, `copyMedia`, `copyAddress`.
  * Logo is always copied when present (required to create a menu).
- * Does not copy staff, tables, ads, or group membership.
+ * Staff ROLES are always copied (falling back to defaults when the source has
+ * none). Does not copy staff members, tables, ads, or group membership.
  */
 export async function copyMenu(req: Request, res: Response): Promise<void> {
   try {
@@ -1122,6 +1124,78 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
         }
       }
 
+      // Copy staff ROLES (names + permissions + login portal) — never staff
+      // members. Roles only exist for integer-id menus (MenuStaffRoles.menuId
+      // is INT), so skip for custom string ids.
+      if (!isIdString) {
+        const newNumericMenuId = Number(newMenuId);
+        const sourceRoles = Number.isFinite(sourceMenuId)
+          ? await transaction
+              .request()
+              .input("sourceMenuId", sql.Int, sourceMenuId).query(`
+                SELECT name, permissionsJson, isDefault, loginPortal
+                FROM dbo.MenuStaffRoles
+                WHERE menuId = @sourceMenuId
+                ORDER BY isDefault DESC, name ASC
+              `)
+          : { recordset: [] as Record<string, unknown>[] };
+
+        if (sourceRoles.recordset.length > 0) {
+          for (const role of sourceRoles.recordset as Record<
+            string,
+            unknown
+          >[]) {
+            await transaction
+              .request()
+              .input("menuId", sql.Int, newNumericMenuId)
+              .input("name", sql.NVarChar(100), String(role.name))
+              .input(
+                "permissionsJson",
+                sql.NVarChar(sql.MAX),
+                role.permissionsJson != null
+                  ? String(role.permissionsJson)
+                  : "[]",
+              )
+              .input("isDefault", sql.Bit, role.isDefault ? 1 : 0)
+              .input(
+                "loginPortal",
+                sql.NVarChar(20),
+                role.loginPortal === "dashboard" ? "dashboard" : "staff_app",
+              ).query(`
+                IF NOT EXISTS (
+                  SELECT 1 FROM dbo.MenuStaffRoles
+                  WHERE menuId = @menuId AND name = @name
+                )
+                INSERT INTO dbo.MenuStaffRoles
+                  (menuId, name, permissionsJson, isDefault, loginPortal)
+                VALUES (@menuId, @name, @permissionsJson, @isDefault, @loginPortal)
+              `);
+          }
+        } else {
+          // Source had no roles — seed the standard defaults for the new menu.
+          for (const def of DEFAULT_STAFF_ROLES) {
+            await transaction
+              .request()
+              .input("menuId", sql.Int, newNumericMenuId)
+              .input("name", sql.NVarChar(100), def.nameAr)
+              .input(
+                "permissionsJson",
+                sql.NVarChar(sql.MAX),
+                JSON.stringify(def.permissions),
+              )
+              .input("loginPortal", sql.NVarChar(20), def.loginPortal).query(`
+                IF NOT EXISTS (
+                  SELECT 1 FROM dbo.MenuStaffRoles
+                  WHERE menuId = @menuId AND name = @name
+                )
+                INSERT INTO dbo.MenuStaffRoles
+                  (menuId, name, permissionsJson, isDefault, loginPortal)
+                VALUES (@menuId, @name, @permissionsJson, 1, @loginPortal)
+              `);
+          }
+        }
+      }
+
       return newMenuId;
     });
 
@@ -1791,7 +1865,7 @@ export async function deleteMenu(req: Request, res: Response): Promise<void> {
     const menuId = parseInt(req.params.id, 10);
     const pool = await getPool();
 
-    // تأكد إن المنيو ملك اليوزر
+    // Confirm the menu belongs to the requester before touching anything.
     const owned = await pool
       .request()
       .input("id", sql.Int, menuId)
@@ -1803,24 +1877,26 @@ export async function deleteMenu(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // 1) امسح الموظفين الأول (بيفك FK_MenuStaff_Role)
-    await pool
-      .request()
-      .input("id", sql.Int, menuId)
-      .query(`DELETE FROM MenuStaff WHERE menuId = @id`);
+    // Delete staff -> roles -> menu inside one transaction. Staff must go first
+    // to release FK_MenuStaff_Role before the roles (and the menu) are removed;
+    // wrapping it prevents a mid-failure from leaving a half-deleted menu.
+    await executeTransaction(async (transaction) => {
+      await transaction
+        .request()
+        .input("id", sql.Int, menuId)
+        .query(`DELETE FROM MenuStaff WHERE menuId = @id`);
 
-    // 2) اختياري صريح — أو سيبه للـ CASCADE
-    await pool
-      .request()
-      .input("id", sql.Int, menuId)
-      .query(`DELETE FROM MenuStaffRoles WHERE menuId = @id`);
+      await transaction
+        .request()
+        .input("id", sql.Int, menuId)
+        .query(`DELETE FROM MenuStaffRoles WHERE menuId = @id`);
 
-    // 3) امسح المنيو
-    await pool
-      .request()
-      .input("id", sql.Int, menuId)
-      .input("userId", sql.Int, userId)
-      .query(`DELETE FROM Menus WHERE id = @id AND userId = @userId`);
+      await transaction
+        .request()
+        .input("id", sql.Int, menuId)
+        .input("userId", sql.Int, userId)
+        .query(`DELETE FROM Menus WHERE id = @id AND userId = @userId`);
+    });
 
     res.json({ message: "Menu deleted successfully" });
   } catch (error) {

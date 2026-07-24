@@ -10,6 +10,10 @@ import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+import { getMenuAccessForRequest } from "../utils/menuAccess";
+
+/** Staff-management endpoints: owner OR a staff member whose role grants it. */
+const STAFF_MANAGE_PERMISSION = "staff:manage";
 
 /** Ensures a roleId exists and belongs to this menu; returns its name/legacy role. */
 async function resolveMenuRole(
@@ -95,22 +99,20 @@ async function isStaffEmailTaken(
 
 export async function getStaff(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
 
-    const pool = await getPool();
-    const meta = await getMenuStaffColumnMeta();
-
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
+    const access = await getMenuAccessForRequest(
+      req,
+      parseInt(menuId, 10),
+      STAFF_MANAGE_PERMISSION,
+    );
+    if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
+
+    const pool = await getPool();
+    const meta = await getMenuStaffColumnMeta();
 
     const result = await pool
       .request()
@@ -139,8 +141,17 @@ export async function getStaffById(
   res: Response,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, staffId } = req.params;
+
+    const access = await getMenuAccessForRequest(
+      req,
+      parseInt(menuId, 10),
+      STAFF_MANAGE_PERMISSION,
+    );
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFound);
+      return;
+    }
 
     const pool = await getPool();
     const meta = await getMenuStaffColumnMeta();
@@ -149,7 +160,7 @@ export async function getStaffById(
       .request()
       .input("staffId", sql.Int, parseInt(staffId))
       .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
+      .input("userId", sql.Int, access.ownerUserId)
       .query(`
         SELECT s.*, r.name AS roleName
         FROM MenuStaff s
@@ -180,23 +191,21 @@ export async function createStaff(
   res: Response,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const { name, roleId, phone, email, password, isActive = true } = req.body;
 
-    const pool = await getPool();
-    const meta = await getMenuStaffColumnMeta();
-
-    const menuCheck = await pool
-      .request()
-      .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
-      .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-
-    if (menuCheck.recordset.length === 0) {
+    const access = await getMenuAccessForRequest(
+      req,
+      parseInt(menuId, 10),
+      STAFF_MANAGE_PERMISSION,
+    );
+    if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
+
+    const pool = await getPool();
+    const meta = await getMenuStaffColumnMeta();
 
     const resolvedRole = await resolveMenuRole(parseInt(menuId, 10), roleId);
     if (!resolvedRole.ok) {
@@ -312,9 +321,18 @@ export async function updateStaff(
   res: Response,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, staffId } = req.params;
     const { name, roleId, phone, email, password, isActive } = req.body;
+
+    const access = await getMenuAccessForRequest(
+      req,
+      parseInt(menuId, 10),
+      STAFF_MANAGE_PERMISSION,
+    );
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.staffMemberNotFound);
+      return;
+    }
 
     const pool = await getPool();
     const meta = await getMenuStaffColumnMeta();
@@ -323,7 +341,7 @@ export async function updateStaff(
       .request()
       .input("staffId", sql.Int, parseInt(staffId))
       .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
+      .input("userId", sql.Int, access.ownerUserId)
       .query(`
         SELECT s.*
         FROM MenuStaff s
@@ -452,8 +470,17 @@ export async function deleteStaff(
   res: Response,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId, staffId } = req.params;
+
+    const access = await getMenuAccessForRequest(
+      req,
+      parseInt(menuId, 10),
+      STAFF_MANAGE_PERMISSION,
+    );
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.staffMemberNotFound);
+      return;
+    }
 
     const pool = await getPool();
     const meta = await getMenuStaffColumnMeta();
@@ -463,7 +490,7 @@ export async function deleteStaff(
       .request()
       .input("staffId", sql.Int, parseInt(staffId, 10))
       .input("menuId", sql.Int, parseInt(menuId, 10))
-      .input("userId", sql.Int, userId)
+      .input("userId", sql.Int, access.ownerUserId)
       .query(`
         SELECT ${nameCol} AS staffName
         FROM MenuStaff s
@@ -485,7 +512,7 @@ export async function deleteStaff(
       .request()
       .input("staffId", sql.Int, parseInt(staffId))
       .input("menuId", sql.Int, parseInt(menuId))
-      .input("userId", sql.Int, userId)
+      .input("userId", sql.Int, access.ownerUserId)
       .query(`
         DELETE s
         FROM MenuStaff s
