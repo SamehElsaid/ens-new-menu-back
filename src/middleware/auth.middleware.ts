@@ -134,6 +134,23 @@ export async function requireStaff(
   });
 }
 
+/**
+ * Blocks staff tokens from owner-only endpoints (menu create/copy/delete,
+ * listing all menus, etc.). Assumes `requireAuth` already populated `req.user`.
+ * Owners and admins pass through.
+ */
+export function rejectStaff(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (req.user?.role === ROLES.STAFF) {
+    sendApiError(res, req, 403, ApiErrors.forbidden);
+    return;
+  }
+  next();
+}
+
 export async function requireEmailVerified(
   req: Request,
   res: Response,

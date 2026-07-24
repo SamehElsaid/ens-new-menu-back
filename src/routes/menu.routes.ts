@@ -6,7 +6,7 @@ import { getMenuAnalytics } from "../controllers/menuAnalytics.controller";
 import { listMenuRatingsHandler } from "../controllers/menuRatings.controller";
 import { ALLOWED_MENU_THEMES } from "../constants/menuThemes";
 import { validate } from "../middleware/validation";
-import { requireAuth } from "../middleware/auth.middleware";
+import { requireAuth, rejectStaff } from "../middleware/auth.middleware";
 import { checkMenuLimit } from "../middleware/planLimits";
 import menuItemRoutes from "./menuItem.routes";
 import branchRoutes from "./branch.routes";
@@ -34,9 +34,10 @@ router.get(
   menuController.checkSlugAvailability,
 );
 
-// GET /api/menus - Get user's menus
+// GET /api/menus - Get user's menus (owner-only: staff belong to a single menu)
 router.get(
   "/",
+  rejectStaff,
   [query("locale").optional().isIn(["ar", "en"])],
   menuController.getUserMenus,
 );
@@ -44,6 +45,7 @@ router.get(
 // POST /api/menus - Create new menu
 router.post(
   "/",
+  rejectStaff,
   checkMenuLimit,
   validate([
     body("nameAr").notEmpty().trim().isLength({ max: 255 }),
@@ -63,6 +65,7 @@ router.post(
 // POST /api/menus/:menuId/copy — Copy menu with optional sections
 router.post(
   "/:menuId/copy",
+  rejectStaff,
   checkMenuLimit,
   validate([
     param("menuId").isInt(),
@@ -253,17 +256,19 @@ router.put(
   menuController.updateMenu,
 );
 
-// PUT /api/menus/:id/status - Toggle menu status
+// PUT /api/menus/:id/status - Toggle menu status (owner-only)
 router.put(
   "/:id/status",
+  rejectStaff,
   resolveMenuIdRouteParam,
   [param("id").isInt()],
   menuController.toggleMenuStatus,
 );
 
-// DELETE /api/menus/:id - Delete menu
+// DELETE /api/menus/:id - Delete menu (owner-only)
 router.delete(
   "/:id",
+  rejectStaff,
   resolveMenuIdRouteParam,
   [param("id").isInt()],
   menuController.deleteMenu,

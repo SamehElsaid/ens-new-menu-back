@@ -11,6 +11,9 @@ import {
   normalizeTableNumber,
 } from "../utils/normalizeTableNumber";
 
+/** Tables section: owner or a staff role granting `menu:tables`. */
+const TABLES_PERMISSION = "menu:tables";
+
 async function menuTableNumberExists(
   pool: Awaited<ReturnType<typeof getPool>>,
   menuId: number,
@@ -42,7 +45,11 @@ async function requireMenuAccess(
   res: Response,
   menuId: string,
 ): Promise<boolean> {
-  const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+  const access = await getMenuAccessForRequest(
+    req,
+    parseInt(menuId, 10),
+    TABLES_PERMISSION,
+  );
   if (!access.ok) {
     sendApiError(res, req, 404, ApiErrors.menuNotFound);
     return false;
@@ -87,7 +94,11 @@ export async function getTableById(
 
     const pool = await getPool();
 
-    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    const access = await getMenuAccessForRequest(
+    req,
+    parseInt(menuId, 10),
+    TABLES_PERMISSION,
+  );
     if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
@@ -210,7 +221,11 @@ export async function updateTable(
 
     const pool = await getPool();
 
-    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    const access = await getMenuAccessForRequest(
+    req,
+    parseInt(menuId, 10),
+    TABLES_PERMISSION,
+  );
     if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
@@ -307,7 +322,11 @@ export async function deleteTable(
 
     const pool = await getPool();
 
-    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    const access = await getMenuAccessForRequest(
+    req,
+    parseInt(menuId, 10),
+    TABLES_PERMISSION,
+  );
     if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;

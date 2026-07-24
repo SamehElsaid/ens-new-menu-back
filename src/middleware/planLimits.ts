@@ -3,10 +3,29 @@ import { getPool, sql } from "../config/database";
 import { isUserOnFreePlan } from "../services/subscriptionPlan.service";
 import { canUserBulkImport } from "../services/bulkImportUsage.service";
 import { getActiveSubscriptionLimits } from "../services/extraMenus.service";
-import { hasCapability } from "../services/planCapabilities.service";
+import {
+  hasCapability,
+  menuOwnerHasCapability,
+} from "../services/planCapabilities.service";
+import { getMenuOwnerUserId } from "../utils/menuAccess";
 import type { BooleanCapabilityKey } from "../types/planCapabilities";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
+
+/**
+ * Plan gating on `/api/menus/:menuId/...` must follow the MENU OWNER's plan, not
+ * the requester — dashboard staff carry `userId = MenuStaff.id`, which has no
+ * subscription. Resolve the owner id from the route `menuId` when present and
+ * fall back to the requester (owner-scoped, non-menu routes).
+ */
+async function resolvePlanOwnerId(req: Request): Promise<number> {
+  const menuId = Number(req.params.menuId);
+  if (Number.isInteger(menuId) && menuId > 0) {
+    const ownerId = await getMenuOwnerUserId(menuId);
+    if (ownerId != null) return ownerId;
+  }
+  return req.user!.userId;
+}
 
 export type ActiveMenuLimitCheck = {
   allowed: boolean;
@@ -162,8 +181,8 @@ export async function requireProPlan(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
-    if (await isUserOnFreePlan(userId)) {
+    const ownerId = await resolvePlanOwnerId(req);
+    if (await isUserOnFreePlan(ownerId)) {
       sendApiError(
         res,
         req,
@@ -190,8 +209,12 @@ export function requirePlanCapability(key: BooleanCapabilityKey) {
     next: NextFunction,
   ): Promise<void> => {
     try {
-      const userId = req.user!.userId;
-      if (!(await hasCapability(userId, key))) {
+      const menuId = Number(req.params.menuId);
+      const ok =
+        Number.isInteger(menuId) && menuId > 0
+          ? await menuOwnerHasCapability(menuId, key)
+          : await hasCapability(req.user!.userId, key);
+      if (!ok) {
         sendApiError(
           res,
           req,
@@ -218,8 +241,8 @@ export async function checkBulkImportLimit(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
-    const { allowed, used, limit } = await canUserBulkImport(userId);
+    const ownerId = await resolvePlanOwnerId(req);
+    const { allowed, used, limit } = await canUserBulkImport(ownerId);
 
     if (!allowed) {
       sendApiError(res, req, 403, ApiErrors.bulkImportUsageLimitExceeded, {

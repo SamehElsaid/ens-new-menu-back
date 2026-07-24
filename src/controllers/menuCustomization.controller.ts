@@ -8,9 +8,13 @@ import {
   customizationIncludesHeroTextFields,
   getThemeCustomizationDefaults,
 } from '../constants/menuThemes';
+import { getMenuAccessForRequest } from '../utils/menuAccess';
 
 const ERR_MENU_ACCESS = ApiErrors.menuNotFoundOrAccess.en;
 const ERR_CUSTOM_PRO = ApiErrors.customizationsProOnly.en;
+
+/** Settings/design section: owner or a staff role granting `settings:manage`. */
+const SETTINGS_PERMISSION = 'settings:manage';
 
 /**
  * Get menu customizations
@@ -19,6 +23,17 @@ const ERR_CUSTOM_PRO = ApiErrors.customizationsProOnly.en;
 export async function getCustomizations(req: Request, res: Response): Promise<void> {
   try {
     const { menuId } = req.params;
+
+    const access = await getMenuAccessForRequest(
+      req,
+      parseInt(menuId, 10),
+      SETTINGS_PERMISSION,
+    );
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
+      return;
+    }
+
     const pool = await getPool();
 
     const menuResult = await pool
@@ -62,7 +77,6 @@ export async function getCustomizations(req: Request, res: Response): Promise<vo
  */
 export async function updateCustomizations(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
     const {
       primaryColor,
@@ -75,11 +89,21 @@ export async function updateCustomizations(req: Request, res: Response): Promise
       heroSubtitleEn,
     } = req.body;
 
+    const access = await getMenuAccessForRequest(
+      req,
+      parseInt(menuId, 10),
+      SETTINGS_PERMISSION,
+    );
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
+      return;
+    }
+
     await executeTransaction(async (transaction) => {
       const menuResult = await transaction
         .request()
         .input('menuId', sql.Int, parseInt(menuId))
-        .input('userId', sql.Int, userId)
+        .input('userId', sql.Int, access.ownerUserId)
         .query(`
           SELECT m.id, m.theme, s.billingCycle
           FROM Menus m
@@ -218,14 +242,23 @@ export async function updateCustomizations(req: Request, res: Response): Promise
  */
 export async function resetCustomizations(req: Request, res: Response): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const { menuId } = req.params;
+
+    const access = await getMenuAccessForRequest(
+      req,
+      parseInt(menuId, 10),
+      SETTINGS_PERMISSION,
+    );
+    if (!access.ok) {
+      sendApiError(res, req, 404, ApiErrors.menuNotFoundOrAccess);
+      return;
+    }
 
     await executeTransaction(async (transaction) => {
       const menuResult = await transaction
         .request()
         .input('menuId', sql.Int, parseInt(menuId))
-        .input('userId', sql.Int, userId)
+        .input('userId', sql.Int, access.ownerUserId)
         .query('SELECT id FROM Menus WHERE id = @menuId AND userId = @userId');
 
       if (menuResult.recordset.length === 0) {
