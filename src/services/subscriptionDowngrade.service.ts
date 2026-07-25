@@ -191,6 +191,9 @@ export class SubscriptionDowngradeService {
 
   /**
    * Expire paid subscriptions past end date (or legacy grace period) and move user to Free.
+   * Preserves paid Pro rows (planId / billingCycle / amount) so first-month intro
+   * eligibility can still see prior monthly/yearly history. Inserts a new Free row
+   * instead of rewriting the paid subscription (matches self-service downgrade).
    * Returns number of subscriptions processed.
    */
   static async expireAndDowngradePaidSubscriptionsForUser(
@@ -230,20 +233,43 @@ export class SubscriptionDowngradeService {
         await pool
           .request()
           .input("subscriptionId", sql.Int, subscription.subscriptionId)
-          .input("freePlanId", sql.Int, freePlanId)
           .query(`
             UPDATE Subscriptions
-            SET planId = @freePlanId,
-                billingCycle = 'free',
-                status = 'active',
-                startDate = GETDATE(),
-                endDate = NULL,
+            SET status = 'expired',
+                endDate = ISNULL(endDate, GETDATE()),
                 extraMenus = 0,
                 gracePeriodStartDate = NULL,
                 gracePeriodEndDate = NULL,
                 notificationSent = 0,
                 expiryNotificationSent = 0
             WHERE id = @subscriptionId
+          `);
+      }
+
+      const activeResult = await pool
+        .request()
+        .input("userId", sql.Int, userId).query(`
+          SELECT TOP 1 id
+          FROM Subscriptions
+          WHERE userId = @userId
+            AND status = 'active'
+            AND (endDate IS NULL OR endDate > GETDATE())
+          ORDER BY id DESC
+        `);
+
+      if (activeResult.recordset.length === 0) {
+        await pool
+          .request()
+          .input("userId", sql.Int, userId)
+          .input("planId", sql.Int, freePlanId).query(`
+            INSERT INTO Subscriptions (
+              userId, planId, billingCycle, startDate, endDate, status,
+              notificationSent, paymentStatus, paidAt, amount
+            )
+            VALUES (
+              @userId, @planId, 'free', GETDATE(), NULL, 'active',
+              1, 'completed', GETDATE(), 0
+            )
           `);
       }
 

@@ -109,6 +109,27 @@ const PRO_PAID_SUBSCRIPTION_FILTER = `
     )
 `;
 
+async function userHadCompletedProPaymentKind(
+  pool: ConnectionPool,
+  userId: number,
+  kind: "pro_monthly" | "pro_yearly",
+): Promise<boolean> {
+  // Survives legacy Free rewrites of Subscriptions rows that wiped planId/billingCycle.
+  const kindPattern = `%"kind":"${kind}"%`;
+  const result = await pool
+    .request()
+    .input("userId", sql.Int, userId)
+    .input("kindPattern", sql.NVarChar(100), kindPattern).query(`
+      SELECT COUNT(*) as cnt
+      FROM payments p
+      INNER JOIN [subscriptionCheckout] o ON p.order_id = o.id
+      WHERE o.user_id = @userId
+        AND LOWER(LTRIM(RTRIM(ISNULL(p.payment_status, '')))) = N'completed'
+        AND p.customer_reference LIKE @kindPattern
+    `);
+  return Number(result.recordset[0]?.cnt ?? 0) > 0;
+}
+
 /** True if user had a paid Pro subscription on monthly billing (independent of yearly). */
 export async function userHadPriorMonthlySubscription(
   pool: ConnectionPool,
@@ -120,7 +141,10 @@ export async function userHadPriorMonthlySubscription(
       ${PRO_PAID_SUBSCRIPTION_FILTER}
         AND LOWER(LTRIM(RTRIM(ISNULL(s.billingCycle, '')))) = N'monthly'
     `);
-  return Number(result.recordset[0]?.cnt ?? 0) > 0;
+  if (Number(result.recordset[0]?.cnt ?? 0) > 0) {
+    return true;
+  }
+  return userHadCompletedProPaymentKind(pool, userId, "pro_monthly");
 }
 
 /** True if user had a paid Pro subscription on yearly billing (independent of monthly). */
@@ -134,7 +158,10 @@ export async function userHadPriorYearlySubscription(
       ${PRO_PAID_SUBSCRIPTION_FILTER}
         AND LOWER(LTRIM(RTRIM(ISNULL(s.billingCycle, '')))) IN (N'yearly', N'annual')
     `);
-  return Number(result.recordset[0]?.cnt ?? 0) > 0;
+  if (Number(result.recordset[0]?.cnt ?? 0) > 0) {
+    return true;
+  }
+  return userHadCompletedProPaymentKind(pool, userId, "pro_yearly");
 }
 
 export async function resolveProMonthlyCheckoutAmount(

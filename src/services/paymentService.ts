@@ -815,11 +815,12 @@ export class PaymentService {
         ownerUserId,
         Number(plan.priceMonthly),
       );
-      price = checkout.amount;
+      // Renewals always use full monthly — intro is first checkout only.
+      price = data.renew ? checkout.fullMonthly : checkout.amount;
       if (!Number.isFinite(price) || price <= 0) {
         throw new ApiError(500, "Pro monthly price is not configured");
       }
-      if (checkout.isFirstMonthly) {
+      if (!data.renew && checkout.isFirstMonthly) {
         console.log(
           `💰 Pro monthly first-month offer: ${checkout.fullMonthly} → ${price} ${PRO_YEARLY_CURRENCY}`,
         );
@@ -831,11 +832,12 @@ export class PaymentService {
         Number(plan.priceYearly),
         Number(plan.priceMonthly),
       );
-      price = checkout.amount;
+      // Renewals always use full yearly — intro is first checkout only.
+      price = data.renew ? checkout.fullYearly : checkout.amount;
       if (!Number.isFinite(price) || price <= 0) {
         throw new ApiError(500, "Pro yearly price is not configured");
       }
-      if (checkout.isFirstYearly) {
+      if (!data.renew && checkout.isFirstYearly) {
         console.log(
           `💰 Pro yearly first-time discount: ${checkout.fullYearly} → ${price} ${PRO_YEARLY_CURRENCY}`,
         );
