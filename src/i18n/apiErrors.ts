@@ -290,6 +290,10 @@ export const ApiErrors = {
     en: "This email is already used by another staff member",
     ar: "هذا البريد الإلكتروني مستخدم بالفعل من قبل موظف آخر",
   },
+  staffMenuGrantsRequired: {
+    en: "Select at least one menu for this staff member",
+    ar: "اختر منيو واحدًا على الأقل لهذا الموظف",
+  },
   staffPasswordRequiresEmail: {
     en: "Email is required when setting a staff password",
     ar: "البريد الإلكتروني مطلوب عند تعيين كلمة مرور للموظف",
@@ -1042,6 +1046,10 @@ export const ApiErrors = {
   lastDashboardAccessRole: {
     en: "Cannot remove the last role that has dashboard access",
     ar: "لا يمكن حذف آخر دور يملك صلاحية دخول لوحة التحكم",
+  },
+  defaultRoleReadOnly: {
+    en: "Default roles cannot be edited or deleted. Duplicate the role to get an editable copy.",
+    ar: "الأدوار الافتراضية لا يمكن تعديلها أو حذفها. انسخ الدور للحصول على نسخة قابلة للتعديل.",
   },
   invalidRoleId: {
     en: "A valid role must be selected",

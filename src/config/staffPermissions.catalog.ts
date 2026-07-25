@@ -29,6 +29,21 @@ export interface StaffPermissionMeta {
   dependsOn: string[];
 }
 
+/**
+ * Permissions kept in the catalog for backwards compatibility but no longer
+ * enforced: every staff member may sign in from either surface and open the
+ * dashboard shell. What they can actually do inside is still decided by the
+ * specific permissions (`orders:view`, `staff:manage`, …) plus their menu
+ * grants, so treating these as always granted widens nothing real.
+ */
+export const NON_GATING_PERMISSIONS: ReadonlySet<string> = new Set([
+  "dashboard:access",
+]);
+
+export function isNonGatingPermission(permission: string): boolean {
+  return NON_GATING_PERMISSIONS.has(permission);
+}
+
 export const STAFF_PERMISSIONS: readonly StaffPermissionMeta[] = [
   // ── Orders ──────────────────────────────────────────────────────────
   {

@@ -1133,7 +1133,7 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
           ? await transaction
               .request()
               .input("sourceMenuId", sql.Int, sourceMenuId).query(`
-                SELECT name, permissionsJson, isDefault, loginPortal
+                SELECT name, nameEn, permissionsJson, isDefault, loginPortal
                 FROM dbo.MenuStaffRoles
                 WHERE menuId = @sourceMenuId
                 ORDER BY isDefault DESC, name ASC
@@ -1149,6 +1149,11 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
               .request()
               .input("menuId", sql.Int, newNumericMenuId)
               .input("name", sql.NVarChar(100), String(role.name))
+              .input(
+                "nameEn",
+                sql.NVarChar(100),
+                role.nameEn != null ? String(role.nameEn) : null,
+              )
               .input(
                 "permissionsJson",
                 sql.NVarChar(sql.MAX),
@@ -1167,8 +1172,8 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
                   WHERE menuId = @menuId AND name = @name
                 )
                 INSERT INTO dbo.MenuStaffRoles
-                  (menuId, name, permissionsJson, isDefault, loginPortal)
-                VALUES (@menuId, @name, @permissionsJson, @isDefault, @loginPortal)
+                  (menuId, name, nameEn, permissionsJson, isDefault, loginPortal)
+                VALUES (@menuId, @name, @nameEn, @permissionsJson, @isDefault, @loginPortal)
               `);
           }
         } else {
@@ -1178,6 +1183,7 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
               .request()
               .input("menuId", sql.Int, newNumericMenuId)
               .input("name", sql.NVarChar(100), def.nameAr)
+              .input("nameEn", sql.NVarChar(100), def.nameEn)
               .input(
                 "permissionsJson",
                 sql.NVarChar(sql.MAX),
@@ -1189,8 +1195,8 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
                   WHERE menuId = @menuId AND name = @name
                 )
                 INSERT INTO dbo.MenuStaffRoles
-                  (menuId, name, permissionsJson, isDefault, loginPortal)
-                VALUES (@menuId, @name, @permissionsJson, 1, @loginPortal)
+                  (menuId, name, nameEn, permissionsJson, isDefault, loginPortal)
+                VALUES (@menuId, @name, @nameEn, @permissionsJson, 1, @loginPortal)
               `);
           }
         }
@@ -1263,11 +1269,11 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
           en.name as nameEn, en.description as descriptionEn
         FROM Menus m
         ${MENU_GROUP_JOIN_SQL}
-        INNER JOIN MenuStaff s ON s.menuId = m.id AND s.id = @staffId
+        INNER JOIN MenuStaff s ON s.id = @staffId
+        INNER JOIN dbo.MenuStaffGrants g ON g.staffId = s.id AND g.menuId = m.id
         LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
         LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
         WHERE m.id = @id
-          AND LOWER(LTRIM(RTRIM(ISNULL(s.role, '')))) IN ('cashier', 'casher')
       `);
     } else {
       result = await pool
@@ -1293,11 +1299,9 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       `);
     }
 
+    // Staff reach this only through a menu grant, so "no rows" means the menu
+    // is not theirs — same answer as a missing menu, and it leaks nothing.
     if (result.recordset.length === 0) {
-      if (isStaff) {
-        sendApiError(res, req, 403, ApiErrors.staffCashierRequired);
-        return;
-      }
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
@@ -1877,19 +1881,47 @@ export async function deleteMenu(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Delete staff -> roles -> menu inside one transaction. Staff must go first
-    // to release FK_MenuStaff_Role before the roles (and the menu) are removed;
-    // wrapping it prevents a mid-failure from leaving a half-deleted menu.
+    // Grants -> staff -> roles -> menu inside one transaction. Staff must go
+    // before the roles to release FK_MenuStaff_Role; wrapping it prevents a
+    // mid-failure from leaving a half-deleted menu. Staff and roles are
+    // account-level now, so only what this menu leaves orphaned is removed.
     await executeTransaction(async (transaction) => {
       await transaction
         .request()
         .input("id", sql.Int, menuId)
-        .query(`DELETE FROM MenuStaff WHERE menuId = @id`);
+        .query(`DELETE FROM dbo.MenuStaffGrants WHERE menuId = @id`);
 
       await transaction
         .request()
         .input("id", sql.Int, menuId)
-        .query(`DELETE FROM MenuStaffRoles WHERE menuId = @id`);
+        .query(`
+          DELETE s
+          FROM MenuStaff s
+          WHERE s.menuId = @id
+            AND NOT EXISTS (
+              SELECT 1 FROM dbo.MenuStaffGrants g WHERE g.staffId = s.id
+            )
+        `);
+
+      // Survivors still working on other menus must not keep a dangling anchor.
+      await transaction
+        .request()
+        .input("id", sql.Int, menuId)
+        .query(`
+          UPDATE s
+          SET s.menuId = (
+            SELECT MIN(g.menuId) FROM dbo.MenuStaffGrants g WHERE g.staffId = s.id
+          )
+          FROM MenuStaff s
+          WHERE s.menuId = @id
+        `);
+
+      // Roles belong to the account catalog — unanchor instead of deleting so
+      // staff on the owner's other menus keep their role.
+      await transaction
+        .request()
+        .input("id", sql.Int, menuId)
+        .query(`UPDATE MenuStaffRoles SET menuId = NULL WHERE menuId = @id`);
 
       await transaction
         .request()

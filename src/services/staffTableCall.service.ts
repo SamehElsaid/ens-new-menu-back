@@ -1416,17 +1416,22 @@ export async function getStaffPushTokensForMenu(
     const meta = await getMenuStaffColumnMeta();
     if (!meta.expoTokenColumnQuoted) return [];
 
-    const activeClause = meta.activeColumnQuoted
-      ? `AND (${meta.activeColumnQuoted} = 1 OR ${meta.activeColumnQuoted} IS NULL)`
+    const tokenCol = `s.${meta.expoTokenColumnQuoted}`;
+    const activeCol = meta.activeColumnQuoted
+      ? `s.${meta.activeColumnQuoted}`
+      : null;
+    const activeClause = activeCol
+      ? `AND (${activeCol} = 1 OR ${activeCol} IS NULL)`
       : "";
 
+    // Grants, not the legacy MenuStaff.menuId anchor, decide who works here.
     const pool = await getPool();
     const r = await pool.request().input("menuId", sql.Int, menuId).query(`
-        SELECT ${meta.expoTokenColumnQuoted} AS token
-        FROM MenuStaff
-        WHERE menuId = @menuId
-          AND ${meta.expoTokenColumnQuoted} IS NOT NULL
-          AND LEN(${meta.expoTokenColumnQuoted}) > 0
+        SELECT DISTINCT ${tokenCol} AS token
+        FROM MenuStaff s
+        INNER JOIN dbo.MenuStaffGrants g ON g.staffId = s.id AND g.menuId = @menuId
+        WHERE ${tokenCol} IS NOT NULL
+          AND LEN(${tokenCol}) > 0
           ${activeClause}
       `);
 
@@ -1868,8 +1873,7 @@ export async function getStaffTableCallSnapshot(
           c.lastEditedAt,
           sm.${nameCol} AS lastEditedByName
         FROM StaffTableCalls c
-        LEFT JOIN MenuStaff sm
-          ON sm.id = c.lastEditedByStaffId AND sm.menuId = c.menuId
+        LEFT JOIN MenuStaff sm ON sm.id = c.lastEditedByStaffId
         WHERE c.id = @id AND c.menuId = @menuId
       `);
     } else {
@@ -2017,8 +2021,7 @@ export async function getStaffTableCallsHistory(
           c.lastEditedAt,
           sm.${nameCol} AS lastEditedByName
         FROM StaffTableCalls c
-        LEFT JOIN MenuStaff sm
-          ON sm.id = c.lastEditedByStaffId AND sm.menuId = c.menuId
+        LEFT JOIN MenuStaff sm ON sm.id = c.lastEditedByStaffId
         WHERE c.menuId = @menuId
         ORDER BY c.createdAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY

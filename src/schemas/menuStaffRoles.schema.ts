@@ -28,6 +28,7 @@ async function ensureRolesTable(): Promise<void> {
         id INT IDENTITY(1,1) PRIMARY KEY,
         menuId INT NOT NULL,
         name NVARCHAR(100) NOT NULL,
+        nameEn NVARCHAR(100) NULL,
         permissionsJson NVARCHAR(MAX) NULL,
         isDefault BIT NOT NULL CONSTRAINT DF_MenuStaffRoles_isDefault DEFAULT 0,
         loginPortal NVARCHAR(20) NOT NULL CONSTRAINT DF_MenuStaffRoles_loginPortal DEFAULT 'staff_app',
@@ -71,6 +72,35 @@ async function ensureLoginPortalColumn(): Promise<void> {
   `);
 }
 
+/**
+ * Adds `nameEn` and backfills it for the seeded default roles, which used to
+ * store their Arabic name only. `name` stays the primary (Arabic) name and the
+ * uniqueness key; `nameEn` is optional and falls back to `name` when empty.
+ * Idempotent.
+ */
+async function ensureRoleNameEnColumn(): Promise<void> {
+  const pool = await getPool();
+
+  await pool.request().query(`
+    IF COL_LENGTH('dbo.MenuStaffRoles', 'nameEn') IS NULL
+    BEGIN
+      ALTER TABLE dbo.MenuStaffRoles ADD nameEn NVARCHAR(100) NULL;
+    END
+  `);
+
+  for (const def of DEFAULT_STAFF_ROLES) {
+    await pool
+      .request()
+      .input("nameAr", sql.NVarChar(100), def.nameAr)
+      .input("nameEn", sql.NVarChar(100), def.nameEn)
+      .query(`
+        UPDATE dbo.MenuStaffRoles
+        SET nameEn = @nameEn
+        WHERE isDefault = 1 AND name = @nameAr AND nameEn IS NULL
+      `);
+  }
+}
+
 async function ensureStaffRoleIdColumn(): Promise<void> {
   const pool = await getPool();
   await pool.request().query(`
@@ -97,11 +127,11 @@ async function ensureStaffRoleIdColumn(): Promise<void> {
 }
 
 /**
- * Seeds the default roles for a single menu:
- * staff app -> ويتر / محضر طعام / ديلفري, dashboard -> كاشير / محاسب / مدير المطعم.
- * Idempotent — skips roles whose name already exists for the menu.
+ * Pre-migration seeding: roles anchored to one menu. Only the legacy
+ * `role` → `roleId` mapping below still needs this shape; everything created
+ * from now on is account-level (see `ensureDefaultRolesForMenu`).
  */
-export async function ensureDefaultRolesForMenu(menuId: number): Promise<void> {
+async function ensureLegacyDefaultRolesForMenu(menuId: number): Promise<void> {
   if (!Number.isFinite(menuId) || menuId <= 0) return;
   const pool = await getPool();
 
@@ -110,6 +140,7 @@ export async function ensureDefaultRolesForMenu(menuId: number): Promise<void> {
       .request()
       .input("menuId", sql.Int, menuId)
       .input("name", sql.NVarChar(100), def.nameAr)
+      .input("nameEn", sql.NVarChar(100), def.nameEn)
       .input(
         "permissionsJson",
         sql.NVarChar(sql.MAX),
@@ -122,28 +153,80 @@ export async function ensureDefaultRolesForMenu(menuId: number): Promise<void> {
           WHERE menuId = @menuId AND name = @name
         )
         BEGIN
-          INSERT INTO dbo.MenuStaffRoles (menuId, name, permissionsJson, isDefault, loginPortal)
-          VALUES (@menuId, @name, @permissionsJson, 1, @loginPortal);
+          INSERT INTO dbo.MenuStaffRoles (menuId, name, nameEn, permissionsJson, isDefault, loginPortal)
+          VALUES (@menuId, @name, @nameEn, @permissionsJson, 1, @loginPortal);
         END
       `);
   }
 }
 
 /**
- * Seeds the default roles for every menu (idempotent), so all menus expose the
- * standard staff-app + dashboard roles — not just menus that already have staff.
- *
- * Uses one set-based INSERT..SELECT per default role (6 statements total)
- * instead of a per-menu loop, so startup stays fast even with many menus on a
- * remote database.
+ * Seeds the default roles into the account catalog of the menu's owner:
+ * staff app -> ويتر / محضر طعام / ديلفري, dashboard -> كاشير / محاسب / مدير المطعم.
+ * Idempotent — an owner adding a second menu reuses the roles they already have.
  */
-async function seedDefaultRolesForAllMenus(): Promise<void> {
+export async function ensureDefaultRolesForMenu(menuId: number): Promise<void> {
+  if (!Number.isFinite(menuId) || menuId <= 0) return;
+  const pool = await getPool();
+
+  const ownerResult = await pool
+    .request()
+    .input("menuId", sql.Int, menuId)
+    .query(`SELECT userId FROM dbo.Menus WHERE id = @menuId`);
+  const ownerUserId = Number(ownerResult.recordset[0]?.userId);
+  if (!Number.isFinite(ownerUserId) || ownerUserId <= 0) return;
+
+  await ensureDefaultRolesForOwner(ownerUserId);
+}
+
+export async function ensureDefaultRolesForOwner(
+  ownerUserId: number,
+): Promise<void> {
+  if (!Number.isFinite(ownerUserId) || ownerUserId <= 0) return;
+  const pool = await getPool();
+
+  for (const def of DEFAULT_STAFF_ROLES) {
+    await pool
+      .request()
+      .input("ownerUserId", sql.Int, ownerUserId)
+      .input("name", sql.NVarChar(100), def.nameAr)
+      .input("nameEn", sql.NVarChar(100), def.nameEn)
+      .input(
+        "permissionsJson",
+        sql.NVarChar(sql.MAX),
+        JSON.stringify(def.permissions),
+      )
+      .input("loginPortal", sql.NVarChar(20), def.loginPortal)
+      .query(`
+        IF NOT EXISTS (
+          SELECT 1 FROM dbo.MenuStaffRoles
+          WHERE ownerUserId = @ownerUserId AND name = @name
+        )
+        BEGIN
+          INSERT INTO dbo.MenuStaffRoles
+            (menuId, ownerUserId, name, nameEn, permissionsJson, isDefault, loginPortal)
+          VALUES (NULL, @ownerUserId, @name, @nameEn, @permissionsJson, 1, @loginPortal);
+        END
+      `);
+  }
+}
+
+/**
+ * Seeds the standard staff-app + dashboard roles into every menu owner's
+ * catalog. Runs after the account-scope backfill so `ownerUserId` is already
+ * populated on legacy rows and no duplicates are created.
+ *
+ * One set-based INSERT..SELECT per default role (6 statements total) instead of
+ * a per-owner loop, so startup stays fast on a remote database.
+ */
+export async function seedDefaultRolesForAllOwners(): Promise<void> {
   const pool = await getPool();
 
   for (const def of DEFAULT_STAFF_ROLES) {
     await pool
       .request()
       .input("name", sql.NVarChar(100), def.nameAr)
+      .input("nameEn", sql.NVarChar(100), def.nameEn)
       .input(
         "permissionsJson",
         sql.NVarChar(sql.MAX),
@@ -152,12 +235,12 @@ async function seedDefaultRolesForAllMenus(): Promise<void> {
       .input("loginPortal", sql.NVarChar(20), def.loginPortal)
       .query(`
         INSERT INTO dbo.MenuStaffRoles
-          (menuId, name, permissionsJson, isDefault, loginPortal)
-        SELECT m.id, @name, @permissionsJson, 1, @loginPortal
+          (menuId, ownerUserId, name, nameEn, permissionsJson, isDefault, loginPortal)
+        SELECT DISTINCT NULL, m.userId, @name, @nameEn, @permissionsJson, 1, @loginPortal
         FROM dbo.Menus m
         WHERE NOT EXISTS (
           SELECT 1 FROM dbo.MenuStaffRoles r
-          WHERE r.menuId = m.id AND r.name = @name
+          WHERE r.ownerUserId = m.userId AND r.name = @name
         )
       `);
   }
@@ -183,7 +266,7 @@ async function migrateLegacyStaffRoles(): Promise<void> {
   if (menuIds.length === 0) return;
 
   for (const menuId of menuIds) {
-    await ensureDefaultRolesForMenu(menuId);
+    await ensureLegacyDefaultRolesForMenu(menuId);
   }
 
   // Map legacy text roles when the old `role` column still exists.
@@ -251,6 +334,7 @@ export async function ensureMenuStaffRolesSchema(): Promise<void> {
 
   await ensureRolesTable();
   await ensureLoginPortalColumn();
+  await ensureRoleNameEnColumn();
   await ensureStaffRoleIdColumn();
   try {
     await migrateLegacyStaffRoles();
@@ -259,12 +343,7 @@ export async function ensureMenuStaffRolesSchema(): Promise<void> {
       error: error instanceof Error ? error.message : String(error),
     });
   }
-  try {
-    await seedDefaultRolesForAllMenus();
-  } catch (error) {
-    logger.warn("Seeding default roles for all menus skipped due to error", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  // Default-role seeding now happens in the grants schema step, which runs
+  // right after and guarantees `ownerUserId` is populated first.
   logger.info("MenuStaffRoles schema ensured");
 }

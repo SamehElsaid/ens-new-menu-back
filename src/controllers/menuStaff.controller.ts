@@ -11,6 +11,8 @@ import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 import { getMenuAccessForRequest } from "../utils/menuAccess";
+import { localizedRoleNameSql } from "../services/menuStaffRoles.service";
+import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 
 /** Staff-management endpoints: owner OR a staff member whose role grants it. */
 const STAFF_MANAGE_PERMISSION = "staff:manage";
@@ -19,6 +21,7 @@ const STAFF_MANAGE_PERMISSION = "staff:manage";
 async function resolveMenuRole(
   menuId: number,
   roleId: unknown,
+  locale: string,
 ): Promise<
   | { ok: true; roleId: number; roleName: string; legacyRole: string }
   | { ok: false }
@@ -32,9 +35,12 @@ async function resolveMenuRole(
     .request()
     .input("roleId", sql.Int, rid)
     .input("menuId", sql.Int, menuId)
-    .query(
-      "SELECT id, name, permissionsJson FROM dbo.MenuStaffRoles WHERE id = @roleId AND menuId = @menuId",
-    );
+    .input("locale", sql.NVarChar(5), locale)
+    .query(`
+      SELECT id, ${localizedRoleNameSql("r", "name")}, permissionsJson
+      FROM dbo.MenuStaffRoles r
+      WHERE id = @roleId AND menuId = @menuId
+    `);
   if (check.recordset.length === 0) return { ok: false };
 
   // Legacy `role` text kept in sync for backward-compatible reads until the
@@ -117,11 +123,12 @@ export async function getStaff(req: Request, res: Response): Promise<void> {
     const result = await pool
       .request()
       .input("menuId", sql.Int, parseInt(menuId))
+      .input("locale", sql.NVarChar(5), getLocaleFromAcceptLanguage(req))
       .query(`
-        SELECT s.*, r.name AS roleName
+        SELECT s.*, ${localizedRoleNameSql("r", "roleName")}
         FROM MenuStaff s
+        INNER JOIN dbo.MenuStaffGrants g ON g.staffId = s.id AND g.menuId = @menuId
         LEFT JOIN dbo.MenuStaffRoles r ON r.id = s.roleId
-        WHERE s.menuId = @menuId
         ORDER BY s.id DESC
       `);
 
@@ -161,8 +168,9 @@ export async function getStaffById(
       .input("staffId", sql.Int, parseInt(staffId))
       .input("menuId", sql.Int, parseInt(menuId))
       .input("userId", sql.Int, access.ownerUserId)
+      .input("locale", sql.NVarChar(5), getLocaleFromAcceptLanguage(req))
       .query(`
-        SELECT s.*, r.name AS roleName
+        SELECT s.*, ${localizedRoleNameSql("r", "roleName")}
         FROM MenuStaff s
         JOIN Menus m ON s.menuId = m.id
         LEFT JOIN dbo.MenuStaffRoles r ON r.id = s.roleId
@@ -207,7 +215,11 @@ export async function createStaff(
     const pool = await getPool();
     const meta = await getMenuStaffColumnMeta();
 
-    const resolvedRole = await resolveMenuRole(parseInt(menuId, 10), roleId);
+    const resolvedRole = await resolveMenuRole(
+      parseInt(menuId, 10),
+      roleId,
+      getLocaleFromAcceptLanguage(req),
+    );
     if (!resolvedRole.ok) {
       sendApiError(res, req, 400, ApiErrors.invalidRoleId);
       return;
@@ -363,7 +375,11 @@ export async function updateStaff(
       request.input("name", sql.NVarChar, name);
     }
     if (roleId !== undefined && meta.roleIdColumnQuoted) {
-      const resolvedRole = await resolveMenuRole(parseInt(menuId, 10), roleId);
+      const resolvedRole = await resolveMenuRole(
+        parseInt(menuId, 10),
+        roleId,
+        getLocaleFromAcceptLanguage(req),
+      );
       if (!resolvedRole.ok) {
         sendApiError(res, req, 400, ApiErrors.invalidRoleId);
         return;

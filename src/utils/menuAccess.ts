@@ -3,7 +3,12 @@ import { getPool, sql } from "../config/database";
 import { ROLES } from "../config/constants";
 import { authorization } from "../services/authorization.service";
 
-/** Staff row (menu + roleId) for a staff id, or null if not on this menu. */
+/**
+ * Staff role for a staff id **on a specific menu**, or null when the staff has
+ * no grant for it. Only `MenuStaffGrants` decides access — revoking the last
+ * grant must lock the staff out even though `MenuStaff.menuId` still points at
+ * the menu they were created under.
+ */
 async function getStaffMenuRole(
   staffId: number,
   menuId: number,
@@ -14,10 +19,14 @@ async function getStaffMenuRole(
     .input("menuId", sql.Int, menuId)
     .input("staffId", sql.Int, staffId)
     .query(`
-      SELECT m.userId AS ownerUserId, s.roleId AS roleId
+      SELECT TOP 1 m.userId AS ownerUserId, s.roleId AS roleId
       FROM Menus m
-      INNER JOIN MenuStaff s ON s.menuId = m.id AND s.id = @staffId
+      INNER JOIN MenuStaff s ON s.id = @staffId
       WHERE m.id = @menuId
+        AND EXISTS (
+          SELECT 1 FROM dbo.MenuStaffGrants g
+          WHERE g.staffId = s.id AND g.menuId = m.id
+        )
     `);
   if (r.recordset.length === 0) return null;
   return {
@@ -29,8 +38,8 @@ async function getStaffMenuRole(
 
 /**
  * Owner: menu.userId === JWT userId.
- * Staff: MenuStaff row for this menu whose role grants `requiredPermission`
- * (default `dashboard:access`).
+ * Staff: a `MenuStaffGrants` row for this menu whose account-level role grants
+ * `requiredPermission` (default `dashboard:access`).
  */
 export async function getMenuAccessForRequest(
   req: Request,

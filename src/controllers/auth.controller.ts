@@ -34,6 +34,8 @@ import {
   MAX_FCM_TOKEN_LEN,
   removeUserFcmToken,
 } from "../services/fcmPush.service";
+import { localizedRoleNameSql } from "../services/menuStaffRoles.service";
+import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 
 // Check Availability (Email or Phone Number)
 export async function checkAvailability(
@@ -217,10 +219,11 @@ function parseStaffRolePermissions(raw: unknown): string[] {
 }
 
 /**
- * Dashboard login for back-office staff (cashier / accountant / manager).
- * Only roles whose `loginPortal = 'dashboard'` may authenticate here. Returns
- * true when it has written a response (success or a staff-specific error), and
- * false to let the caller fall back to the normal Users login error.
+ * Dashboard login for staff. Every staff member may sign in here regardless of
+ * their role — what they can see and do is decided by the role's permissions
+ * and their menu grants. Returns true when it has written a response (success
+ * or a staff-specific error), and false to let the caller fall back to the
+ * normal Users login error.
  *
  * Staff ids do not exist in `Users`, so (like the staff app) we issue a
  * non-expiring staff access token and do not persist a refresh token.
@@ -238,12 +241,12 @@ async function tryDashboardStaffLogin(
   const emailCol = quoteMenuStaffIdent(staffMeta.emailKey);
   const staffResult = await pool
     .request()
-    .input("email", sql.NVarChar, email.toLowerCase().trim()).query(`
+    .input("email", sql.NVarChar, email.toLowerCase().trim())
+    .input("locale", sql.NVarChar(5), getLocaleFromAcceptLanguage(req)).query(`
       SELECT
         s.*,
-        sr.name as staffRoleName,
+        ${localizedRoleNameSql("sr", "staffRoleName")},
         sr.permissionsJson as staffRolePermissions,
-        sr.loginPortal as staffRoleLoginPortal,
         m.id as menuTableId,
         m.uuid as menuUuid,
         m.userId as menuOwnerUserId,
@@ -276,10 +279,6 @@ async function tryDashboardStaffLogin(
 
   const staff = matchedRow;
 
-  // Only dashboard-portal roles may use the dashboard login. Staff-app accounts
-  // fall through to the generic invalid-credentials response.
-  if (staff.staffRoleLoginPortal !== "dashboard") return false;
-
   if (!getStaffIsActive(staff, staffMeta)) {
     sendApiError(res, req, 403, {
       en: "Your account is deactivated. Contact the restaurant manager.",
@@ -302,12 +301,20 @@ async function tryDashboardStaffLogin(
     staff.staffRoleName != null ? String(staff.staffRoleName) : null;
   const permissions = parseStaffRolePermissions(staff.staffRolePermissions);
 
+  const ownerUserId =
+    norm.ownerUserId != null
+      ? Number(norm.ownerUserId)
+      : staff.menuOwnerUserId != null
+        ? Number(staff.menuOwnerUserId)
+        : undefined;
+
   const tokenPayload = {
     id: staff.id as number,
     userId: staff.id as number,
     email: norm.email as string,
     role: ROLES.STAFF,
     menuId: norm.menuId != null ? Number(norm.menuId) : undefined,
+    ownerUserId,
     staffRoleId: staffRoleId ?? undefined,
   };
 
