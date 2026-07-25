@@ -32,6 +32,7 @@ router.post(
   validate([
     param("menuId").isInt(),
     body("name").isString().trim().isLength({ min: 1, max: 100 }),
+    body("nameEn").optional().isString().trim().isLength({ max: 100 }),
     body("permissions").optional().isArray(),
     body("permissions.*").optional().isString(),
     body("loginPortal").optional().isIn(["staff_app", "dashboard"]),
@@ -46,6 +47,7 @@ router.put(
     param("menuId").isInt(),
     param("roleId").isInt(),
     body("name").optional().isString().trim().isLength({ min: 1, max: 100 }),
+    body("nameEn").optional().isString().trim().isLength({ max: 100 }),
     body("permissions").optional().isArray(),
     body("permissions.*").optional().isString(),
     body("loginPortal").optional().isIn(["staff_app", "dashboard"]),

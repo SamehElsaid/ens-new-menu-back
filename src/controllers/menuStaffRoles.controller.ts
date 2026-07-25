@@ -47,6 +47,9 @@ function sendRoleError(
     case "last_dashboard_access_role":
       sendApiError(res, req, 409, ApiErrors.lastDashboardAccessRole);
       return;
+    case "default_role_read_only":
+      sendApiError(res, req, 409, ApiErrors.defaultRoleReadOnly);
+      return;
     case "no_fields":
       sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
       return;
@@ -106,14 +109,19 @@ export async function createStaffRole(
 ): Promise<void> {
   try {
     const menuId = parseInt(req.params.menuId, 10);
-    const { name, permissions, loginPortal } = req.body;
+    const { name, nameEn, permissions, loginPortal } = req.body;
 
     if (!(await canManageRoles(req, menuId))) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
-    const role = await createRole(menuId, name, permissions, loginPortal);
+    const role = await createRole(menuId, {
+      name,
+      nameEn,
+      permissions,
+      loginPortal,
+    });
     res.status(201).json({ role });
 
     void logMenuActivitySafe(req, menuId, {
@@ -146,7 +154,7 @@ export async function updateStaffRole(
   try {
     const menuId = parseInt(req.params.menuId, 10);
     const roleId = parseInt(req.params.roleId, 10);
-    const { name, permissions, loginPortal } = req.body;
+    const { name, nameEn, permissions, loginPortal } = req.body;
 
     if (!(await canManageRoles(req, menuId))) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
@@ -155,6 +163,7 @@ export async function updateStaffRole(
 
     const { role, before } = await updateRole(menuId, roleId, {
       name,
+      nameEn,
       permissions,
       loginPortal,
     });

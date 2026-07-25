@@ -534,6 +534,7 @@ async function resolveMenuIdsForOrderChannel(
   return [menuId];
 }
 
+/** `@menuId` is bound to the first id, so a single-menu query stays parameterised. */
 function menuIdWhereSql(menuIds: number[]): string {
   if (menuIds.length === 1) {
     return "mo.menuId = @menuId";
@@ -765,10 +766,62 @@ export async function listMenuActivityLogs(
   page: number;
   limit: number;
 }> {
+  const menuIds = await resolveMenuIdsForOrderChannel(menuId, channel);
+  return listMenuOrdersForMenuIds(menuIds, page, limit, {
+    actorNameSearch,
+    channel,
+    dateFrom: listFilters?.dateFrom ?? null,
+    dateTo: listFilters?.dateTo ?? null,
+    status: listFilters?.status ?? null,
+  });
+}
+
+export type MenuOrdersQueryOptions = {
+  actorNameSearch?: string | null;
+  channel?: MenuOrderChannel | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  status?: string | null;
+  /** `desc` (newest first) is the dashboard default. */
+  direction?: "asc" | "desc";
+};
+
+/**
+ * Orders across any set of menus — the account-level dashboard passes every
+ * menu the actor may see, the per-menu page passes just one (plus its delivery
+ * group). Rows carry `menuId` so the caller can label and filter them.
+ */
+export async function listMenuOrdersForMenuIds(
+  menuIdsInput: number[],
+  page: number,
+  limit: number,
+  options: MenuOrdersQueryOptions = {},
+): Promise<{
+  rows: any[];
+  total: number;
+  page: number;
+  limit: number;
+}> {
+  const {
+    actorNameSearch = null,
+    channel = null,
+    dateFrom = null,
+    dateTo = null,
+    status = null,
+    direction = "desc",
+  } = options;
+
   const safePage = Math.max(1, Math.floor(page));
   const safeLimit = Math.min(100, Math.max(1, Math.floor(limit)));
   const offset = (safePage - 1) * safeLimit;
   const nameFilter = sanitizeActorNameSearch(actorNameSearch ?? null);
+  const menuIds = [...new Set(menuIdsInput)].filter(
+    (id) => Number.isFinite(id) && id > 0,
+  );
+
+  if (menuIds.length === 0) {
+    return { rows: [], total: 0, page: safePage, limit: safeLimit };
+  }
 
   try {
     const pool = await getPool();
@@ -780,19 +833,19 @@ export async function listMenuActivityLogs(
     }
 
     const orderListFilters: MenuOrderListFilters = {
-      channel: channel ?? null,
-      dateFrom: listFilters?.dateFrom ?? null,
-      dateTo: listFilters?.dateTo ?? null,
-      status: listFilters?.status ?? null,
+      channel,
+      dateFrom,
+      dateTo,
+      status,
     };
 
-    const menuIds = await resolveMenuIdsForOrderChannel(menuId, channel);
     const menuFilter = menuIdWhereSql(menuIds);
+    const sortDirection = direction === "asc" ? "ASC" : "DESC";
 
-    const countReq = pool.request().input("menuId", sql.Int, menuId);
+    const countReq = pool.request().input("menuId", sql.Int, menuIds[0]);
     const rowsReq = pool
       .request()
-      .input("menuId", sql.Int, menuId)
+      .input("menuId", sql.Int, menuIds[0])
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, safeLimit);
 
@@ -821,6 +874,7 @@ export async function listMenuActivityLogs(
     const rowsR = await rowsReq.query(`
       SELECT
         mo.id,
+        mo.menuId,
         mo.orderId,
         mo.orderJson,
         mo.actionsJson,
@@ -829,7 +883,7 @@ export async function listMenuActivityLogs(
       WHERE ${menuFilter}
       ${tableCallOnly}
       ${nameCondition}
-      ORDER BY mo.updatedAt DESC
+      ORDER BY mo.updatedAt ${sortDirection}
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
@@ -899,6 +953,7 @@ export async function listMenuActivityLogs(
 
       return {
         id: String(r.id),
+        menuId: r.menuId != null ? Number(r.menuId) : null,
         orderId: String(r.orderId),
         lastAction: String(lastAction),
         actionDetails: actionDetails,
@@ -964,7 +1019,7 @@ export async function listMenuActivityLogs(
 
     return { rows, total, page: safePage, limit: safeLimit };
   } catch (error) {
-    logger.error("listMenuActivityLogs error:", error);
+    logger.error("listMenuOrdersForMenuIds error:", error);
     return { rows: [], total: 0, page: safePage, limit: safeLimit };
   }
 }
@@ -1221,6 +1276,34 @@ function actionToStatus(action: MenuOrderActionType): string {
   if (action === "TABLE_CALL_PREPARED") return "prepared";
   if (action === "TABLE_CALL_COMPLETED") return "delivered";
   return "delivered";
+}
+
+/**
+ * Owning menu of a `MenuOrders` row. The account-level dashboard addresses
+ * orders by log id alone, so the menu (and therefore the access check) has to
+ * be resolved from the row itself.
+ */
+export async function getMenuIdForOrderLogId(
+  menuOrderLogId: number,
+): Promise<number | null> {
+  try {
+    const pool = await getPool();
+    const tableCheck = await pool.request().query(`
+      SELECT OBJECT_ID(N'dbo.MenuOrders', N'U') AS oid
+    `);
+    if (!tableCheck.recordset[0]?.oid) return null;
+
+    const result = await pool
+      .request()
+      .input("logId", sql.Int, menuOrderLogId)
+      .query(`SELECT TOP 1 menuId FROM dbo.MenuOrders WHERE id = @logId`);
+
+    const menuId = result.recordset[0]?.menuId;
+    return menuId != null ? Number(menuId) : null;
+  } catch (error) {
+    logger.error("getMenuIdForOrderLogId error:", error);
+    return null;
+  }
 }
 
 /** Resolve delivery vs table from a dashboard `MenuOrders` row id. */

@@ -39,7 +39,8 @@ const WAITER_PERMISSIONS = [
   "orders:edit_items",
 ];
 
-const FOOD_PREPARER_PERMISSIONS = ["orders:view", "orders:prepare"];
+const FOOD_PREPARER_PERMISSIONS = ["orders:view", "orders:prepare " , "delivery:view",
+];
 
 const DELIVERY_PERMISSIONS = [
   "orders:view",

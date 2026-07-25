@@ -8,8 +8,13 @@ export interface TokenPayload {
   role: string;
   /** When `role` is `staff`: the dynamic MenuStaffRoles.id used for RBAC. */
   staffRoleId?: number;
-  /** When `role` is `staff`: the menu the staff belongs to. */
+  /**
+   * When `role` is `staff`: the menu the staff was created under. Legacy —
+   * access is decided by `MenuStaffGrants` per request, not by this value.
+   */
   menuId?: number;
+  /** When `role` is `staff`: the owner account the staff belongs to. */
+  ownerUserId?: number;
 }
 
 // Validate JWT secrets on startup

@@ -144,6 +144,7 @@ export function normalizeStaffRow(
   return {
     id: row.id,
     menuId: row.menuId,
+    ownerUserId: row.ownerUserId ?? null,
     name: pick(meta.nameKey),
     role: meta.roleKey ? pick(meta.roleKey) : null,
     roleId: meta.roleIdKey ? (pick(meta.roleIdKey) ?? null) : null,
