@@ -17,8 +17,6 @@ export function normalizeLoginPortal(raw: unknown): StaffLoginPortal {
 
 export interface StaffRole {
   id: number;
-  /** Legacy anchor: null for account-level roles created after the migration. */
-  menuId: number | null;
   ownerUserId: number | null;
   /** Primary (Arabic) name — also the uniqueness key inside the account. */
   name: string;
@@ -89,22 +87,9 @@ export async function getRolePermissions(roleId: number): Promise<string[]> {
   return permissions;
 }
 
-/** Menu id that owns a role — used to scope authorization to the right menu. */
-export async function getRoleMenuId(roleId: number): Promise<number | null> {
-  if (!Number.isFinite(roleId) || roleId <= 0) return null;
-  const pool = await getPool();
-  const result = await pool
-    .request()
-    .input("roleId", sql.Int, roleId)
-    .query(`SELECT menuId FROM dbo.MenuStaffRoles WHERE id = @roleId`);
-  if (!result.recordset.length) return null;
-  const menuId = result.recordset[0].menuId as number;
-  return Number.isFinite(menuId) ? menuId : null;
-}
-
 const ROLE_SELECT_SQL = `
   SELECT
-    r.id, r.menuId, r.ownerUserId, r.name, r.nameEn, r.permissionsJson,
+    r.id, r.ownerUserId, r.name, r.nameEn, r.permissionsJson,
     r.isDefault, r.loginPortal, r.createdAt, r.updatedAt,
     (SELECT COUNT(*) FROM dbo.MenuStaff s WHERE s.roleId = r.id) AS staffCount
   FROM dbo.MenuStaffRoles r
@@ -203,7 +188,6 @@ export async function getRoleForMenu(
 function mapRoleRow(row: Record<string, unknown>): StaffRole {
   return {
     id: Number(row.id),
-    menuId: row.menuId != null ? Number(row.menuId) : null,
     ownerUserId: row.ownerUserId != null ? Number(row.ownerUserId) : null,
     name: String(row.name),
     nameEn: normalizeOptionalName(row.nameEn),
@@ -258,8 +242,7 @@ export interface CreateRoleInput {
 }
 
 /**
- * Account-level roles are not anchored to a menu, so `menuId` stays NULL and
- * the role survives the deletion of any single menu.
+ * Account-level roles are scoped by `ownerUserId` only — never by a menu.
  */
 export async function createRoleForOwner(
   ownerUserId: number,
@@ -291,9 +274,9 @@ export async function createRoleForOwner(
     .input("loginPortal", sql.NVarChar(20), loginPortal)
     .query(`
       INSERT INTO dbo.MenuStaffRoles
-        (menuId, ownerUserId, name, nameEn, permissionsJson, isDefault, loginPortal)
+        (ownerUserId, name, nameEn, permissionsJson, isDefault, loginPortal)
       OUTPUT INSERTED.id
-      VALUES (NULL, @ownerUserId, @name, @nameEn, @permissionsJson, 0, @loginPortal)
+      VALUES (@ownerUserId, @name, @nameEn, @permissionsJson, 0, @loginPortal)
     `);
 
   const roleId = Number(result.recordset[0].id);

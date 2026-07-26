@@ -93,6 +93,35 @@ class AuthorizationService {
       throw new AuthorizationError(permissions.join("&"));
     }
   }
+
+  /**
+   * Which order channels the actor may see:
+   * - `orders:view` → table
+   * - `delivery:view` → online/delivery
+   * - both → `"all"`
+   * - neither → `null`
+   */
+  async resolveOrderChannelFilter(
+    actor: AuthActor,
+  ): Promise<"table" | "delivery" | "all" | null> {
+    const canTable = await this.can(actor, "orders:view");
+    const canDelivery = await this.can(actor, "delivery:view");
+    if (canTable && canDelivery) return "all";
+    if (canTable) return "table";
+    if (canDelivery) return "delivery";
+    return null;
+  }
+
+  /** Whether the actor may see/act on a specific order channel. */
+  async canAccessOrderChannel(
+    actor: AuthActor,
+    channel: "table" | "delivery",
+  ): Promise<boolean> {
+    return this.can(
+      actor,
+      channel === "delivery" ? "delivery:view" : "orders:view",
+    );
+  }
 }
 
 export const authorization = new AuthorizationService();

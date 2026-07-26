@@ -6,7 +6,7 @@
  *     summary: Staff permission catalog
  *     description: |
  *       Static catalog of assignable staff permissions (RBAC). Roles are dynamic
- *       per-menu, but the set of permissions is fixed in code. Human labels are
+ *       per-account (owner), but the set of permissions is fixed in code. Human labels are
  *       resolved on the client via i18n using `labelKey` / `descriptionKey`.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     responses:
@@ -31,7 +31,7 @@
  *   get:
  *     tags: [Staff]
  *     summary: List staff roles
- *     description: Dynamic per-menu roles (RBAC). **Pro plan** required.
+ *     description: Account-scoped staff roles (RBAC) via the menu's owner. Prefer `/api/dashboard/staff-roles`. **Pro plan** required.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - $ref: '#/components/parameters/menuId'

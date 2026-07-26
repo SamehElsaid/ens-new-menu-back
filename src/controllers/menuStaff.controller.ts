@@ -21,7 +21,7 @@ import {
 /** Staff-management endpoints: owner OR a staff member whose role grants it. */
 const STAFF_MANAGE_PERMISSION = "staff:manage";
 
-/** Ensures a roleId exists and belongs to this menu; returns its name/legacy role. */
+/** Ensures a roleId exists on the menu owner's account catalog. */
 async function resolveMenuRole(
   menuId: number,
   roleId: unknown,
@@ -41,9 +41,10 @@ async function resolveMenuRole(
     .input("menuId", sql.Int, menuId)
     .input("locale", sql.NVarChar(5), locale)
     .query(`
-      SELECT id, ${localizedRoleNameSql("r", "name")}, permissionsJson
+      SELECT r.id, ${localizedRoleNameSql("r", "name")}, r.permissionsJson
       FROM dbo.MenuStaffRoles r
-      WHERE id = @roleId AND menuId = @menuId
+      INNER JOIN dbo.Menus m ON m.userId = r.ownerUserId
+      WHERE r.id = @roleId AND m.id = @menuId
     `);
   if (check.recordset.length === 0) return { ok: false };
 

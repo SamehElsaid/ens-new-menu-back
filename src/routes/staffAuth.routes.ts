@@ -27,7 +27,7 @@ router.get("/me", requireAuth, staffAuthController.getStaffMe);
 router.get(
   "/table-calls/history",
   requireStaff,
-  requireStaffPermission("orders:view"),
+  requireStaffPermission.any(["orders:view", "delivery:view"]),
   validate([
     query("page").optional().isInt({ min: 1 }).toInt(),
     query("limit").optional().isInt({ min: 1, max: 500 }).toInt(),
@@ -39,7 +39,7 @@ router.get(
 router.get(
   "/table-calls",
   requireStaff,
-  requireStaffPermission("orders:view"),
+  requireStaffPermission.any(["orders:view", "delivery:view"]),
   staffTableCallController.listPendingStaffTableCalls,
 );
 
@@ -47,7 +47,7 @@ router.get(
 router.get(
   "/table-calls/:id",
   requireStaff,
-  requireStaffPermission("orders:view"),
+  requireStaffPermission.any(["orders:view", "delivery:view"]),
   validate([param("id").isInt()]),
   staffTableCallController.getStaffTableCallById,
 );

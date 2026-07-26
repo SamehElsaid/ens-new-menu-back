@@ -71,21 +71,20 @@ export function attachStaffNotificationsSocket(
           return;
         }
 
-        // RBAC: staff must have orders:view to receive the order feed.
+        // RBAC: staff must have orders:view or delivery:view for the order feed.
         if (typeof decoded.staffRoleId !== "number") {
           reply({ ok: false, error: "ROLE_REQUIRED" });
           return;
         }
-        const canView = await authorization.can(
-          {
-            kind: "staff",
-            staffId: decoded.userId,
-            staffRoleId: decoded.staffRoleId,
-            menuId,
-          },
-          "orders:view",
-        );
-        if (!canView) {
+        const staffActor = {
+          kind: "staff" as const,
+          staffId: decoded.userId,
+          staffRoleId: decoded.staffRoleId,
+          menuId,
+        };
+        const channel =
+          await authorization.resolveOrderChannelFilter(staffActor);
+        if (!channel) {
           reply({ ok: false, error: "FORBIDDEN" });
           return;
         }
@@ -94,7 +93,7 @@ export function attachStaffNotificationsSocket(
         (socket.data as { staffMenuId?: number }).staffMenuId = menuId;
         reply({ ok: true, menuId });
 
-        const pending = await getPendingStaffTableCalls(menuId, 100);
+        const pending = await getPendingStaffTableCalls(menuId, 100, channel);
         socket.emit("staff:pending_calls", {
           calls: pending.map((c) => ({
             id: c.id,
@@ -153,7 +152,16 @@ export function attachStaffNotificationsSocket(
             menuId,
             "orders:view",
           );
-          if (!allowed) {
+          // Delivery-only staff may subscribe without orders:view.
+          const deliveryAllowed =
+            !allowed &&
+            (await verifyMenuAccessForSocket(
+              decoded.userId,
+              decoded.role,
+              menuId,
+              "delivery:view",
+            ));
+          if (!allowed && !deliveryAllowed) {
             reply({ ok: false, error: "FORBIDDEN" });
             return;
           }

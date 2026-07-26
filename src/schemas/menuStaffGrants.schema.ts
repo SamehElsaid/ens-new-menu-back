@@ -1,6 +1,10 @@
 import { getPool } from "../config/database";
 import { logger } from "../utils/logger";
-import { seedDefaultRolesForAllOwners } from "./menuStaffRoles.schema";
+import { permissionCache } from "../services/permissionCache";
+import {
+  migrateLegacyStaffRoleAssignments,
+  seedDefaultRolesForAllOwners,
+} from "./menuStaffRoles.schema";
 
 async function tableExists(tableName: string): Promise<boolean> {
   const pool = await getPool();
@@ -62,9 +66,8 @@ async function ensureStaffOwnerColumn(): Promise<void> {
 }
 
 /**
- * Account scope on roles. `menuId` becomes nullable so account-level roles are
- * not anchored to a single menu (an anchor would cascade-delete the role with
- * its menu while other menus' staff still reference it).
+ * Account scope on roles: ensure `ownerUserId` exists. The legacy `menuId`
+ * column is removed later by `detachRolesFromMenus`.
  */
 async function ensureRoleOwnerColumn(): Promise<void> {
   const pool = await getPool();
@@ -76,20 +79,7 @@ async function ensureRoleOwnerColumn(): Promise<void> {
     END
   `);
 
-  // (menuId, name) must allow NULL menuId for account roles, and stay unique
-  // for the legacy per-menu rows — a filtered index gives both.
-  await pool.request().query(`
-    IF EXISTS (
-      SELECT 1 FROM sys.indexes
-      WHERE name = 'UQ_MenuStaffRoles_menuId_name'
-        AND object_id = OBJECT_ID('dbo.MenuStaffRoles')
-        AND has_filter = 0
-    )
-    BEGIN
-      DROP INDEX UQ_MenuStaffRoles_menuId_name ON dbo.MenuStaffRoles;
-    END
-  `);
-
+  // Allow NULL menuId so account roles can exist until the column is dropped.
   await pool.request().query(`
     IF EXISTS (
       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
@@ -98,20 +88,28 @@ async function ensureRoleOwnerColumn(): Promise<void> {
         AND IS_NULLABLE = 'NO'
     )
     BEGIN
-      ALTER TABLE dbo.MenuStaffRoles ALTER COLUMN menuId INT NULL;
-    END
-  `);
+      IF EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE name = 'UQ_MenuStaffRoles_menuId_name'
+          AND object_id = OBJECT_ID('dbo.MenuStaffRoles')
+          AND has_filter = 0
+      )
+      BEGIN
+        DROP INDEX UQ_MenuStaffRoles_menuId_name ON dbo.MenuStaffRoles;
+      END
 
-  await pool.request().query(`
-    IF NOT EXISTS (
-      SELECT 1 FROM sys.indexes
-      WHERE name = 'UQ_MenuStaffRoles_menuId_name'
-        AND object_id = OBJECT_ID('dbo.MenuStaffRoles')
-    )
-    BEGIN
-      CREATE UNIQUE INDEX UQ_MenuStaffRoles_menuId_name
-        ON dbo.MenuStaffRoles (menuId, name)
-        WHERE menuId IS NOT NULL;
+      ALTER TABLE dbo.MenuStaffRoles ALTER COLUMN menuId INT NULL;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE name = 'UQ_MenuStaffRoles_menuId_name'
+          AND object_id = OBJECT_ID('dbo.MenuStaffRoles')
+      )
+      BEGIN
+        CREATE UNIQUE INDEX UQ_MenuStaffRoles_menuId_name
+          ON dbo.MenuStaffRoles (menuId, name)
+          WHERE menuId IS NOT NULL;
+      END
     END
   `);
 
@@ -126,6 +124,153 @@ async function ensureRoleOwnerColumn(): Promise<void> {
         ON dbo.MenuStaffRoles (ownerUserId);
     END
   `);
+}
+
+/**
+ * One-shot: drop the roles↔menu link. Roles are account-scoped via
+ * `ownerUserId` only. Idempotent — no-ops when `menuId` is already gone.
+ */
+async function detachRolesFromMenus(): Promise<void> {
+  const pool = await getPool();
+
+  const colCheck = await pool.request().query(`
+    SELECT 1 AS found
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_NAME = 'MenuStaffRoles' AND COLUMN_NAME = 'menuId'
+  `);
+  if (colCheck.recordset.length === 0) {
+    // Still ensure the owner uniqueness index exists on fresh / already-detached DBs.
+    await pool.request().query(`
+      IF NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE name = 'UQ_MenuStaffRoles_ownerUserId_name'
+          AND object_id = OBJECT_ID('dbo.MenuStaffRoles')
+      )
+      BEGIN
+        CREATE UNIQUE INDEX UQ_MenuStaffRoles_ownerUserId_name
+          ON dbo.MenuStaffRoles (ownerUserId, name)
+          WHERE ownerUserId IS NOT NULL;
+      END
+    `);
+    return;
+  }
+
+  // Fill owner from the legacy menu anchor before dropping it.
+  await pool.request().query(`
+    UPDATE r
+    SET r.ownerUserId = m.userId
+    FROM dbo.MenuStaffRoles r
+    INNER JOIN dbo.Menus m ON m.id = r.menuId
+    WHERE r.ownerUserId IS NULL AND r.menuId IS NOT NULL
+  `);
+
+  // Collapse duplicate (ownerUserId, name) rows: remap staff, then delete extras.
+  await pool.request().query(`
+    ;WITH ranked AS (
+      SELECT
+        id,
+        ownerUserId,
+        name,
+        ROW_NUMBER() OVER (
+          PARTITION BY ownerUserId, name
+          ORDER BY isDefault DESC, id ASC
+        ) AS rn
+      FROM dbo.MenuStaffRoles
+      WHERE ownerUserId IS NOT NULL
+    ),
+    dups AS (
+      SELECT r.id AS dupId, k.id AS keeperId
+      FROM ranked r
+      INNER JOIN ranked k
+        ON k.ownerUserId = r.ownerUserId
+       AND k.name = r.name
+       AND k.rn = 1
+      WHERE r.rn > 1
+    )
+    UPDATE s
+    SET s.roleId = d.keeperId
+    FROM dbo.MenuStaff s
+    INNER JOIN dups d ON d.dupId = s.roleId
+  `);
+
+  const deleted = await pool.request().query(`
+    ;WITH ranked AS (
+      SELECT
+        id,
+        ownerUserId,
+        name,
+        ROW_NUMBER() OVER (
+          PARTITION BY ownerUserId, name
+          ORDER BY isDefault DESC, id ASC
+        ) AS rn
+      FROM dbo.MenuStaffRoles
+      WHERE ownerUserId IS NOT NULL
+    )
+    DELETE FROM dbo.MenuStaffRoles
+    WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+  `);
+
+  await pool.request().query(`
+    IF EXISTS (
+      SELECT 1 FROM sys.foreign_keys WHERE name = 'FK_MenuStaffRoles_Menus'
+    )
+    BEGIN
+      ALTER TABLE dbo.MenuStaffRoles DROP CONSTRAINT FK_MenuStaffRoles_Menus;
+    END
+  `);
+
+  await pool.request().query(`
+    IF EXISTS (
+      SELECT 1 FROM sys.indexes
+      WHERE name = 'UQ_MenuStaffRoles_menuId_name'
+        AND object_id = OBJECT_ID('dbo.MenuStaffRoles')
+    )
+    BEGIN
+      DROP INDEX UQ_MenuStaffRoles_menuId_name ON dbo.MenuStaffRoles;
+    END
+  `);
+
+  // Drop any other non-PK indexes that include menuId before dropping the column.
+  await pool.request().query(`
+    DECLARE @sql NVARCHAR(MAX) = N'';
+    SELECT @sql = @sql + N'DROP INDEX ' + QUOTENAME(i.name)
+      + N' ON dbo.MenuStaffRoles; '
+    FROM sys.indexes i
+    WHERE i.object_id = OBJECT_ID('dbo.MenuStaffRoles')
+      AND i.is_primary_key = 0
+      AND i.is_unique_constraint = 0
+      AND EXISTS (
+        SELECT 1
+        FROM sys.index_columns ic
+        INNER JOIN sys.columns c
+          ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+        WHERE ic.object_id = i.object_id
+          AND ic.index_id = i.index_id
+          AND c.name = 'menuId'
+      );
+    IF LEN(@sql) > 0 EXEC sp_executesql @sql;
+  `);
+
+  await pool.request().query(`
+    ALTER TABLE dbo.MenuStaffRoles DROP COLUMN menuId;
+  `);
+
+  await pool.request().query(`
+    IF NOT EXISTS (
+      SELECT 1 FROM sys.indexes
+      WHERE name = 'UQ_MenuStaffRoles_ownerUserId_name'
+        AND object_id = OBJECT_ID('dbo.MenuStaffRoles')
+    )
+    BEGIN
+      CREATE UNIQUE INDEX UQ_MenuStaffRoles_ownerUserId_name
+        ON dbo.MenuStaffRoles (ownerUserId, name)
+        WHERE ownerUserId IS NOT NULL;
+    END
+  `);
+
+  logger.info("Detached MenuStaffRoles from menuId", {
+    duplicateRolesRemoved: Number(deleted.rowsAffected?.[0] ?? 0),
+  });
 }
 
 /**
@@ -145,13 +290,22 @@ async function backfillFromLegacyMenuBinding(): Promise<void> {
     WHERE s.ownerUserId IS NULL
   `);
 
-  const roleOwners = await pool.request().query(`
-    UPDATE r
-    SET r.ownerUserId = m.userId
-    FROM dbo.MenuStaffRoles r
-    INNER JOIN dbo.Menus m ON m.id = r.menuId
-    WHERE r.ownerUserId IS NULL
+  let roleOwnersAffected = 0;
+  const roleMenuCol = await pool.request().query(`
+    SELECT 1 AS found
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_NAME = 'MenuStaffRoles' AND COLUMN_NAME = 'menuId'
   `);
+  if (roleMenuCol.recordset.length > 0) {
+    const roleOwners = await pool.request().query(`
+      UPDATE r
+      SET r.ownerUserId = m.userId
+      FROM dbo.MenuStaffRoles r
+      INNER JOIN dbo.Menus m ON m.id = r.menuId
+      WHERE r.ownerUserId IS NULL
+    `);
+    roleOwnersAffected = Number(roleOwners.rowsAffected?.[0] ?? 0);
+  }
 
   const grants = await pool.request().query(`
     INSERT INTO dbo.MenuStaffGrants (staffId, menuId)
@@ -167,7 +321,7 @@ async function backfillFromLegacyMenuBinding(): Promise<void> {
 
   const migrated = {
     staffOwners: Number(staffOwners.rowsAffected?.[0] ?? 0),
-    roleOwners: Number(roleOwners.rowsAffected?.[0] ?? 0),
+    roleOwners: roleOwnersAffected,
     grants: Number(grants.rowsAffected?.[0] ?? 0),
   };
 
@@ -194,7 +348,25 @@ export async function ensureMenuStaffGrantsSchema(): Promise<void> {
   }
 
   try {
+    await detachRolesFromMenus();
+  } catch (error) {
+    logger.warn("Detaching roles from menuId skipped due to error", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  try {
+    await migrateLegacyStaffRoleAssignments();
+  } catch (error) {
+    logger.warn("Legacy staff-role assignment migration skipped due to error", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  try {
     await seedDefaultRolesForAllOwners();
+    // Seeded role permissions may have changed — drop cached resolutions.
+    permissionCache.clear();
   } catch (error) {
     logger.warn("Seeding default account roles skipped due to error", {
       error: error instanceof Error ? error.message : String(error),
