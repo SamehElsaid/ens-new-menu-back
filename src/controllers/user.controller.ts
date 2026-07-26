@@ -20,11 +20,82 @@ import { getPlansWithCustomDisplay } from "../services/plans.service";
 import { getUserPlanCapabilities } from "../services/planCapabilities.service";
 import { ensureRestaurantNameSchema } from "../schemas/restaurantName.schema";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
+import { ROLES } from "../config/constants";
+import {
+  getMenuStaffColumnMeta,
+  normalizeStaffRow,
+  quoteMenuStaffIdent,
+  type MenuStaffColumnMeta,
+} from "../config/menuStaffColumns";
+
+/** Map a MenuStaff row to the same `{ user }` shape owners get from Users. */
+function staffRowToUserProfile(
+  row: Record<string, unknown>,
+  meta: MenuStaffColumnMeta,
+) {
+  const norm = normalizeStaffRow(row, meta);
+  let expoRaw: unknown = null;
+  if (meta.expoTokenKey) {
+    const key = Object.keys(row).find(
+      (k) => k.toLowerCase() === meta.expoTokenKey!.toLowerCase(),
+    );
+    expoRaw = key != null ? row[key] : null;
+  }
+  const hasFcmToken =
+    expoRaw != null && String(expoRaw).trim().length > 0;
+
+  return {
+    id: norm.id,
+    email: norm.email ?? null,
+    name: norm.name ?? null,
+    restaurantName: null,
+    phoneNumber: norm.phone ?? null,
+    deliveryPhone: null,
+    deliveryOn: false,
+    country: null,
+    dateOfBirth: null,
+    gender: null,
+    address: null,
+    role: ROLES.STAFF,
+    isEmailVerified: false,
+    isPhoneVerified: false,
+    phoneVerifiedAt: null,
+    createdAt: norm.createdAt ?? null,
+    profileImage: null,
+    hasFcmToken,
+    menuId: norm.menuId ?? null,
+  };
+}
+
+async function loadStaffProfile(staffId: number) {
+  const meta = await getMenuStaffColumnMeta();
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input("staffId", sql.Int, staffId)
+    .query(`SELECT * FROM MenuStaff WHERE id = @staffId`);
+
+  if (result.recordset.length === 0) return null;
+
+  const row = result.recordset[0] as Record<string, unknown>;
+  return { meta, profile: staffRowToUserProfile(row, meta) };
+}
 
 // Get user profile
 export async function getProfile(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.userId;
+
+    // Staff JWT userId is MenuStaff.id — never look up Users for them.
+    if (req.user!.role === ROLES.STAFF) {
+      const loaded = await loadStaffProfile(userId);
+      if (!loaded) {
+        sendApiError(res, req, 404, ApiErrors.staffMemberNotFound);
+        return;
+      }
+      res.json({ user: loaded.profile });
+      return;
+    }
 
     await ensureRestaurantNameSchema();
     await ensureDeliverySchema();
@@ -93,6 +164,92 @@ export async function updateProfile(
       deliveryOn,
       deliveryPhone,
     } = req.body;
+
+    // Staff JWT userId is MenuStaff.id — update MenuStaff, not Users.
+    if (req.user!.role === ROLES.STAFF) {
+      const meta = await getMenuStaffColumnMeta();
+      const pool = await getPool();
+
+      const existing = await pool
+        .request()
+        .input("staffId", sql.Int, userId)
+        .query(`SELECT * FROM MenuStaff WHERE id = @staffId`);
+
+      if (existing.recordset.length === 0) {
+        sendApiError(res, req, 404, ApiErrors.staffMemberNotFound);
+        return;
+      }
+
+      const updates: string[] = [];
+      const request = pool.request().input("staffId", sql.Int, userId);
+      let tokenHandled = false;
+
+      if (name !== undefined) {
+        updates.push(`${quoteMenuStaffIdent(meta.nameKey)} = @name`);
+        request.input("name", sql.NVarChar, name);
+      }
+
+      const phoneValue = phone ?? phoneNumber;
+      if (phoneValue !== undefined && meta.phoneColumnQuoted) {
+        updates.push(`${meta.phoneColumnQuoted} = @phone`);
+        request.input(
+          "phone",
+          sql.NVarChar,
+          typeof phoneValue === "string" ? phoneValue.trim() || null : null,
+        );
+      }
+
+      if (fcmTokenBody !== undefined && meta.expoTokenColumnQuoted) {
+        tokenHandled = true;
+        if (fcmTokenBody === null || fcmTokenBody === "") {
+          request.input("expoToken", sql.NVarChar(512), null);
+          updates.push(`${meta.expoTokenColumnQuoted} = @expoToken`);
+        } else if (typeof fcmTokenBody === "string") {
+          const token = fcmTokenBody.trim();
+          if (!token) {
+            request.input("expoToken", sql.NVarChar(512), null);
+            updates.push(`${meta.expoTokenColumnQuoted} = @expoToken`);
+          } else if (token.length > MAX_FCM_TOKEN_LEN) {
+            sendApiError(res, req, 400, ApiErrors.invalidFcmTokenLength);
+            return;
+          } else {
+            request.input("expoToken", sql.NVarChar(512), token);
+            updates.push(`${meta.expoTokenColumnQuoted} = @expoToken`);
+          }
+        } else {
+          sendApiError(res, req, 400, ApiErrors.validationFailed);
+          return;
+        }
+      } else if (fcmTokenBody !== undefined) {
+        // No expo token column — treat as handled so clients don't get "no fields".
+        tokenHandled = true;
+      }
+
+      if (updates.length === 0 && !tokenHandled) {
+        sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
+        return;
+      }
+
+      if (updates.length > 0) {
+        await request.query(`
+          UPDATE MenuStaff
+          SET ${updates.join(", ")}
+          WHERE id = @staffId
+        `);
+      }
+
+      const loaded = await loadStaffProfile(userId);
+      if (!loaded) {
+        sendApiError(res, req, 404, ApiErrors.staffMemberNotFound);
+        return;
+      }
+
+      res.json({
+        message: "Profile updated successfully",
+        user: loaded.profile,
+      });
+      return;
+    }
 
     await ensureRestaurantNameSchema();
     await ensureDeliverySchema();
@@ -197,6 +354,11 @@ export async function updateProfile(
             WHERE id = @userId
           `);
 
+        if (currentUser.recordset.length === 0) {
+          sendApiError(res, req, 404, ApiErrors.userNotFound);
+          return;
+        }
+
         const current = currentUser.recordset[0] as {
           deliveryPhone: string | null;
           phoneNumber: string | null;
@@ -285,6 +447,11 @@ export async function updateProfile(
         FROM Users
         WHERE id = @userId
       `);
+
+    if (userResult.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
+      return;
+    }
 
     const updated = userResult.recordset[0] as Record<string, unknown> & {
       hasFcmToken?: unknown;
