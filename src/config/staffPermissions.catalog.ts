@@ -51,49 +51,50 @@ export const STAFF_PERMISSIONS: readonly StaffPermissionMeta[] = [
     labelKey: "StaffPermissions.keys.orders:view",
     descriptionKey: "StaffPermissions.descriptions.orders:view",
     group: "orders",
-    dependsOn: [],
+    dependsOn: [] as string[],
   },
   {
     key: "orders:confirm",
     labelKey: "StaffPermissions.keys.orders:confirm",
     descriptionKey: "StaffPermissions.descriptions.orders:confirm",
     group: "orders",
-    dependsOn: ["orders:view"],
+    // No dependsOn on orders:view — online-only roles use delivery:view instead.
+    dependsOn: [] as string[],
   },
   {
     key: "orders:cancel",
     labelKey: "StaffPermissions.keys.orders:cancel",
     descriptionKey: "StaffPermissions.descriptions.orders:cancel",
     group: "orders",
-    dependsOn: ["orders:view"],
+    dependsOn: [] as string[],
   },
   {
     key: "orders:edit_items",
     labelKey: "StaffPermissions.keys.orders:edit_items",
     descriptionKey: "StaffPermissions.descriptions.orders:edit_items",
     group: "orders",
-    dependsOn: ["orders:view"],
+    dependsOn: [] as string[],
   },
   {
     key: "orders:prepare",
     labelKey: "StaffPermissions.keys.orders:prepare",
     descriptionKey: "StaffPermissions.descriptions.orders:prepare",
     group: "orders",
-    dependsOn: ["orders:view"],
+    dependsOn: [] as string[],
   },
   {
     key: "orders:deliver",
     labelKey: "StaffPermissions.keys.orders:deliver",
     descriptionKey: "StaffPermissions.descriptions.orders:deliver",
     group: "orders",
-    dependsOn: ["orders:view"],
+    dependsOn: [] as string[],
   },
   {
     key: "orders:complete",
     labelKey: "StaffPermissions.keys.orders:complete",
     descriptionKey: "StaffPermissions.descriptions.orders:complete",
     group: "orders",
-    dependsOn: ["orders:view", "orders:confirm"],
+    dependsOn: ["orders:confirm"] as string[],
   },
   // ── Dashboard ───────────────────────────────────────────────────────
   {
@@ -101,7 +102,7 @@ export const STAFF_PERMISSIONS: readonly StaffPermissionMeta[] = [
     labelKey: "StaffPermissions.keys.dashboard:access",
     descriptionKey: "StaffPermissions.descriptions.dashboard:access",
     group: "dashboard",
-    dependsOn: [],
+    dependsOn: [] as string[],
   },
   // ── Menu ────────────────────────────────────────────────────────────
   {
@@ -109,35 +110,35 @@ export const STAFF_PERMISSIONS: readonly StaffPermissionMeta[] = [
     labelKey: "StaffPermissions.keys.menu:view",
     descriptionKey: "StaffPermissions.descriptions.menu:view",
     group: "menu",
-    dependsOn: ["dashboard:access"],
+    dependsOn: ["dashboard:access"] as string[],
   },
   {
     key: "menu:categories",
     labelKey: "StaffPermissions.keys.menu:categories",
     descriptionKey: "StaffPermissions.descriptions.menu:categories",
     group: "menu",
-    dependsOn: ["dashboard:access", "menu:view"],
+    dependsOn: ["dashboard:access", "menu:view"] as string[],
   },
   {
     key: "menu:items",
     labelKey: "StaffPermissions.keys.menu:items",
     descriptionKey: "StaffPermissions.descriptions.menu:items",
     group: "menu",
-    dependsOn: ["dashboard:access", "menu:view"],
+    dependsOn: ["dashboard:access", "menu:view"] as string[],
   },
   {
     key: "menu:tables",
     labelKey: "StaffPermissions.keys.menu:tables",
     descriptionKey: "StaffPermissions.descriptions.menu:tables",
     group: "menu",
-    dependsOn: ["dashboard:access", "menu:view"],
+    dependsOn: ["dashboard:access", "menu:view"] as string[],
   },
   {
     key: "menu:import",
     labelKey: "StaffPermissions.keys.menu:import",
     descriptionKey: "StaffPermissions.descriptions.menu:import",
     group: "menu",
-    dependsOn: ["dashboard:access", "menu:view"],
+    dependsOn: ["dashboard:access", "menu:view"] as string[],
   },
   // ── Delivery ────────────────────────────────────────────────────────
   {
@@ -145,7 +146,9 @@ export const STAFF_PERMISSIONS: readonly StaffPermissionMeta[] = [
     labelKey: "StaffPermissions.keys.delivery:view",
     descriptionKey: "StaffPermissions.descriptions.delivery:view",
     group: "delivery",
-    dependsOn: ["dashboard:access"],
+    // Usable by staff_app roles (food preparer / delivery) without forcing
+    // dashboard:access into the role JSON / loginPortal backfill.
+    dependsOn: [] as string[],
   },
   // ── Staff ───────────────────────────────────────────────────────────
   {
@@ -153,7 +156,7 @@ export const STAFF_PERMISSIONS: readonly StaffPermissionMeta[] = [
     labelKey: "StaffPermissions.keys.staff:manage",
     descriptionKey: "StaffPermissions.descriptions.staff:manage",
     group: "staff",
-    dependsOn: ["dashboard:access"],
+    dependsOn: ["dashboard:access"] as string[],
   },
   // ── Settings ────────────────────────────────────────────────────────
   {
@@ -161,7 +164,7 @@ export const STAFF_PERMISSIONS: readonly StaffPermissionMeta[] = [
     labelKey: "StaffPermissions.keys.settings:manage",
     descriptionKey: "StaffPermissions.descriptions.settings:manage",
     group: "settings",
-    dependsOn: ["dashboard:access"],
+    dependsOn: ["dashboard:access"] as string[],
   },
   // ── Analytics ───────────────────────────────────────────────────────
   {
@@ -169,7 +172,7 @@ export const STAFF_PERMISSIONS: readonly StaffPermissionMeta[] = [
     labelKey: "StaffPermissions.keys.analytics:view",
     descriptionKey: "StaffPermissions.descriptions.analytics:view",
     group: "analytics",
-    dependsOn: ["dashboard:access"],
+    dependsOn: ["dashboard:access"] as string[],
   },
   // ── Ads ─────────────────────────────────────────────────────────────
   {
@@ -177,7 +180,7 @@ export const STAFF_PERMISSIONS: readonly StaffPermissionMeta[] = [
     labelKey: "StaffPermissions.keys.ads:manage",
     descriptionKey: "StaffPermissions.descriptions.ads:manage",
     group: "ads",
-    dependsOn: ["dashboard:access"],
+    dependsOn: ["dashboard:access"] as string[],
   },
 ] as const;
 

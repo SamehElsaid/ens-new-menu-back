@@ -290,6 +290,10 @@ export const ApiErrors = {
     en: "This email is already used by another staff member",
     ar: "هذا البريد الإلكتروني مستخدم بالفعل من قبل موظف آخر",
   },
+  staffEmailBelongsToOwner: {
+    en: "This email belongs to an owner account and cannot be used for staff",
+    ar: "هذا البريد الإلكتروني تابع لحساب مالك ولا يمكن استخدامه لموظف",
+  },
   staffMenuGrantsRequired: {
     en: "Select at least one menu for this staff member",
     ar: "اختر منيو واحدًا على الأقل لهذا الموظف",

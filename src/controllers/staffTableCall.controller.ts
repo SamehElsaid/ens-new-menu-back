@@ -9,9 +9,10 @@ import {
   updateStaffTableCallItemsAndStatus,
   completeStaffTableCall,
   advanceStaffTableCallStatus,
+  type StaffOrderType,
 } from "../services/staffTableCall.service";
 import { menuOwnerHasCapability } from "../services/planCapabilities.service";
-import { authorization } from "../services/authorization.service";
+import { authorization, type AuthActor } from "../services/authorization.service";
 import { actorFromRequest } from "../middleware/requireStaffPermission";
 import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
@@ -21,6 +22,22 @@ import {
   type StaffTableCallChangedPayload,
 } from "../socket/staffIoBroadcast";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+
+async function resolveStaffChannelFilter(
+  req: Request,
+): Promise<"table" | "delivery" | "all" | null> {
+  const actor = actorFromRequest(req);
+  if (!actor) return null;
+  return authorization.resolveOrderChannelFilter(actor);
+}
+
+async function assertActorCanAccessCallChannel(
+  actor: AuthActor | null,
+  orderType: StaffOrderType,
+): Promise<boolean> {
+  if (!actor) return false;
+  return authorization.canAccessOrderChannel(actor, orderType);
+}
 
 function tableCallSummaries(
   snap: {
@@ -139,9 +156,20 @@ export async function listStaffTableCallsHistory(
       return;
     }
 
+    const channel = await resolveStaffChannelFilter(req);
+    if (!channel) {
+      sendApiError(res, req, 403, ApiErrors.forbidden);
+      return;
+    }
+
     const page = parseInt(String(req.query.page ?? "1"), 10) || 1;
     const limit = parseInt(String(req.query.limit ?? "20"), 10) || 20;
-    const history = await getStaffTableCallsHistory(menuId, page, limit);
+    const history = await getStaffTableCallsHistory(
+      menuId,
+      page,
+      limit,
+      channel,
+    );
 
     res.json({
       total: history.total,
@@ -203,6 +231,12 @@ export async function getStaffTableCallById(
       return;
     }
 
+    const actor = actorFromRequest(req);
+    if (!(await assertActorCanAccessCallChannel(actor, snap.type))) {
+      sendApiError(res, req, 403, ApiErrors.forbidden);
+      return;
+    }
+
     const acknowledgedAt = snap.acknowledgedAt ?? null;
     res.json({
       id: snap.id,
@@ -245,8 +279,14 @@ export async function listPendingStaffTableCalls(
       return;
     }
 
+    const channel = await resolveStaffChannelFilter(req);
+    if (!channel) {
+      sendApiError(res, req, 403, ApiErrors.forbidden);
+      return;
+    }
+
     const limit = parseInt(String(req.query.limit ?? "100"), 10) || 100;
-    const rows = await getPendingStaffTableCalls(menuId, limit);
+    const rows = await getPendingStaffTableCalls(menuId, limit, channel);
 
     res.json({
       calls: rows.map((c) => ({
@@ -295,6 +335,21 @@ export async function putStaffTableCall(
     const callId = parseInt(req.params.id, 10);
     if (!Number.isFinite(callId) || callId <= 0) {
       sendApiError(res, req, 400, ApiErrors.invalidCallId);
+      return;
+    }
+
+    const channelSnap = await getStaffTableCallSnapshot(menuId, callId);
+    if (!channelSnap) {
+      sendApiError(res, req, 404, ApiErrors.tableCallNotFound);
+      return;
+    }
+    if (
+      !(await assertActorCanAccessCallChannel(
+        actorFromRequest(req),
+        channelSnap.type,
+      ))
+    ) {
+      sendApiError(res, req, 403, ApiErrors.forbidden);
       return;
     }
 
@@ -422,6 +477,21 @@ export async function patchTableCallStatus(
       return;
     }
 
+    const channelSnap = await getStaffTableCallSnapshot(menuId, callId);
+    if (!channelSnap) {
+      sendApiError(res, req, 404, ApiErrors.tableCallNotFound);
+      return;
+    }
+    if (
+      !(await assertActorCanAccessCallChannel(
+        actorFromRequest(req),
+        channelSnap.type,
+      ))
+    ) {
+      sendApiError(res, req, 403, ApiErrors.forbidden);
+      return;
+    }
+
     const raw = String(req.body?.status ?? "")
       .trim()
       .toLowerCase();
@@ -511,6 +581,21 @@ export async function patchTableCallItems(
     const callId = parseInt(req.params.id, 10);
     if (!Number.isFinite(callId) || callId <= 0) {
       sendApiError(res, req, 400, ApiErrors.invalidCallId);
+      return;
+    }
+
+    const channelSnap = await getStaffTableCallSnapshot(menuId, callId);
+    if (!channelSnap) {
+      sendApiError(res, req, 404, ApiErrors.tableCallNotFound);
+      return;
+    }
+    if (
+      !(await assertActorCanAccessCallChannel(
+        actorFromRequest(req),
+        channelSnap.type,
+      ))
+    ) {
+      sendApiError(res, req, 403, ApiErrors.forbidden);
       return;
     }
 
@@ -620,6 +705,15 @@ export async function patchTableCallComplete(
       sendApiError(res, req, 404, ApiErrors.tableCallNotFound);
       return;
     }
+    if (
+      !(await assertActorCanAccessCallChannel(
+        actorFromRequest(req),
+        snapBefore.type,
+      ))
+    ) {
+      sendApiError(res, req, 403, ApiErrors.forbidden);
+      return;
+    }
 
     const ok = await completeStaffTableCall(callId, menuId);
     if (!ok) {
@@ -695,6 +789,15 @@ export async function patchTableCallPrepare(
     const snapBefore = await getStaffTableCallSnapshot(menuId, callId);
     if (!snapBefore) {
       sendApiError(res, req, 404, ApiErrors.tableCallNotFound);
+      return;
+    }
+    if (
+      !(await assertActorCanAccessCallChannel(
+        actorFromRequest(req),
+        snapBefore.type,
+      ))
+    ) {
+      sendApiError(res, req, 403, ApiErrors.forbidden);
       return;
     }
 

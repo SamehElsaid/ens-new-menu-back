@@ -836,6 +836,32 @@ export async function verifyFcmTokenMatch(
       return;
     }
 
+    // Staff JWT userId is MenuStaff.id — compare against MenuStaff push token.
+    if (req.user!.role === ROLES.STAFF) {
+      const meta = await getMenuStaffColumnMeta();
+      if (!meta.expoTokenColumnQuoted) {
+        res.json({ matches: false });
+        return;
+      }
+      const pool = await getPool();
+      const result = await pool
+        .request()
+        .input("staffId", sql.Int, userId)
+        .query(
+          `SELECT ${meta.expoTokenColumnQuoted} AS pushToken
+           FROM MenuStaff WHERE id = @staffId`,
+        );
+      if (result.recordset.length === 0) {
+        sendApiError(res, req, 404, ApiErrors.staffMemberNotFound);
+        return;
+      }
+      const stored = result.recordset[0]?.pushToken;
+      const matches =
+        stored != null && String(stored).trim() === sent;
+      res.json({ matches });
+      return;
+    }
+
     const tokens = await getUserFcmTokens(userId);
     const matches = tokens.includes(sent);
 

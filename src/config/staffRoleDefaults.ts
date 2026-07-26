@@ -39,13 +39,21 @@ const WAITER_PERMISSIONS = [
   "orders:edit_items",
 ];
 
-const FOOD_PREPARER_PERMISSIONS = ["orders:view", "orders:prepare " , "delivery:view",
-];
-
-const DELIVERY_PERMISSIONS = [
-  "orders:view",
+/** Online/delivery orders only — full kitchen → handoff workflow. */
+const FOOD_PREPARER_PERMISSIONS = [
+  "delivery:view",
+  "orders:confirm",
+  "orders:cancel",
+  "orders:edit_items",
+  "orders:prepare",
   "orders:deliver",
   "orders:complete",
+];
+
+/** Online/delivery orders only — see + mark delivered. */
+const DELIVERY_PERMISSIONS = [
+  "delivery:view",
+  "orders:deliver",
 ];
 
 // ── Dashboard roles (carry dashboard:access) ───────────────────────────

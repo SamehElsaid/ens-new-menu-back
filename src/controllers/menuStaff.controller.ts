@@ -13,11 +13,15 @@ import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 import { getMenuAccessForRequest } from "../utils/menuAccess";
 import { localizedRoleNameSql } from "../services/menuStaffRoles.service";
 import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
+import {
+  findStaffEmailConflict,
+  type StaffEmailConflict,
+} from "../services/staffEmail.service";
 
 /** Staff-management endpoints: owner OR a staff member whose role grants it. */
 const STAFF_MANAGE_PERMISSION = "staff:manage";
 
-/** Ensures a roleId exists and belongs to this menu; returns its name/legacy role. */
+/** Ensures a roleId exists on the menu owner's account catalog. */
 async function resolveMenuRole(
   menuId: number,
   roleId: unknown,
@@ -37,9 +41,10 @@ async function resolveMenuRole(
     .input("menuId", sql.Int, menuId)
     .input("locale", sql.NVarChar(5), locale)
     .query(`
-      SELECT id, ${localizedRoleNameSql("r", "name")}, permissionsJson
+      SELECT r.id, ${localizedRoleNameSql("r", "name")}, r.permissionsJson
       FROM dbo.MenuStaffRoles r
-      WHERE id = @roleId AND menuId = @menuId
+      INNER JOIN dbo.Menus m ON m.userId = r.ownerUserId
+      WHERE r.id = @roleId AND m.id = @menuId
     `);
   if (check.recordset.length === 0) return { ok: false };
 
@@ -69,38 +74,10 @@ function isSqlUniqueViolation(error: unknown): boolean {
   return err?.number === 2627 || err?.number === 2601;
 }
 
-async function isStaffEmailTaken(
-  email: string,
-  excludeStaffId?: number,
-): Promise<boolean> {
-  const meta = await getMenuStaffColumnMeta();
-  if (!meta.emailKey) {
-    return false;
-  }
-
-  const normalizedEmail = email.toLowerCase().trim();
-  if (!normalizedEmail) {
-    return false;
-  }
-
-  const pool = await getPool();
-  const emailCol = quoteMenuStaffIdent(meta.emailKey);
-  const request = pool
-    .request()
-    .input("email", sql.NVarChar, normalizedEmail);
-  const excludeSql =
-    excludeStaffId != null ? " AND id <> @excludeStaffId" : "";
-  if (excludeStaffId != null) {
-    request.input("excludeStaffId", sql.Int, excludeStaffId);
-  }
-
-  const dupCheck = await request.query(`
-      SELECT TOP 1 id
-      FROM MenuStaff
-      WHERE LOWER(${emailCol}) = @email${excludeSql}
-    `);
-
-  return dupCheck.recordset.length > 0;
+function staffEmailConflictError(conflict: Exclude<StaffEmailConflict, null>) {
+  return conflict === "owner"
+    ? ApiErrors.staffEmailBelongsToOwner
+    : ApiErrors.staffEmailExists;
 }
 
 export async function getStaff(req: Request, res: Response): Promise<void> {
@@ -237,8 +214,9 @@ export async function createStaff(
     }
 
     if (normalizedEmail && meta.emailKey) {
-      if (await isStaffEmailTaken(normalizedEmail)) {
-        sendApiError(res, req, 400, ApiErrors.staffEmailExists);
+      const conflict = await findStaffEmailConflict(normalizedEmail);
+      if (conflict) {
+        sendApiError(res, req, 400, staffEmailConflictError(conflict));
         return;
       }
     }
@@ -399,12 +377,15 @@ export async function updateStaff(
     let nextEmail: string | null | undefined;
     if (email !== undefined && meta.emailKey) {
       nextEmail = email ? String(email).toLowerCase().trim() : null;
-      if (
-        nextEmail &&
-        (await isStaffEmailTaken(nextEmail, parseInt(staffId, 10)))
-      ) {
-        sendApiError(res, req, 400, ApiErrors.staffEmailExists);
-        return;
+      if (nextEmail) {
+        const conflict = await findStaffEmailConflict(
+          nextEmail,
+          parseInt(staffId, 10),
+        );
+        if (conflict) {
+          sendApiError(res, req, 400, staffEmailConflictError(conflict));
+          return;
+        }
       }
       updates.push(`${quoteMenuStaffIdent(meta.emailKey)} = @email`);
       request.input("email", sql.NVarChar, nextEmail);

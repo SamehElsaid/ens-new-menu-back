@@ -29,7 +29,8 @@
  *     tags: [Staff]
  *     summary: Create staff member
  *     description: |
- *       `roleId` references a dynamic role from `GET /api/menus/{menuId}/staff-roles`.
+ *       `roleId` references a dynamic role from `GET /api/dashboard/staff-roles`
+ *       (account catalog). Legacy `GET /api/menus/{menuId}/staff-roles` still works as a shim.
  *       Optional password (min 6) enables staff app login with email.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:

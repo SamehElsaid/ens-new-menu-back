@@ -48,6 +48,27 @@ import { parseGeoCoord } from "../utils/geoDistance";
 
 export type StaffOrderType = "table" | "delivery";
 
+/** Limit staff list/history queries to one channel, or both when `"all"`. */
+export type StaffOrderChannelFilter = StaffOrderType | "all";
+
+/**
+ * SQL predicate for `orderType` / legacy `tableNumber = 'delivery'`.
+ * Alias is optional (e.g. `c.` when joining).
+ */
+function orderChannelWhereSql(
+  filter: StaffOrderChannelFilter | undefined,
+  alias = "",
+): string {
+  if (!filter || filter === "all") return "1 = 1";
+  const col = `${alias}orderType`;
+  const tableCol = `${alias}tableNumber`;
+  const isDelivery = `
+    LOWER(LTRIM(RTRIM(ISNULL(${col}, N'')))) = N'delivery'
+    OR LOWER(LTRIM(RTRIM(ISNULL(${tableCol}, N'')))) = N'delivery'
+  `;
+  return filter === "delivery" ? `(${isDelivery})` : `NOT (${isDelivery})`;
+}
+
 /** Guest intent: food order, waiter ping, or bill request. */
 export type StaffRequestKind = "order" | "waiter" | "bill";
 
@@ -2049,10 +2070,12 @@ export async function getStaffTableCallSnapshot(
 export async function getPendingStaffTableCalls(
   menuId: number,
   limit = 100,
+  channel: StaffOrderChannelFilter = "all",
 ): Promise<StaffTableCallRow[]> {
   try {
     await ensureStaffTableCallsOrderTypeSchema();
     const pool = await getPool();
+    const channelSql = orderChannelWhereSql(channel);
     const result = await pool
       .request()
       .input("menuId", sql.Int, menuId)
@@ -2077,6 +2100,7 @@ export async function getPendingStaffTableCalls(
             status = N'pending'
             OR (status IS NULL AND acknowledgedAt IS NULL)
           )
+          AND ${channelSql}
         ORDER BY createdAt ASC
       `);
     const charges = await fetchMenuOrderCharges(menuId);
@@ -2100,6 +2124,7 @@ export async function getStaffTableCallsHistory(
   menuId: number,
   page = 1,
   limit = 20,
+  channel: StaffOrderChannelFilter = "all",
 ): Promise<StaffTableCallHistoryPage> {
   try {
     await ensureStaffTableCallsOrderTypeSchema();
@@ -2107,12 +2132,15 @@ export async function getStaffTableCallsHistory(
     const safePage = Math.max(1, Math.floor(page));
     const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 500);
     const offset = (safePage - 1) * safeLimit;
+    const channelSql = orderChannelWhereSql(channel);
+    const channelSqlAliased = orderChannelWhereSql(channel, "c.");
 
     const totalResult = await pool.request().input("menuId", sql.Int, menuId)
       .query(`
         SELECT COUNT(*) as total
         FROM StaffTableCalls
         WHERE menuId = @menuId
+          AND ${channelSql}
       `);
     const total = Number(totalResult.recordset[0]?.total ?? 0);
 
@@ -2144,6 +2172,7 @@ export async function getStaffTableCallsHistory(
         FROM StaffTableCalls c
         LEFT JOIN MenuStaff sm ON sm.id = c.lastEditedByStaffId
         WHERE c.menuId = @menuId
+          AND ${channelSqlAliased}
         ORDER BY c.createdAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -2166,6 +2195,7 @@ export async function getStaffTableCallsHistory(
           status
         FROM StaffTableCalls
         WHERE menuId = @menuId
+          AND ${channelSql}
         ORDER BY createdAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
