@@ -300,8 +300,7 @@ async function appendMenuAuditLog(
     .input("summaryEn", sql.NVarChar, row.summaryEn)
     .input("detailJson", sql.NVarChar(sql.MAX), row.detailJson ?? null)
     .input("actorRole", sql.NVarChar, actor.actorRole)
-    .input("actorName", sql.NVarChar, actor.actorName)
-    .query(`
+    .input("actorName", sql.NVarChar, actor.actorName).query(`
       INSERT INTO dbo.MenuAuditLog (
         menuId, action, targetType, targetId,
         summaryAr, summaryEn, detailJson, actorRole, actorName
@@ -619,7 +618,9 @@ export async function getMenuActivityLogById(
       menuIds.length === 1
     ) {
       menuIds = await getDeliveryGroupMenuIds(menuId);
-      tableCallOnly = await menuOrdersTableCallExistsSql({ channel: "delivery" });
+      tableCallOnly = await menuOrdersTableCallExistsSql({
+        channel: "delivery",
+      });
       menuFilter = menuIdWhereSql(menuIds);
       result = await pool
         .request()
@@ -681,7 +682,8 @@ export async function getMenuActivityLogById(
         : null;
 
     if (!order.customerPhone && stcPhone) order.customerPhone = stcPhone;
-    if (!order.customerAddress && stcAddress) order.customerAddress = stcAddress;
+    if (!order.customerAddress && stcAddress)
+      order.customerAddress = stcAddress;
     if (!order.orderNotes && stcNotes) order.orderNotes = stcNotes;
 
     const stcSourceMenuId =
@@ -739,8 +741,7 @@ export async function getMenuActivityLogById(
       sourceMenuId: order.sourceMenuId ?? stcSourceMenuId,
       sourceMenuNameAr: order.sourceMenuNameAr ?? null,
       sourceMenuNameEn: order.sourceMenuNameEn ?? null,
-      storageMenuId:
-        r.storageMenuId != null ? Number(r.storageMenuId) : menuId,
+      storageMenuId: r.storageMenuId != null ? Number(r.storageMenuId) : menuId,
       pendingGuestAddition: order.pendingGuestAddition === true,
       pendingBillRequest: order.pendingBillRequest === true,
     };
@@ -918,11 +919,14 @@ export async function listMenuOrdersForMenuIds(
           : null;
 
       const governorateId =
-        order.governorateId != null && Number.isFinite(Number(order.governorateId))
+        order.governorateId != null &&
+        Number.isFinite(Number(order.governorateId))
           ? Number(order.governorateId)
           : null;
 
-      const orderTypeRaw = String(order.type ?? order.orderChannel ?? "").trim().toLowerCase();
+      const orderTypeRaw = String(order.type ?? order.orderChannel ?? "")
+        .trim()
+        .toLowerCase();
       const orderType =
         orderTypeRaw === "delivery" || orderTypeRaw === "table"
           ? orderTypeRaw
@@ -947,7 +951,8 @@ export async function listMenuOrdersForMenuIds(
           : null;
 
       const sourceMenuId =
-        order.sourceMenuId != null && Number.isFinite(Number(order.sourceMenuId))
+        order.sourceMenuId != null &&
+        Number.isFinite(Number(order.sourceMenuId))
           ? Number(order.sourceMenuId)
           : null;
 
@@ -982,7 +987,8 @@ export async function listMenuOrdersForMenuIds(
             ? String(order.governorateNameEn)
             : null,
         deliveryFee:
-          order.deliveryFee != null && Number.isFinite(Number(order.deliveryFee))
+          order.deliveryFee != null &&
+          Number.isFinite(Number(order.deliveryFee))
             ? Number(order.deliveryFee)
             : null,
         items: order.items || [],
@@ -1183,51 +1189,96 @@ function orderActionSummaries(
   if (action === "TABLE_CALL_CONFIRMED") {
     if (isDelivery) {
       return cust
-        ? { ar: `قبول طلب توصيل ${cust}`, en: `Accepted delivery order — ${cust}` }
+        ? {
+            ar: `قبول طلب توصيل ${cust}`,
+            en: `Accepted delivery order — ${cust}`,
+          }
         : { ar: "قبول طلب توصيل", en: "Accepted delivery order" };
     }
     return cust
-      ? { ar: `قبول طلب ${cust} — طاولة ${tbl || "?"}`, en: `Accepted order — ${cust} — table ${tbl || "?"}` }
-      : { ar: `قبول طلب طاولة ${tbl || "?"}`, en: `Accepted table ${tbl || "?"} order` };
+      ? {
+          ar: `قبول طلب ${cust} — طاولة ${tbl || "?"}`,
+          en: `Accepted order — ${cust} — table ${tbl || "?"}`,
+        }
+      : {
+          ar: `قبول طلب طاولة ${tbl || "?"}`,
+          en: `Accepted table ${tbl || "?"} order`,
+        };
   }
   if (action === "TABLE_CALL_CANCELLED") {
     if (isDelivery) {
       return cust
-        ? { ar: `رفض طلب توصيل ${cust}`, en: `Rejected delivery order — ${cust}` }
+        ? {
+            ar: `رفض طلب توصيل ${cust}`,
+            en: `Rejected delivery order — ${cust}`,
+          }
         : { ar: "رفض طلب توصيل", en: "Rejected delivery order" };
     }
     return cust
-      ? { ar: `رفض طلب ${cust} — طاولة ${tbl || "?"}`, en: `Rejected order — ${cust} — table ${tbl || "?"}` }
-      : { ar: `رفض طلب طاولة ${tbl || "?"}`, en: `Rejected table ${tbl || "?"} order` };
+      ? {
+          ar: `رفض طلب ${cust} — طاولة ${tbl || "?"}`,
+          en: `Rejected order — ${cust} — table ${tbl || "?"}`,
+        }
+      : {
+          ar: `رفض طلب طاولة ${tbl || "?"}`,
+          en: `Rejected table ${tbl || "?"} order`,
+        };
   }
   if (action === "TABLE_CALL_PREPARED") {
     if (isDelivery) {
       return cust
-        ? { ar: `تم تحضير طلب توصيل ${cust}`, en: `Delivery order prepared — ${cust}` }
+        ? {
+            ar: `تم تحضير طلب توصيل ${cust}`,
+            en: `Delivery order prepared — ${cust}`,
+          }
         : { ar: "تم تحضير طلب التوصيل", en: "Delivery order prepared" };
     }
     return cust
-      ? { ar: `تم تحضير طلب ${cust} — طاولة ${tbl || "?"}`, en: `Order prepared — ${cust} — table ${tbl || "?"}` }
-      : { ar: `تم تحضير طلب طاولة ${tbl || "?"}`, en: `Table ${tbl || "?"} order prepared` };
+      ? {
+          ar: `تم تحضير طلب ${cust} — طاولة ${tbl || "?"}`,
+          en: `Order prepared — ${cust} — table ${tbl || "?"}`,
+        }
+      : {
+          ar: `تم تحضير طلب طاولة ${tbl || "?"}`,
+          en: `Table ${tbl || "?"} order prepared`,
+        };
   }
   if (action === "TABLE_CALL_COMPLETED") {
     if (isDelivery) {
       return cust
-        ? { ar: `إنهاء طلب توصيل ${cust}`, en: `Completed delivery order — ${cust}` }
+        ? {
+            ar: `إنهاء طلب توصيل ${cust}`,
+            en: `Completed delivery order — ${cust}`,
+          }
         : { ar: "إنهاء طلب التوصيل", en: "Completed delivery order" };
     }
     return cust
-      ? { ar: `إنهاء طلب ${cust} — طاولة ${tbl || "?"}`, en: `Completed order — ${cust} — table ${tbl || "?"}` }
-      : { ar: `إنهاء طلب طاولة ${tbl || "?"}`, en: `Completed table ${tbl || "?"} order` };
+      ? {
+          ar: `إنهاء طلب ${cust} — طاولة ${tbl || "?"}`,
+          en: `Completed order — ${cust} — table ${tbl || "?"}`,
+        }
+      : {
+          ar: `إنهاء طلب طاولة ${tbl || "?"}`,
+          en: `Completed table ${tbl || "?"} order`,
+        };
   }
   if (isDelivery) {
     return cust
-      ? { ar: `تم تسليم طلب توصيل ${cust}`, en: `Delivery order delivered — ${cust}` }
+      ? {
+          ar: `تم تسليم طلب توصيل ${cust}`,
+          en: `Delivery order delivered — ${cust}`,
+        }
       : { ar: "تم تسليم طلب التوصيل", en: "Delivery order delivered" };
   }
   return cust
-    ? { ar: `تم تسليم طلب ${cust} — طاولة ${tbl || "?"}`, en: `Order delivered — ${cust} — table ${tbl || "?"}` }
-    : { ar: `تم تسليم طلب طاولة ${tbl || "?"}`, en: `Table ${tbl || "?"} order delivered` };
+    ? {
+        ar: `تم تسليم طلب ${cust} — طاولة ${tbl || "?"}`,
+        en: `Order delivered — ${cust} — table ${tbl || "?"}`,
+      }
+    : {
+        ar: `تم تسليم طلب طاولة ${tbl || "?"}`,
+        en: `Table ${tbl || "?"} order delivered`,
+      };
 }
 
 function buildOrderDetailForLog(
@@ -1386,8 +1437,7 @@ export async function applyMenuOrderAction(
   action: MenuOrderActionType,
   req: Request,
 ): Promise<
-  | { ok: true; status: string }
-  | { ok: false; error: ApplyMenuOrderActionError }
+  { ok: true; status: string } | { ok: false; error: ApplyMenuOrderActionError }
 > {
   try {
     const pool = await getPool();
@@ -1439,7 +1489,9 @@ export async function applyMenuOrderAction(
     if (!permActor) {
       return { ok: false, error: "FORBIDDEN" };
     }
-    if (!(await authorization.can(permActor, orderActionToPermission(action)))) {
+    if (
+      !(await authorization.can(permActor, orderActionToPermission(action)))
+    ) {
       return { ok: false, error: "FORBIDDEN" };
     }
 
@@ -1451,15 +1503,18 @@ export async function applyMenuOrderAction(
         action === "TABLE_CALL_COMPLETED" ||
         (action === "TABLE_CALL_DELIVERED" &&
           snapBefore.type !== "delivery" &&
-          String(snapBefore.tableNumber ?? "").trim().toLowerCase() !==
-            "delivery"))
+          String(snapBefore.tableNumber ?? "")
+            .trim()
+            .toLowerCase() !== "delivery"))
     ) {
       return { ok: false, error: "INVALID_STATE" };
     }
 
     const isTableOrder =
       snapBefore.type !== "delivery" &&
-      String(snapBefore.tableNumber ?? "").trim().toLowerCase() !== "delivery";
+      String(snapBefore.tableNumber ?? "")
+        .trim()
+        .toLowerCase() !== "delivery";
 
     if (action === "TABLE_CALL_CONFIRMED") {
       if (pendingGuestAddition) {
@@ -1493,18 +1548,30 @@ export async function applyMenuOrderAction(
       } else if (currentStatus !== "pending") {
         return { ok: false, error: "INVALID_STATE" };
       } else {
-        applied = await setStaffTableCallStatus(callId, storageMenuId, "confirmed");
+        applied = await setStaffTableCallStatus(
+          callId,
+          storageMenuId,
+          "confirmed",
+        );
       }
     } else if (action === "TABLE_CALL_CANCELLED") {
       if (currentStatus !== "pending") {
         return { ok: false, error: "INVALID_STATE" };
       }
-      applied = await setStaffTableCallStatus(callId, storageMenuId, "cancelled");
+      applied = await setStaffTableCallStatus(
+        callId,
+        storageMenuId,
+        "cancelled",
+      );
     } else if (action === "TABLE_CALL_PREPARED") {
       if (currentStatus !== "confirmed") {
         return { ok: false, error: "INVALID_STATE" };
       }
-      applied = await advanceStaffTableCallStatus(callId, storageMenuId, "prepared");
+      applied = await advanceStaffTableCallStatus(
+        callId,
+        storageMenuId,
+        "prepared",
+      );
     } else if (action === "TABLE_CALL_COMPLETED") {
       if (!isTableOrder) {
         return { ok: false, error: "INVALID_ACTION" };
@@ -1523,7 +1590,11 @@ export async function applyMenuOrderAction(
         if (currentStatus !== "prepared") {
           return { ok: false, error: "INVALID_STATE" };
         }
-        applied = await advanceStaffTableCallStatus(callId, storageMenuId, "delivered");
+        applied = await advanceStaffTableCallStatus(
+          callId,
+          storageMenuId,
+          "delivered",
+        );
       }
     } else {
       return { ok: false, error: "INVALID_ACTION" };

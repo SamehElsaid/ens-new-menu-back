@@ -55,6 +55,8 @@ router.post(
     body("branchId").optional().isInt({ min: 1 }).toInt(),
     body("customerLat").optional().isFloat({ min: -90, max: 90 }),
     body("customerLng").optional().isFloat({ min: -180, max: 180 }),
+    body("governorateNameAr").optional().isString().trim().isLength({ max: 255 }),
+    body("governorateNameEn").optional().isString().trim().isLength({ max: 255 }),
     body("status")
       .optional()
       .isIn(["pending", "confirmed", "cancelled"])

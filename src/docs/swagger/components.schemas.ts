@@ -119,6 +119,14 @@
  *         branchId: { type: integer, example: 3, description: "For distance delivery mode" }
  *         customerLat: { type: number, example: 30.0444 }
  *         customerLng: { type: number, example: 31.2357 }
+ *         governorateNameAr:
+ *           type: string
+ *           example: "طنطا، الغربية"
+ *           description: "Delivery area label (distance mode). Stored on the order for dashboard منطقة التوصيل."
+ *         governorateNameEn:
+ *           type: string
+ *           example: "Tanta, Gharbia"
+ *           description: "English delivery area label (distance mode)."
  *         status:
  *           type: string
  *           enum: [pending, confirmed, cancelled]

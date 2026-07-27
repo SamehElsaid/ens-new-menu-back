@@ -116,6 +116,8 @@ export async function postGuestStaffCall(
       branchId: req.body?.branchId,
       customerLat: req.body?.customerLat,
       customerLng: req.body?.customerLng,
+      governorateNameAr: req.body?.governorateNameAr,
+      governorateNameEn: req.body?.governorateNameEn,
     });
 
     if (!result.ok) {

@@ -159,6 +159,9 @@ export type GuestStaffCallOptions = {
   branchId?: number | null;
   customerLat?: number | null;
   customerLng?: number | null;
+  /** Delivery area label for distance mode (same fields as governorate zones). */
+  governorateNameAr?: string | null;
+  governorateNameEn?: string | null;
 };
 
 export function parseStaffRequestKind(raw: unknown): StaffRequestKind {
@@ -240,6 +243,12 @@ function parseCustomerPhone(
 function parseOrderNotes(raw: unknown): string | null {
   if (raw == null) return null;
   const trimmed = String(raw).trim().slice(0, 500);
+  return trimmed.length ? trimmed : null;
+}
+
+function parseDeliveryAreaName(raw: unknown): string | null {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim().slice(0, 255);
   return trimmed.length ? trimmed : null;
 }
 
@@ -351,7 +360,9 @@ function coerceStaffOrderLineSize(raw: unknown): MenuItemSize | undefined {
   return { nameAr: ar, nameEn: en, price };
 }
 
-function coerceStaffOrderLineVariant(raw: unknown): MenuItemVariant | undefined {
+function coerceStaffOrderLineVariant(
+  raw: unknown,
+): MenuItemVariant | undefined {
   if (raw == null || raw === "") return undefined;
   const normalized = normalizeMenuItemVariantsInput([raw]);
   if (normalized?.length === 1) return normalized[0];
@@ -375,27 +386,31 @@ function coerceStaffOrderLineVariant(raw: unknown): MenuItemVariant | undefined 
   return { labelAr: ar, labelEn: en, price };
 }
 
-function parseStaffOrderLineSize(
-  raw: unknown,
-): { ok: true; value: MenuItemSize | undefined } {
+function parseStaffOrderLineSize(raw: unknown): {
+  ok: true;
+  value: MenuItemSize | undefined;
+} {
   if (raw === null || raw === undefined || raw === "") {
     return { ok: true, value: undefined };
   }
   return { ok: true, value: coerceStaffOrderLineSize(raw) };
 }
 
-function parseStaffOrderLineVariant(
-  raw: unknown,
-): { ok: true; value: MenuItemVariant | undefined } {
+function parseStaffOrderLineVariant(raw: unknown): {
+  ok: true;
+  value: MenuItemVariant | undefined;
+} {
   if (raw === null || raw === undefined || raw === "") {
     return { ok: true, value: undefined };
   }
   return { ok: true, value: coerceStaffOrderLineVariant(raw) };
 }
 
-function pickStaffOrderItemOptions(
-  o: Record<string, unknown>,
-): { ok: true; size?: MenuItemSize; variant?: MenuItemVariant } {
+function pickStaffOrderItemOptions(o: Record<string, unknown>): {
+  ok: true;
+  size?: MenuItemSize;
+  variant?: MenuItemVariant;
+} {
   const sizeParsed = parseStaffOrderLineSize(o.size);
   const variantParsed = parseStaffOrderLineVariant(o.variant);
   return {
@@ -456,10 +471,7 @@ async function fetchMenuOrderCharges(menuId: number): Promise<{
   try {
     await ensureMenuWifiTaxServiceSchema();
     const pool = await getPool();
-    const result = await pool
-      .request()
-      .input("id", sql.Int, menuId)
-      .query(`
+    const result = await pool.request().input("id", sql.Int, menuId).query(`
         SELECT
           ISNULL(taxEnabled, 0) AS taxEnabled,
           taxPercent,
@@ -1024,14 +1036,14 @@ export async function processGuestStaffCall(
       nameEn: string;
       price: number;
     } | null = null;
-    let distanceDelivery:
-      | {
-          branchId: number;
-          distanceKm: number;
-          deliveryFee: number;
-          maxDeliveryRadiusKm: number | null;
-        }
-      | null = null;
+    let distanceDelivery: {
+      branchId: number;
+      distanceKm: number;
+      deliveryFee: number;
+      maxDeliveryRadiusKm: number | null;
+      governorateNameAr: string | null;
+      governorateNameEn: string | null;
+    } | null = null;
 
     if (isDeliveryOrder) {
       await ensureDeliverySchema();
@@ -1065,18 +1077,34 @@ export async function processGuestStaffCall(
           return { ok: false, error: "INVALID_BRANCH" };
         }
 
+        let governorateNameAr = parseDeliveryAreaName(
+          options?.governorateNameAr,
+        );
+        let governorateNameEn = parseDeliveryAreaName(
+          options?.governorateNameEn,
+        );
+        if (governorateNameAr || governorateNameEn) {
+          governorateNameAr = governorateNameAr || governorateNameEn;
+          governorateNameEn = governorateNameEn || governorateNameAr;
+        }
+
         distanceDelivery = {
           branchId: branchResult.delivery.branchId,
           distanceKm: branchResult.delivery.quote.distanceKm,
           deliveryFee: branchResult.delivery.quote.deliveryFee ?? 0,
           maxDeliveryRadiusKm: branchResult.delivery.quote.maxDeliveryRadiusKm,
+          governorateNameAr,
+          governorateNameEn,
         };
       } else {
         const governorateId = governorateIdFromOptions;
         if (!governorateId) {
           return { ok: false, error: "INVALID_PAYLOAD" };
         }
-        const govResult = await resolveDeliveryGovernorate(menuId, governorateId);
+        const govResult = await resolveDeliveryGovernorate(
+          menuId,
+          governorateId,
+        );
         if (!govResult.ok) {
           return { ok: false, error: "INVALID_GOVERNORATE" };
         }
@@ -1196,9 +1224,7 @@ export async function processGuestStaffCall(
                   orderTotal: appended.orderTotal,
                   status: appended.status,
                   pendingGuestAddition: true,
-                  ...(existingPendingBill
-                    ? { pendingBillRequest: true }
-                    : {}),
+                  ...(existingPendingBill ? { pendingBillRequest: true } : {}),
                 },
               ),
             }),
@@ -1439,6 +1465,17 @@ export async function processGuestStaffCall(
                   deliveryFee: distanceDelivery.deliveryFee,
                   maxDeliveryRadiusKm: distanceDelivery.maxDeliveryRadiusKm,
                   deliveryMode: "distance",
+                  ...(distanceDelivery.governorateNameAr ||
+                  distanceDelivery.governorateNameEn
+                    ? {
+                        governorateNameAr:
+                          distanceDelivery.governorateNameAr ||
+                          distanceDelivery.governorateNameEn,
+                        governorateNameEn:
+                          distanceDelivery.governorateNameEn ||
+                          distanceDelivery.governorateNameAr,
+                      }
+                    : {}),
                 }
               : {}),
           }),
@@ -2653,9 +2690,7 @@ export async function clearStaffTableAndDeliveryCallsForUser(
   try {
     const pool = await getPool();
 
-    const menusResult = await pool
-      .request()
-      .input("userId", sql.Int, userId)
+    const menusResult = await pool.request().input("userId", sql.Int, userId)
       .query(`
         SELECT id FROM Menus WHERE userId = @userId
       `);
@@ -2749,7 +2784,10 @@ export type GuestOpenTableOrderCall = {
 async function assertGuestTableOrderAccess(
   menuId: number,
   tableNumber: string,
-): Promise<{ ok: true; tableNumber: string } | { ok: false; error: GuestOpenTableOrderError }> {
+): Promise<
+  | { ok: true; tableNumber: string }
+  | { ok: false; error: GuestOpenTableOrderError }
+> {
   if (!Number.isFinite(menuId) || menuId <= 0) {
     return { ok: false, error: "INVALID_PAYLOAD" };
   }
@@ -2835,7 +2873,10 @@ export async function getGuestOpenTableOrder(
     return access;
   }
   try {
-    const openCall = await findOpenTableCallForTable(menuId, access.tableNumber);
+    const openCall = await findOpenTableCallForTable(
+      menuId,
+      access.tableNumber,
+    );
     return {
       ok: true,
       call: openCall ? toGuestOpenTableOrderCall(openCall) : null,
@@ -2873,7 +2914,10 @@ export async function replaceGuestPendingTableOrder(
   }
 
   try {
-    const openCall = await findOpenTableCallForTable(menuId, access.tableNumber);
+    const openCall = await findOpenTableCallForTable(
+      menuId,
+      access.tableNumber,
+    );
     if (!openCall) {
       return { ok: false, error: "NOT_FOUND" };
     }

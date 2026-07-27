@@ -24,7 +24,7 @@
  *       **Delivery order** (`type: delivery`):
  *       - Set `customerName`, `customerPhone`, `customerAddress`
  *       - **Governorates mode**: pass `governorateId`
- *       - **Distance mode**: pass `branchId`, `customerLat`, `customerLng`
+ *       - **Distance mode**: pass `branchId`, `customerLat`, `customerLng`, and `governorateNameAr`/`governorateNameEn` (e.g. "طنطا، الغربية") so the dashboard shows منطقة التوصيل
  *       - Not valid with `requestKind` waiter/bill
  *
  *       Optional `items` array for cart lines. `status` defaults to `pending`.
@@ -85,6 +85,8 @@
  *                 branchId: 3
  *                 customerLat: 29.9602
  *                 customerLng: 31.2569
+ *                 governorateNameAr: "المعادي، القاهرة"
+ *                 governorateNameEn: "Maadi, Cairo"
  *                 status: pending
  *     responses:
  *       200:
