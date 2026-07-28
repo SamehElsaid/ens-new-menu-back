@@ -261,7 +261,7 @@ async function startServer() {
 
     testEmailConnection().then((ok) => {
       if (ok) {
-        logger.info("✅ Email (Resend) configured");
+        logger.info("✅ Email (Resend) configured Successfully");
       } else {
         logger.warn("⚠️ Email disabled: set RESEND_API_KEY and EMAIL_FROM");
       }
