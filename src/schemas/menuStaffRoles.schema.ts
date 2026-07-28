@@ -21,25 +21,41 @@ async function tableExists(tableName: string): Promise<boolean> {
 
 async function ensureRolesTable(): Promise<void> {
   const pool = await getPool();
+  // Dynamic SQL: if MenuStaffRoles already exists without ownerUserId, SQL Server
+  // still compiles CREATE INDEX on ownerUserId inside a normal IF batch and throws
+  // "Invalid column name 'ownerUserId'" — aborting every later schema step.
   await pool.request().query(`
     IF OBJECT_ID('dbo.MenuStaffRoles', 'U') IS NULL
     BEGIN
-      CREATE TABLE dbo.MenuStaffRoles (
-        id INT IDENTITY(1,1) PRIMARY KEY,
-        ownerUserId INT NULL,
-        name NVARCHAR(100) NOT NULL,
-        nameEn NVARCHAR(100) NULL,
-        permissionsJson NVARCHAR(MAX) NULL,
-        isDefault BIT NOT NULL CONSTRAINT DF_MenuStaffRoles_isDefault DEFAULT 0,
-        loginPortal NVARCHAR(20) NOT NULL CONSTRAINT DF_MenuStaffRoles_loginPortal DEFAULT 'staff_app',
-        createdAt DATETIME2 NOT NULL CONSTRAINT DF_MenuStaffRoles_createdAt DEFAULT SYSUTCDATETIME(),
-        updatedAt DATETIME2 NOT NULL CONSTRAINT DF_MenuStaffRoles_updatedAt DEFAULT SYSUTCDATETIME()
-      );
-      CREATE UNIQUE INDEX UQ_MenuStaffRoles_ownerUserId_name
-        ON dbo.MenuStaffRoles (ownerUserId, name)
-        WHERE ownerUserId IS NOT NULL;
-      CREATE INDEX IX_MenuStaffRoles_ownerUserId
-        ON dbo.MenuStaffRoles (ownerUserId);
+      EXEC(N'
+        CREATE TABLE dbo.MenuStaffRoles (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          ownerUserId INT NULL,
+          name NVARCHAR(100) NOT NULL,
+          nameEn NVARCHAR(100) NULL,
+          permissionsJson NVARCHAR(MAX) NULL,
+          isDefault BIT NOT NULL CONSTRAINT DF_MenuStaffRoles_isDefault DEFAULT 0,
+          loginPortal NVARCHAR(20) NOT NULL CONSTRAINT DF_MenuStaffRoles_loginPortal DEFAULT ''staff_app'',
+          createdAt DATETIME2 NOT NULL CONSTRAINT DF_MenuStaffRoles_createdAt DEFAULT SYSUTCDATETIME(),
+          updatedAt DATETIME2 NOT NULL CONSTRAINT DF_MenuStaffRoles_updatedAt DEFAULT SYSUTCDATETIME()
+        );
+        CREATE UNIQUE INDEX UQ_MenuStaffRoles_ownerUserId_name
+          ON dbo.MenuStaffRoles (ownerUserId, name)
+          WHERE ownerUserId IS NOT NULL;
+        CREATE INDEX IX_MenuStaffRoles_ownerUserId
+          ON dbo.MenuStaffRoles (ownerUserId);
+      ');
+    END
+  `);
+}
+
+/** Adds account-scope column on legacy MenuStaffRoles (created with menuId only). */
+async function ensureOwnerUserIdColumn(): Promise<void> {
+  const pool = await getPool();
+  await pool.request().query(`
+    IF COL_LENGTH('dbo.MenuStaffRoles', 'ownerUserId') IS NULL
+    BEGIN
+      ALTER TABLE dbo.MenuStaffRoles ADD ownerUserId INT NULL;
     END
   `);
 }
@@ -319,17 +335,17 @@ async function migrateLegacyStaffRoles(): Promise<void> {
 
 /** Ensures the dynamic staff-roles table + columns (account-scoped). */
 export async function ensureMenuStaffRolesSchema(): Promise<void> {
-  if (!(await tableExists("MenuStaff"))) {
-    return;
-  }
   if (!(await tableExists("Menus"))) {
     return;
   }
 
   await ensureRolesTable();
+  await ensureOwnerUserIdColumn();
   await ensureLoginPortalColumn();
   await ensureRoleNameEnColumn();
-  await ensureStaffRoleIdColumn();
+  if (await tableExists("MenuStaff")) {
+    await ensureStaffRoleIdColumn();
+  }
   // Legacy roleId mapping + default seeding run in the grants schema step
   // after `ownerUserId` is populated and `menuId` is detached from roles.
   logger.info("MenuStaffRoles schema ensured");

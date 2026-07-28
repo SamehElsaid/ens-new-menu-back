@@ -19,6 +19,41 @@ async function tableExists(tableName: string): Promise<boolean> {
   return result.recordset.length > 0;
 }
 
+/**
+ * Creates MenuStaff when missing. Legacy DBs already have this table; fresh
+ * environments need an explicit create (column ensure alone is a no-op).
+ */
+async function ensureMenuStaffTable(): Promise<void> {
+  const pool = await getPool();
+  await pool.request().query(`
+    IF OBJECT_ID('dbo.MenuStaff', 'U') IS NULL
+    BEGIN
+      EXEC(N'
+        CREATE TABLE dbo.MenuStaff (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          menuId INT NOT NULL,
+          ownerUserId INT NULL,
+          name NVARCHAR(200) NOT NULL,
+          role NVARCHAR(100) NULL,
+          roleId INT NULL,
+          phone NVARCHAR(50) NULL,
+          email NVARCHAR(255) NULL,
+          password NVARCHAR(255) NULL,
+          isActive BIT NOT NULL CONSTRAINT DF_MenuStaff_isActive DEFAULT 1,
+          expoPushToken NVARCHAR(512) NULL,
+          createdAt DATETIME2 NOT NULL
+            CONSTRAINT DF_MenuStaff_createdAt DEFAULT SYSUTCDATETIME(),
+          CONSTRAINT FK_MenuStaff_Menus FOREIGN KEY (menuId)
+            REFERENCES dbo.Menus(id)
+        );
+        CREATE INDEX IX_MenuStaff_menuId ON dbo.MenuStaff (menuId);
+        CREATE INDEX IX_MenuStaff_ownerUserId ON dbo.MenuStaff (ownerUserId);
+      ');
+    END
+  `);
+  resetMenuStaffColumnMetaCache();
+}
+
 async function ensureIsActiveColumn(): Promise<void> {
   const pool = await getPool();
   const candidates = ["isActive", "active", "available", "isAvailable"] as const;
@@ -92,12 +127,18 @@ async function ensureStaffEmailUniqueIndex(): Promise<void> {
   logger.info("MenuStaff email unique index ensured");
 }
 
-/** Ensures MenuStaff supports active/inactive status (same pattern as MenuTables). */
+/** Ensures MenuStaff table exists and supports active/inactive + email uniqueness. */
 export async function ensureMenuStaffSchema(): Promise<void> {
+  if (!(await tableExists("Menus"))) {
+    return;
+  }
+
+  await ensureMenuStaffTable();
   if (!(await tableExists("MenuStaff"))) {
     return;
   }
 
   await ensureIsActiveColumn();
   await ensureStaffEmailUniqueIndex();
+  logger.info("MenuStaff schema ensured");
 }

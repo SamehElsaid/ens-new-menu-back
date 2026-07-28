@@ -60,7 +60,7 @@ async function ensureStaffOwnerColumn(): Promise<void> {
     )
     AND COL_LENGTH('dbo.MenuStaff', 'ownerUserId') IS NOT NULL
     BEGIN
-      CREATE INDEX IX_MenuStaff_ownerUserId ON dbo.MenuStaff (ownerUserId);
+      EXEC(N'CREATE INDEX IX_MenuStaff_ownerUserId ON dbo.MenuStaff (ownerUserId)');
     END
   `);
 }
@@ -79,7 +79,8 @@ async function ensureRoleOwnerColumn(): Promise<void> {
     END
   `);
 
-  // Allow NULL menuId so account roles can exist until the column is dropped.
+  // Legacy-only: make menuId nullable. Dynamic SQL so a fresh MenuStaffRoles
+  // (no menuId column) does not fail at compile time with Invalid column name.
   await pool.request().query(`
     IF EXISTS (
       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
@@ -88,28 +89,30 @@ async function ensureRoleOwnerColumn(): Promise<void> {
         AND IS_NULLABLE = 'NO'
     )
     BEGIN
-      IF EXISTS (
-        SELECT 1 FROM sys.indexes
-        WHERE name = 'UQ_MenuStaffRoles_menuId_name'
-          AND object_id = OBJECT_ID('dbo.MenuStaffRoles')
-          AND has_filter = 0
-      )
-      BEGIN
-        DROP INDEX UQ_MenuStaffRoles_menuId_name ON dbo.MenuStaffRoles;
-      END
+      EXEC(N'
+        IF EXISTS (
+          SELECT 1 FROM sys.indexes
+          WHERE name = ''UQ_MenuStaffRoles_menuId_name''
+            AND object_id = OBJECT_ID(''dbo.MenuStaffRoles'')
+            AND has_filter = 0
+        )
+        BEGIN
+          DROP INDEX UQ_MenuStaffRoles_menuId_name ON dbo.MenuStaffRoles;
+        END
 
-      ALTER TABLE dbo.MenuStaffRoles ALTER COLUMN menuId INT NULL;
+        ALTER TABLE dbo.MenuStaffRoles ALTER COLUMN menuId INT NULL;
 
-      IF NOT EXISTS (
-        SELECT 1 FROM sys.indexes
-        WHERE name = 'UQ_MenuStaffRoles_menuId_name'
-          AND object_id = OBJECT_ID('dbo.MenuStaffRoles')
-      )
-      BEGIN
-        CREATE UNIQUE INDEX UQ_MenuStaffRoles_menuId_name
-          ON dbo.MenuStaffRoles (menuId, name)
-          WHERE menuId IS NOT NULL;
-      END
+        IF NOT EXISTS (
+          SELECT 1 FROM sys.indexes
+          WHERE name = ''UQ_MenuStaffRoles_menuId_name''
+            AND object_id = OBJECT_ID(''dbo.MenuStaffRoles'')
+        )
+        BEGIN
+          CREATE UNIQUE INDEX UQ_MenuStaffRoles_menuId_name
+            ON dbo.MenuStaffRoles (menuId, name)
+            WHERE menuId IS NOT NULL;
+        END
+      ');
     END
   `);
 
@@ -119,9 +122,9 @@ async function ensureRoleOwnerColumn(): Promise<void> {
       WHERE name = 'IX_MenuStaffRoles_ownerUserId'
         AND object_id = OBJECT_ID('dbo.MenuStaffRoles')
     )
+    AND COL_LENGTH('dbo.MenuStaffRoles', 'ownerUserId') IS NOT NULL
     BEGIN
-      CREATE INDEX IX_MenuStaffRoles_ownerUserId
-        ON dbo.MenuStaffRoles (ownerUserId);
+      EXEC(N'CREATE INDEX IX_MenuStaffRoles_ownerUserId ON dbo.MenuStaffRoles (ownerUserId)');
     END
   `);
 }
@@ -146,22 +149,28 @@ async function detachRolesFromMenus(): Promise<void> {
         WHERE name = 'UQ_MenuStaffRoles_ownerUserId_name'
           AND object_id = OBJECT_ID('dbo.MenuStaffRoles')
       )
+      AND COL_LENGTH('dbo.MenuStaffRoles', 'ownerUserId') IS NOT NULL
       BEGIN
-        CREATE UNIQUE INDEX UQ_MenuStaffRoles_ownerUserId_name
-          ON dbo.MenuStaffRoles (ownerUserId, name)
-          WHERE ownerUserId IS NOT NULL;
+        EXEC(N'
+          CREATE UNIQUE INDEX UQ_MenuStaffRoles_ownerUserId_name
+            ON dbo.MenuStaffRoles (ownerUserId, name)
+            WHERE ownerUserId IS NOT NULL
+        ');
       END
     `);
     return;
   }
 
-  // Fill owner from the legacy menu anchor before dropping it.
+  // Fill owner from the legacy menu anchor before dropping it (dynamic SQL:
+  // batch must not reference menuId unless the column still exists).
   await pool.request().query(`
-    UPDATE r
-    SET r.ownerUserId = m.userId
-    FROM dbo.MenuStaffRoles r
-    INNER JOIN dbo.Menus m ON m.id = r.menuId
-    WHERE r.ownerUserId IS NULL AND r.menuId IS NOT NULL
+    EXEC(N'
+      UPDATE r
+      SET r.ownerUserId = m.userId
+      FROM dbo.MenuStaffRoles r
+      INNER JOIN dbo.Menus m ON m.id = r.menuId
+      WHERE r.ownerUserId IS NULL AND r.menuId IS NOT NULL
+    ');
   `);
 
   // Collapse duplicate (ownerUserId, name) rows: remap staff, then delete extras.
@@ -337,7 +346,13 @@ export async function ensureMenuStaffGrantsSchema(): Promise<void> {
 
   await ensureGrantsTable();
   await ensureStaffOwnerColumn();
-  await ensureRoleOwnerColumn();
+  try {
+    await ensureRoleOwnerColumn();
+  } catch (error) {
+    logger.warn("MenuStaffRoles owner column ensure skipped due to error", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   try {
     await backfillFromLegacyMenuBinding();

@@ -103,8 +103,13 @@ export async function ensureDatabaseSchemas(): Promise<void> {
   ];
 
   for (const step of steps) {
-    await step.run();
-    logger.debug(`Schema ensured: ${step.name}`);
+    try {
+      await step.run();
+      logger.debug(`Schema ensured: ${step.name}`);
+    } catch (error) {
+      logger.error(`Schema ensure failed: ${step.name}`, error);
+      throw error;
+    }
   }
 
   logger.info("✅ Database schemas ensured");
