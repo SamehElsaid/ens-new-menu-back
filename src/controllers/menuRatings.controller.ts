@@ -21,7 +21,7 @@ export async function listMenuRatingsHandler(
       return;
     }
 
-    const access = await getMenuAccessForRequest(req, mid);
+    const access = await getMenuAccessForRequest(req, mid, "analytics:view");
     if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;

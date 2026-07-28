@@ -283,10 +283,26 @@
  *   get:
  *     tags: [Public]
  *     summary: Landing page trusted-by logos
+ *     description: |
+ *       Returns featured restaurant logos for the landing page Trusted By section.
+ *       Each item includes the menu slug for linking to the public menu.
  *     security: []
  *     responses:
  *       200:
  *         description: Logos list
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               logos:
+ *                 - id: 20
+ *                   menuId: 276
+ *                   userId: 304
+ *                   logo: https://devapi.ensbot.net/uploads/logos/example.webp
+ *                   slug: example-restaurant
+ *                   countryCode: US
+ *                   sortOrder: 1
+ *                   createdAt: "2026-07-05T12:22:15.691Z"
  *
  * /api/public/version:
  *   post:

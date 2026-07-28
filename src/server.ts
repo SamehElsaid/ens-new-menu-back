@@ -28,6 +28,7 @@ import verifykitRoutes from "./routes/verifykit.routes";
 import publicRoutes from "./routes/public.routes";
 import menuRoutes from "./routes/menu.routes";
 import menuGroupRoutes from "./routes/menuGroup.routes";
+import dashboardRoutes from "./routes/dashboard.routes";
 import categoryRoutes from "./routes/category.routes";
 import userRoutes from "./routes/user.routes";
 import adminRoutes from "./routes/admin.routes";
@@ -212,6 +213,7 @@ app.use("/api/api/staff-auth", staffAuthRoutes);
 app.use("/api/staff-permissions", staffPermissionsRoutes);
 app.use("/api/menus", menuRoutes);
 app.use("/api/menu-groups", menuGroupRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 // Must be before app.use("/api", categoryRoutes): that router runs requireAuth on all /api/* paths
 app.use("/api/payment", paymentRoutes);
 app.use("/api/vouchers", voucherRoutes);

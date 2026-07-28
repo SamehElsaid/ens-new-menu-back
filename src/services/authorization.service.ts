@@ -5,11 +5,23 @@
  * permission list). Permissions are resolved per role via `getRolePermissions`
  * which is backed by the in-process `permissionCache`.
  */
+import { isNonGatingPermission } from "../config/staffPermissions.catalog";
 import { getRolePermissions } from "./menuStaffRoles.service";
 
+/**
+ * Staff permissions are account-level: the role answers "what may they do",
+ * while `MenuStaffGrants` answers "on which menu" — so `menuId` here is only
+ * context for the current request, never the access decision itself.
+ */
 export type AuthActor =
   | { kind: "owner"; userId: number; menuId?: number }
-  | { kind: "staff"; staffId: number; staffRoleId: number; menuId: number }
+  | {
+      kind: "staff";
+      staffId: number;
+      staffRoleId: number;
+      menuId?: number;
+      ownerUserId?: number;
+    }
   | { kind: "admin"; userId: number }
   | { kind: "system" };
 
@@ -41,6 +53,7 @@ class AuthorizationService {
   }
 
   async can(actor: AuthActor, permission: string): Promise<boolean> {
+    if (isNonGatingPermission(permission)) return true;
     const perms = await this.getPermissionsForActor(actor);
     if (perms === "*") return true;
     return perms.includes(permission);
@@ -54,6 +67,7 @@ class AuthorizationService {
 
   async hasAny(actor: AuthActor, permissions: string[]): Promise<boolean> {
     if (permissions.length === 0) return true;
+    if (permissions.some(isNonGatingPermission)) return true;
     const perms = await this.getPermissionsForActor(actor);
     if (perms === "*") return true;
     return permissions.some((p) => perms.includes(p));
@@ -61,9 +75,11 @@ class AuthorizationService {
 
   async hasAll(actor: AuthActor, permissions: string[]): Promise<boolean> {
     if (permissions.length === 0) return true;
+    const gating = permissions.filter((p) => !isNonGatingPermission(p));
+    if (gating.length === 0) return true;
     const perms = await this.getPermissionsForActor(actor);
     if (perms === "*") return true;
-    return permissions.every((p) => perms.includes(p));
+    return gating.every((p) => perms.includes(p));
   }
 
   async requireAny(actor: AuthActor, permissions: string[]): Promise<void> {
@@ -76,6 +92,35 @@ class AuthorizationService {
     if (!(await this.hasAll(actor, permissions))) {
       throw new AuthorizationError(permissions.join("&"));
     }
+  }
+
+  /**
+   * Which order channels the actor may see:
+   * - `orders:view` → table
+   * - `delivery:view` → online/delivery
+   * - both → `"all"`
+   * - neither → `null`
+   */
+  async resolveOrderChannelFilter(
+    actor: AuthActor,
+  ): Promise<"table" | "delivery" | "all" | null> {
+    const canTable = await this.can(actor, "orders:view");
+    const canDelivery = await this.can(actor, "delivery:view");
+    if (canTable && canDelivery) return "all";
+    if (canTable) return "table";
+    if (canDelivery) return "delivery";
+    return null;
+  }
+
+  /** Whether the actor may see/act on a specific order channel. */
+  async canAccessOrderChannel(
+    actor: AuthActor,
+    channel: "table" | "delivery",
+  ): Promise<boolean> {
+    return this.can(
+      actor,
+      channel === "delivery" ? "delivery:view" : "orders:view",
+    );
   }
 }
 

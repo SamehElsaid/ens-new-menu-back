@@ -7,6 +7,7 @@ import {
   type BroadcastAudience,
 } from "../utils/adminUserFilters";
 import {
+  parseBroadcastEmails,
   previewBroadcastRecipients,
   sendBroadcastEmail,
 } from "../services/adminBroadcastEmail.service";
@@ -50,7 +51,27 @@ export async function getBroadcastPreview(
       return;
     }
 
-    const preview = await previewBroadcastRecipients({ audience, userIds });
+    let emails: string[] | undefined;
+    if (audience === "test") {
+      const parsed = parseBroadcastEmails(
+        req.query.emails ?? req.query.email,
+      );
+      if (parsed.invalid.length > 0) {
+        sendApiError(res, req, 400, ApiErrors.broadcastEmailsInvalid);
+        return;
+      }
+      if (parsed.emails.length === 0) {
+        sendApiError(res, req, 400, ApiErrors.broadcastEmailsRequired);
+        return;
+      }
+      emails = parsed.emails;
+    }
+
+    const preview = await previewBroadcastRecipients({
+      audience,
+      userIds,
+      emails,
+    });
     res.json(preview);
   } catch (error) {
     logger.error("Broadcast preview error:", error);
@@ -89,9 +110,24 @@ export async function postBroadcastSend(
       return;
     }
 
+    let emails: string[] | undefined;
+    if (audience === "test") {
+      const parsed = parseBroadcastEmails(req.body?.emails ?? req.body?.email);
+      if (parsed.invalid.length > 0) {
+        sendApiError(res, req, 400, ApiErrors.broadcastEmailsInvalid);
+        return;
+      }
+      if (parsed.emails.length === 0) {
+        sendApiError(res, req, 400, ApiErrors.broadcastEmailsRequired);
+        return;
+      }
+      emails = parsed.emails;
+    }
+
     const result = await sendBroadcastEmail({
       audience,
       userIds,
+      emails,
       subject,
       message,
       locale,

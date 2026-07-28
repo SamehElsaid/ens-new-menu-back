@@ -31,6 +31,7 @@ export const USER_PRODUCTS_NO_IMAGE_SQL = `EXISTS (
 export const BROADCAST_AUDIENCES = [
   "all",
   "selected",
+  "test",
   "pro",
   "free",
   "no-menu",
@@ -80,6 +81,7 @@ export function applyBroadcastAudienceFilter(
       break;
     case "all":
     case "selected":
+    case "test":
     default:
       break;
   }

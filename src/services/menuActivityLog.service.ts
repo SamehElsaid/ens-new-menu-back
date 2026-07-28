@@ -300,8 +300,7 @@ async function appendMenuAuditLog(
     .input("summaryEn", sql.NVarChar, row.summaryEn)
     .input("detailJson", sql.NVarChar(sql.MAX), row.detailJson ?? null)
     .input("actorRole", sql.NVarChar, actor.actorRole)
-    .input("actorName", sql.NVarChar, actor.actorName)
-    .query(`
+    .input("actorName", sql.NVarChar, actor.actorName).query(`
       INSERT INTO dbo.MenuAuditLog (
         menuId, action, targetType, targetId,
         summaryAr, summaryEn, detailJson, actorRole, actorName
@@ -534,6 +533,7 @@ async function resolveMenuIdsForOrderChannel(
   return [menuId];
 }
 
+/** `@menuId` is bound to the first id, so a single-menu query stays parameterised. */
 function menuIdWhereSql(menuIds: number[]): string {
   if (menuIds.length === 1) {
     return "mo.menuId = @menuId";
@@ -618,7 +618,9 @@ export async function getMenuActivityLogById(
       menuIds.length === 1
     ) {
       menuIds = await getDeliveryGroupMenuIds(menuId);
-      tableCallOnly = await menuOrdersTableCallExistsSql({ channel: "delivery" });
+      tableCallOnly = await menuOrdersTableCallExistsSql({
+        channel: "delivery",
+      });
       menuFilter = menuIdWhereSql(menuIds);
       result = await pool
         .request()
@@ -680,7 +682,8 @@ export async function getMenuActivityLogById(
         : null;
 
     if (!order.customerPhone && stcPhone) order.customerPhone = stcPhone;
-    if (!order.customerAddress && stcAddress) order.customerAddress = stcAddress;
+    if (!order.customerAddress && stcAddress)
+      order.customerAddress = stcAddress;
     if (!order.orderNotes && stcNotes) order.orderNotes = stcNotes;
 
     const stcSourceMenuId =
@@ -738,8 +741,7 @@ export async function getMenuActivityLogById(
       sourceMenuId: order.sourceMenuId ?? stcSourceMenuId,
       sourceMenuNameAr: order.sourceMenuNameAr ?? null,
       sourceMenuNameEn: order.sourceMenuNameEn ?? null,
-      storageMenuId:
-        r.storageMenuId != null ? Number(r.storageMenuId) : menuId,
+      storageMenuId: r.storageMenuId != null ? Number(r.storageMenuId) : menuId,
       pendingGuestAddition: order.pendingGuestAddition === true,
       pendingBillRequest: order.pendingBillRequest === true,
     };
@@ -765,10 +767,62 @@ export async function listMenuActivityLogs(
   page: number;
   limit: number;
 }> {
+  const menuIds = await resolveMenuIdsForOrderChannel(menuId, channel);
+  return listMenuOrdersForMenuIds(menuIds, page, limit, {
+    actorNameSearch,
+    channel,
+    dateFrom: listFilters?.dateFrom ?? null,
+    dateTo: listFilters?.dateTo ?? null,
+    status: listFilters?.status ?? null,
+  });
+}
+
+export type MenuOrdersQueryOptions = {
+  actorNameSearch?: string | null;
+  channel?: MenuOrderChannel | null;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  status?: string | null;
+  /** `desc` (newest first) is the dashboard default. */
+  direction?: "asc" | "desc";
+};
+
+/**
+ * Orders across any set of menus — the account-level dashboard passes every
+ * menu the actor may see, the per-menu page passes just one (plus its delivery
+ * group). Rows carry `menuId` so the caller can label and filter them.
+ */
+export async function listMenuOrdersForMenuIds(
+  menuIdsInput: number[],
+  page: number,
+  limit: number,
+  options: MenuOrdersQueryOptions = {},
+): Promise<{
+  rows: any[];
+  total: number;
+  page: number;
+  limit: number;
+}> {
+  const {
+    actorNameSearch = null,
+    channel = null,
+    dateFrom = null,
+    dateTo = null,
+    status = null,
+    direction = "desc",
+  } = options;
+
   const safePage = Math.max(1, Math.floor(page));
   const safeLimit = Math.min(100, Math.max(1, Math.floor(limit)));
   const offset = (safePage - 1) * safeLimit;
   const nameFilter = sanitizeActorNameSearch(actorNameSearch ?? null);
+  const menuIds = [...new Set(menuIdsInput)].filter(
+    (id) => Number.isFinite(id) && id > 0,
+  );
+
+  if (menuIds.length === 0) {
+    return { rows: [], total: 0, page: safePage, limit: safeLimit };
+  }
 
   try {
     const pool = await getPool();
@@ -780,19 +834,19 @@ export async function listMenuActivityLogs(
     }
 
     const orderListFilters: MenuOrderListFilters = {
-      channel: channel ?? null,
-      dateFrom: listFilters?.dateFrom ?? null,
-      dateTo: listFilters?.dateTo ?? null,
-      status: listFilters?.status ?? null,
+      channel,
+      dateFrom,
+      dateTo,
+      status,
     };
 
-    const menuIds = await resolveMenuIdsForOrderChannel(menuId, channel);
     const menuFilter = menuIdWhereSql(menuIds);
+    const sortDirection = direction === "asc" ? "ASC" : "DESC";
 
-    const countReq = pool.request().input("menuId", sql.Int, menuId);
+    const countReq = pool.request().input("menuId", sql.Int, menuIds[0]);
     const rowsReq = pool
       .request()
-      .input("menuId", sql.Int, menuId)
+      .input("menuId", sql.Int, menuIds[0])
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, safeLimit);
 
@@ -821,6 +875,7 @@ export async function listMenuActivityLogs(
     const rowsR = await rowsReq.query(`
       SELECT
         mo.id,
+        mo.menuId,
         mo.orderId,
         mo.orderJson,
         mo.actionsJson,
@@ -829,7 +884,7 @@ export async function listMenuActivityLogs(
       WHERE ${menuFilter}
       ${tableCallOnly}
       ${nameCondition}
-      ORDER BY mo.updatedAt DESC
+      ORDER BY mo.updatedAt ${sortDirection}
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
@@ -864,11 +919,14 @@ export async function listMenuActivityLogs(
           : null;
 
       const governorateId =
-        order.governorateId != null && Number.isFinite(Number(order.governorateId))
+        order.governorateId != null &&
+        Number.isFinite(Number(order.governorateId))
           ? Number(order.governorateId)
           : null;
 
-      const orderTypeRaw = String(order.type ?? order.orderChannel ?? "").trim().toLowerCase();
+      const orderTypeRaw = String(order.type ?? order.orderChannel ?? "")
+        .trim()
+        .toLowerCase();
       const orderType =
         orderTypeRaw === "delivery" || orderTypeRaw === "table"
           ? orderTypeRaw
@@ -893,12 +951,14 @@ export async function listMenuActivityLogs(
           : null;
 
       const sourceMenuId =
-        order.sourceMenuId != null && Number.isFinite(Number(order.sourceMenuId))
+        order.sourceMenuId != null &&
+        Number.isFinite(Number(order.sourceMenuId))
           ? Number(order.sourceMenuId)
           : null;
 
       return {
         id: String(r.id),
+        menuId: r.menuId != null ? Number(r.menuId) : null,
         orderId: String(r.orderId),
         lastAction: String(lastAction),
         actionDetails: actionDetails,
@@ -927,7 +987,8 @@ export async function listMenuActivityLogs(
             ? String(order.governorateNameEn)
             : null,
         deliveryFee:
-          order.deliveryFee != null && Number.isFinite(Number(order.deliveryFee))
+          order.deliveryFee != null &&
+          Number.isFinite(Number(order.deliveryFee))
             ? Number(order.deliveryFee)
             : null,
         items: order.items || [],
@@ -964,7 +1025,7 @@ export async function listMenuActivityLogs(
 
     return { rows, total, page: safePage, limit: safeLimit };
   } catch (error) {
-    logger.error("listMenuActivityLogs error:", error);
+    logger.error("listMenuOrdersForMenuIds error:", error);
     return { rows: [], total: 0, page: safePage, limit: safeLimit };
   }
 }
@@ -1128,51 +1189,96 @@ function orderActionSummaries(
   if (action === "TABLE_CALL_CONFIRMED") {
     if (isDelivery) {
       return cust
-        ? { ar: `قبول طلب توصيل ${cust}`, en: `Accepted delivery order — ${cust}` }
+        ? {
+            ar: `قبول طلب توصيل ${cust}`,
+            en: `Accepted delivery order — ${cust}`,
+          }
         : { ar: "قبول طلب توصيل", en: "Accepted delivery order" };
     }
     return cust
-      ? { ar: `قبول طلب ${cust} — طاولة ${tbl || "?"}`, en: `Accepted order — ${cust} — table ${tbl || "?"}` }
-      : { ar: `قبول طلب طاولة ${tbl || "?"}`, en: `Accepted table ${tbl || "?"} order` };
+      ? {
+          ar: `قبول طلب ${cust} — طاولة ${tbl || "?"}`,
+          en: `Accepted order — ${cust} — table ${tbl || "?"}`,
+        }
+      : {
+          ar: `قبول طلب طاولة ${tbl || "?"}`,
+          en: `Accepted table ${tbl || "?"} order`,
+        };
   }
   if (action === "TABLE_CALL_CANCELLED") {
     if (isDelivery) {
       return cust
-        ? { ar: `رفض طلب توصيل ${cust}`, en: `Rejected delivery order — ${cust}` }
+        ? {
+            ar: `رفض طلب توصيل ${cust}`,
+            en: `Rejected delivery order — ${cust}`,
+          }
         : { ar: "رفض طلب توصيل", en: "Rejected delivery order" };
     }
     return cust
-      ? { ar: `رفض طلب ${cust} — طاولة ${tbl || "?"}`, en: `Rejected order — ${cust} — table ${tbl || "?"}` }
-      : { ar: `رفض طلب طاولة ${tbl || "?"}`, en: `Rejected table ${tbl || "?"} order` };
+      ? {
+          ar: `رفض طلب ${cust} — طاولة ${tbl || "?"}`,
+          en: `Rejected order — ${cust} — table ${tbl || "?"}`,
+        }
+      : {
+          ar: `رفض طلب طاولة ${tbl || "?"}`,
+          en: `Rejected table ${tbl || "?"} order`,
+        };
   }
   if (action === "TABLE_CALL_PREPARED") {
     if (isDelivery) {
       return cust
-        ? { ar: `تم تحضير طلب توصيل ${cust}`, en: `Delivery order prepared — ${cust}` }
+        ? {
+            ar: `تم تحضير طلب توصيل ${cust}`,
+            en: `Delivery order prepared — ${cust}`,
+          }
         : { ar: "تم تحضير طلب التوصيل", en: "Delivery order prepared" };
     }
     return cust
-      ? { ar: `تم تحضير طلب ${cust} — طاولة ${tbl || "?"}`, en: `Order prepared — ${cust} — table ${tbl || "?"}` }
-      : { ar: `تم تحضير طلب طاولة ${tbl || "?"}`, en: `Table ${tbl || "?"} order prepared` };
+      ? {
+          ar: `تم تحضير طلب ${cust} — طاولة ${tbl || "?"}`,
+          en: `Order prepared — ${cust} — table ${tbl || "?"}`,
+        }
+      : {
+          ar: `تم تحضير طلب طاولة ${tbl || "?"}`,
+          en: `Table ${tbl || "?"} order prepared`,
+        };
   }
   if (action === "TABLE_CALL_COMPLETED") {
     if (isDelivery) {
       return cust
-        ? { ar: `إنهاء طلب توصيل ${cust}`, en: `Completed delivery order — ${cust}` }
+        ? {
+            ar: `إنهاء طلب توصيل ${cust}`,
+            en: `Completed delivery order — ${cust}`,
+          }
         : { ar: "إنهاء طلب التوصيل", en: "Completed delivery order" };
     }
     return cust
-      ? { ar: `إنهاء طلب ${cust} — طاولة ${tbl || "?"}`, en: `Completed order — ${cust} — table ${tbl || "?"}` }
-      : { ar: `إنهاء طلب طاولة ${tbl || "?"}`, en: `Completed table ${tbl || "?"} order` };
+      ? {
+          ar: `إنهاء طلب ${cust} — طاولة ${tbl || "?"}`,
+          en: `Completed order — ${cust} — table ${tbl || "?"}`,
+        }
+      : {
+          ar: `إنهاء طلب طاولة ${tbl || "?"}`,
+          en: `Completed table ${tbl || "?"} order`,
+        };
   }
   if (isDelivery) {
     return cust
-      ? { ar: `تم تسليم طلب توصيل ${cust}`, en: `Delivery order delivered — ${cust}` }
+      ? {
+          ar: `تم تسليم طلب توصيل ${cust}`,
+          en: `Delivery order delivered — ${cust}`,
+        }
       : { ar: "تم تسليم طلب التوصيل", en: "Delivery order delivered" };
   }
   return cust
-    ? { ar: `تم تسليم طلب ${cust} — طاولة ${tbl || "?"}`, en: `Order delivered — ${cust} — table ${tbl || "?"}` }
-    : { ar: `تم تسليم طلب طاولة ${tbl || "?"}`, en: `Table ${tbl || "?"} order delivered` };
+    ? {
+        ar: `تم تسليم طلب ${cust} — طاولة ${tbl || "?"}`,
+        en: `Order delivered — ${cust} — table ${tbl || "?"}`,
+      }
+    : {
+        ar: `تم تسليم طلب طاولة ${tbl || "?"}`,
+        en: `Table ${tbl || "?"} order delivered`,
+      };
 }
 
 function buildOrderDetailForLog(
@@ -1221,6 +1327,34 @@ function actionToStatus(action: MenuOrderActionType): string {
   if (action === "TABLE_CALL_PREPARED") return "prepared";
   if (action === "TABLE_CALL_COMPLETED") return "delivered";
   return "delivered";
+}
+
+/**
+ * Owning menu of a `MenuOrders` row. The account-level dashboard addresses
+ * orders by log id alone, so the menu (and therefore the access check) has to
+ * be resolved from the row itself.
+ */
+export async function getMenuIdForOrderLogId(
+  menuOrderLogId: number,
+): Promise<number | null> {
+  try {
+    const pool = await getPool();
+    const tableCheck = await pool.request().query(`
+      SELECT OBJECT_ID(N'dbo.MenuOrders', N'U') AS oid
+    `);
+    if (!tableCheck.recordset[0]?.oid) return null;
+
+    const result = await pool
+      .request()
+      .input("logId", sql.Int, menuOrderLogId)
+      .query(`SELECT TOP 1 menuId FROM dbo.MenuOrders WHERE id = @logId`);
+
+    const menuId = result.recordset[0]?.menuId;
+    return menuId != null ? Number(menuId) : null;
+  } catch (error) {
+    logger.error("getMenuIdForOrderLogId error:", error);
+    return null;
+  }
 }
 
 /** Resolve delivery vs table from a dashboard `MenuOrders` row id. */
@@ -1303,8 +1437,7 @@ export async function applyMenuOrderAction(
   action: MenuOrderActionType,
   req: Request,
 ): Promise<
-  | { ok: true; status: string }
-  | { ok: false; error: ApplyMenuOrderActionError }
+  { ok: true; status: string } | { ok: false; error: ApplyMenuOrderActionError }
 > {
   try {
     const pool = await getPool();
@@ -1356,7 +1489,9 @@ export async function applyMenuOrderAction(
     if (!permActor) {
       return { ok: false, error: "FORBIDDEN" };
     }
-    if (!(await authorization.can(permActor, orderActionToPermission(action)))) {
+    if (
+      !(await authorization.can(permActor, orderActionToPermission(action)))
+    ) {
       return { ok: false, error: "FORBIDDEN" };
     }
 
@@ -1368,15 +1503,18 @@ export async function applyMenuOrderAction(
         action === "TABLE_CALL_COMPLETED" ||
         (action === "TABLE_CALL_DELIVERED" &&
           snapBefore.type !== "delivery" &&
-          String(snapBefore.tableNumber ?? "").trim().toLowerCase() !==
-            "delivery"))
+          String(snapBefore.tableNumber ?? "")
+            .trim()
+            .toLowerCase() !== "delivery"))
     ) {
       return { ok: false, error: "INVALID_STATE" };
     }
 
     const isTableOrder =
       snapBefore.type !== "delivery" &&
-      String(snapBefore.tableNumber ?? "").trim().toLowerCase() !== "delivery";
+      String(snapBefore.tableNumber ?? "")
+        .trim()
+        .toLowerCase() !== "delivery";
 
     if (action === "TABLE_CALL_CONFIRMED") {
       if (pendingGuestAddition) {
@@ -1410,18 +1548,30 @@ export async function applyMenuOrderAction(
       } else if (currentStatus !== "pending") {
         return { ok: false, error: "INVALID_STATE" };
       } else {
-        applied = await setStaffTableCallStatus(callId, storageMenuId, "confirmed");
+        applied = await setStaffTableCallStatus(
+          callId,
+          storageMenuId,
+          "confirmed",
+        );
       }
     } else if (action === "TABLE_CALL_CANCELLED") {
       if (currentStatus !== "pending") {
         return { ok: false, error: "INVALID_STATE" };
       }
-      applied = await setStaffTableCallStatus(callId, storageMenuId, "cancelled");
+      applied = await setStaffTableCallStatus(
+        callId,
+        storageMenuId,
+        "cancelled",
+      );
     } else if (action === "TABLE_CALL_PREPARED") {
       if (currentStatus !== "confirmed") {
         return { ok: false, error: "INVALID_STATE" };
       }
-      applied = await advanceStaffTableCallStatus(callId, storageMenuId, "prepared");
+      applied = await advanceStaffTableCallStatus(
+        callId,
+        storageMenuId,
+        "prepared",
+      );
     } else if (action === "TABLE_CALL_COMPLETED") {
       if (!isTableOrder) {
         return { ok: false, error: "INVALID_ACTION" };
@@ -1440,7 +1590,11 @@ export async function applyMenuOrderAction(
         if (currentStatus !== "prepared") {
           return { ok: false, error: "INVALID_STATE" };
         }
-        applied = await advanceStaffTableCallStatus(callId, storageMenuId, "delivered");
+        applied = await advanceStaffTableCallStatus(
+          callId,
+          storageMenuId,
+          "delivered",
+        );
       }
     } else {
       return { ok: false, error: "INVALID_ACTION" };

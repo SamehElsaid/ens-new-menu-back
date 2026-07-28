@@ -22,6 +22,8 @@ import {
   menuOwnerHasProPlan,
 } from "../services/subscriptionPlan.service";
 import { sendApiError } from "../utils/apiErrorResponse";
+import { localizedRoleNameSql } from "../services/menuStaffRoles.service";
+import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 
 function parseRolePermissions(raw: unknown): string[] {
   if (raw == null) return [];
@@ -72,10 +74,11 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
     const emailCol = quoteMenuStaffIdent(staffMeta.emailKey);
     const staffResult = await pool
       .request()
-      .input("email", sql.NVarChar, email.toLowerCase().trim()).query(`
+      .input("email", sql.NVarChar, email.toLowerCase().trim())
+      .input("locale", sql.NVarChar(5), getLocaleFromAcceptLanguage(req)).query(`
         SELECT
           s.*,
-          sr.name as staffRoleName,
+          ${localizedRoleNameSql("sr", "staffRoleName")},
           sr.permissionsJson as staffRolePermissions,
           m.id as menuTableId,
           m.uuid as menuUuid,
@@ -229,6 +232,12 @@ export async function staffLogin(req: Request, res: Response): Promise<void> {
       email: norm.email as string,
       role: ROLES.STAFF,
       menuId: norm.menuId != null ? Number(norm.menuId) : undefined,
+      ownerUserId:
+        norm.ownerUserId != null
+          ? Number(norm.ownerUserId)
+          : staff.menuOwnerUserId != null
+            ? Number(staff.menuOwnerUserId)
+            : undefined,
       staffRoleId: staffRoleId ?? undefined,
     };
 
@@ -337,11 +346,13 @@ export async function getStaffMe(req: Request, res: Response): Promise<void> {
 
     const meta = await getMenuStaffColumnMeta();
 
-    const result = await pool.request().input("staffId", sql.Int, staffId)
-      .query(`
+    const result = await pool
+      .request()
+      .input("staffId", sql.Int, staffId)
+      .input("locale", sql.NVarChar(5), getLocaleFromAcceptLanguage(req)).query(`
         SELECT
           s.*,
-          sr.name as staffRoleName,
+          ${localizedRoleNameSql("sr", "staffRoleName")},
           sr.permissionsJson as staffRolePermissions,
           m.userId as menuOwnerUserId,
           m.uuid as menuUuid,

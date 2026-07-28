@@ -12,6 +12,7 @@ import { ensureMenuChatbotSchema } from "./menuChatbot.schema";
 import { ensureMenuWifiTaxServiceSchema } from "./menuWifiTaxService.schema";
 import { ensureMenuStaffSchema } from "./menuStaff.schema";
 import { ensureMenuStaffRolesSchema } from "./menuStaffRoles.schema";
+import { ensureMenuStaffGrantsSchema } from "./menuStaffGrants.schema";
 import { ensureMenuTablesSchema } from "./menuTables.schema";
 import { ensureMenuUuidSchema } from "./menuUuid.schema";
 import { ensurePhoneVerifiedSchema } from "./phoneVerified.schema";
@@ -46,6 +47,7 @@ export {
   ensureMenuStaffRolesSchema,
   ensureDefaultRolesForMenu,
 } from "./menuStaffRoles.schema";
+export { ensureMenuStaffGrantsSchema } from "./menuStaffGrants.schema";
 export { ensureMenuTablesSchema } from "./menuTables.schema";
 export { ensureMenuUuidSchema } from "./menuUuid.schema";
 export { ensurePhoneVerifiedSchema } from "./phoneVerified.schema";
@@ -81,6 +83,7 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "menuTables", run: ensureMenuTablesSchema },
     { name: "menuStaff", run: ensureMenuStaffSchema },
     { name: "menuStaffRoles", run: ensureMenuStaffRolesSchema },
+    { name: "menuStaffGrants", run: ensureMenuStaffGrantsSchema },
     { name: "bulkImportUsage", run: ensureBulkImportUsageSchema },
     { name: "homepageFeaturedLogos", run: ensureHomepageFeaturedLogosSchema },
     { name: "adminCustomer", run: ensureAdminCustomerSchema },

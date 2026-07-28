@@ -20,6 +20,9 @@ import {
   validateMenuItemVariants,
 } from '../utils/menuItemVariants';
 
+/** Items section: owner or a staff role granting `menu:items`. */
+const ITEMS_PERMISSION = 'menu:items';
+
 const MENU_ITEM_OPTIONAL_COLUMNS = [
   'categoryId',
   'originalPrice',
@@ -45,7 +48,11 @@ async function requireMenuAccess(
   res: Response,
   menuId: string,
 ): Promise<boolean> {
-  const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+  const access = await getMenuAccessForRequest(
+    req,
+    parseInt(menuId, 10),
+    ITEMS_PERMISSION,
+  );
   if (!access.ok) {
     sendApiError(res, req, 404, ApiErrors.menuNotFound);
     return false;
@@ -615,7 +622,11 @@ export async function updateMenuItem(req: Request, res: Response): Promise<void>
       }
     }
 
-    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    const access = await getMenuAccessForRequest(
+    req,
+    parseInt(menuId, 10),
+    ITEMS_PERMISSION,
+  );
     if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
@@ -808,7 +819,11 @@ export async function deleteMenuItem(req: Request, res: Response): Promise<void>
 
     const pool = await getPool();
 
-    const access = await getMenuAccessForRequest(req, parseInt(menuId, 10));
+    const access = await getMenuAccessForRequest(
+    req,
+    parseInt(menuId, 10),
+    ITEMS_PERMISSION,
+  );
     if (!access.ok) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;

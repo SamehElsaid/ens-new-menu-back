@@ -10,10 +10,7 @@ export function actorFromRequest(req: Request): AuthActor | null {
   if (!user) return null;
 
   if (user.role === ROLES.STAFF) {
-    if (
-      typeof user.staffRoleId !== "number" ||
-      typeof user.menuId !== "number"
-    ) {
+    if (typeof user.staffRoleId !== "number") {
       // Legacy staff token without RBAC identity — force re-login.
       return null;
     }
@@ -21,7 +18,9 @@ export function actorFromRequest(req: Request): AuthActor | null {
       kind: "staff",
       staffId: user.userId,
       staffRoleId: user.staffRoleId,
-      menuId: user.menuId,
+      menuId: typeof user.menuId === "number" ? user.menuId : undefined,
+      ownerUserId:
+        typeof user.ownerUserId === "number" ? user.ownerUserId : undefined,
     };
   }
 

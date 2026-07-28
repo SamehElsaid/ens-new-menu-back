@@ -5,7 +5,15 @@ import { getPool, sql, executeTransaction } from "../config/database";
 import {
   generateAccessToken,
   generateRefreshToken,
+  generateStaffAccessToken,
 } from "../utils/tokenHelper";
+import {
+  getMenuStaffColumnMeta,
+  getStaffIsActive,
+  getStaffPasswordHash,
+  normalizeStaffRow,
+  quoteMenuStaffIdent,
+} from "../config/menuStaffColumns";
 import {
   sendVerificationEmail,
   sendPasswordResetEmail,
@@ -26,6 +34,8 @@ import {
   MAX_FCM_TOKEN_LEN,
   removeUserFcmToken,
 } from "../services/fcmPush.service";
+import { localizedRoleNameSql } from "../services/menuStaffRoles.service";
+import { getLocaleFromAcceptLanguage } from "../utils/localeHelper";
 
 // Check Availability (Email or Phone Number)
 export async function checkAvailability(
@@ -197,6 +207,162 @@ export async function signup(req: Request, res: Response): Promise<void> {
 }
 
 // Login
+function parseStaffRolePermissions(raw: unknown): string[] {
+  if (raw == null) return [];
+  try {
+    const parsed = JSON.parse(String(raw));
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === "string");
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Dashboard login for staff. Every staff member may sign in here regardless of
+ * their role — what they can see and do is decided by the role's permissions
+ * and their menu grants. Returns true when it has written a response (success
+ * or a staff-specific error), and false to let the caller fall back to the
+ * normal Users login error.
+ *
+ * Staff ids do not exist in `Users`, so (like the staff app) we issue a
+ * non-expiring staff access token and do not persist a refresh token.
+ */
+async function tryDashboardStaffLogin(
+  req: Request,
+  res: Response,
+  email: string,
+  password: string,
+): Promise<boolean> {
+  const pool = await getPool();
+  const staffMeta = await getMenuStaffColumnMeta();
+  if (!staffMeta.emailKey || !staffMeta.passwordKey) return false;
+
+  const emailCol = quoteMenuStaffIdent(staffMeta.emailKey);
+  const staffResult = await pool
+    .request()
+    .input("email", sql.NVarChar, email.toLowerCase().trim())
+    .input("locale", sql.NVarChar(5), getLocaleFromAcceptLanguage(req)).query(`
+      SELECT
+        s.*,
+        ${localizedRoleNameSql("sr", "staffRoleName")},
+        sr.permissionsJson as staffRolePermissions,
+        m.id as menuTableId,
+        m.uuid as menuUuid,
+        m.userId as menuOwnerUserId,
+        m.slug as menuSlug,
+        m.logo as menuLogo,
+        m.theme as menuTheme,
+        m.isActive as menuIsActive,
+        ISNULL(m.currency, 'SAR') as menuCurrency,
+        ar.name as menuNameAr,
+        en.name as menuNameEn
+      FROM MenuStaff s
+      JOIN Menus m ON s.menuId = m.id
+      LEFT JOIN MenuStaffRoles sr ON sr.id = s.roleId
+      LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
+      LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
+      WHERE ${emailCol} = @email
+    `);
+
+  if (staffResult.recordset.length === 0) return false;
+
+  let matchedRow: Record<string, unknown> | null = null;
+  for (const row of staffResult.recordset) {
+    const staff = row as Record<string, unknown>;
+    const storedHash = getStaffPasswordHash(staff, staffMeta);
+    if (!storedHash) continue;
+    if (!(await bcrypt.compare(password, storedHash))) continue;
+    matchedRow = staff;
+  }
+  if (!matchedRow) return false;
+
+  const staff = matchedRow;
+
+  if (!getStaffIsActive(staff, staffMeta)) {
+    sendApiError(res, req, 403, {
+      en: "Your account is deactivated. Contact the restaurant manager.",
+      ar: "تم إيقاف حسابك. تواصل مع إدارة المطعم.",
+    });
+    return true;
+  }
+
+  if (!staff.menuIsActive) {
+    sendApiError(res, req, 403, {
+      en: "This restaurant is currently inactive",
+      ar: "هذا المطعم غير مفعل حالياً",
+    });
+    return true;
+  }
+
+  const norm = normalizeStaffRow(staff, staffMeta);
+  const staffRoleId = norm.roleId != null ? Number(norm.roleId) : null;
+  const staffRoleName =
+    staff.staffRoleName != null ? String(staff.staffRoleName) : null;
+  const permissions = parseStaffRolePermissions(staff.staffRolePermissions);
+
+  const ownerUserId =
+    norm.ownerUserId != null
+      ? Number(norm.ownerUserId)
+      : staff.menuOwnerUserId != null
+        ? Number(staff.menuOwnerUserId)
+        : undefined;
+
+  const tokenPayload = {
+    id: staff.id as number,
+    userId: staff.id as number,
+    email: norm.email as string,
+    role: ROLES.STAFF,
+    menuId: norm.menuId != null ? Number(norm.menuId) : undefined,
+    ownerUserId,
+    staffRoleId: staffRoleId ?? undefined,
+  };
+
+  const accessToken = generateStaffAccessToken(tokenPayload);
+
+  res.json({
+    message: "Login successful",
+    user: {
+      id: staff.id,
+      email: norm.email,
+      name: norm.name,
+      restaurantName: staff.menuNameAr ?? staff.menuNameEn ?? null,
+      role: ROLES.STAFF,
+      isStaff: true,
+      menuId: norm.menuId,
+      roleId: staffRoleId,
+      roleName: staffRoleName,
+      permissions,
+    },
+    staff: {
+      id: norm.id,
+      name: norm.name,
+      email: norm.email,
+      roleId: staffRoleId,
+      roleName: staffRoleName,
+      menuId: norm.menuId,
+    },
+    role:
+      staffRoleId != null ? { id: staffRoleId, name: staffRoleName } : null,
+    permissions,
+    menu: {
+      id: staff.menuTableId,
+      uuid: staff.menuUuid,
+      userId: staff.menuOwnerUserId,
+      slug: staff.menuSlug,
+      logo: staff.menuLogo,
+      theme: staff.menuTheme,
+      isActive: staff.menuIsActive,
+      currency: staff.menuCurrency,
+      nameAr: staff.menuNameAr,
+      nameEn: staff.menuNameEn,
+    },
+    accessToken,
+    refreshToken: null,
+  });
+  return true;
+}
+
 export async function login(req: Request, res: Response): Promise<void> {
   try {
     const { email, password } = req.body;
@@ -229,6 +395,25 @@ export async function login(req: Request, res: Response): Promise<void> {
       .query("SELECT * FROM Users WHERE email = @email");
 
     if (userResult.recordset.length === 0) {
+      // No owner account with this email — try a dashboard-portal staff login
+      // (cashier / accountant / manager) before failing.
+      const handledAsStaff = await tryDashboardStaffLogin(
+        req,
+        res,
+        email,
+        password,
+      );
+      if (handledAsStaff) {
+        await LoginAttemptsService.recordAttempt(
+          email,
+          ipAddress,
+          true,
+          userAgent,
+        );
+        await LoginAttemptsService.resetFailedAttempts(email);
+        return;
+      }
+
       // Record failed attempt
       await LoginAttemptsService.recordAttempt(
         email,
@@ -651,6 +836,32 @@ export async function verifyFcmTokenMatch(
       return;
     }
 
+    // Staff JWT userId is MenuStaff.id — compare against MenuStaff push token.
+    if (req.user!.role === ROLES.STAFF) {
+      const meta = await getMenuStaffColumnMeta();
+      if (!meta.expoTokenColumnQuoted) {
+        res.json({ matches: false });
+        return;
+      }
+      const pool = await getPool();
+      const result = await pool
+        .request()
+        .input("staffId", sql.Int, userId)
+        .query(
+          `SELECT ${meta.expoTokenColumnQuoted} AS pushToken
+           FROM MenuStaff WHERE id = @staffId`,
+        );
+      if (result.recordset.length === 0) {
+        sendApiError(res, req, 404, ApiErrors.staffMemberNotFound);
+        return;
+      }
+      const stored = result.recordset[0]?.pushToken;
+      const matches =
+        stored != null && String(stored).trim() === sent;
+      res.json({ matches });
+      return;
+    }
+
     const tokens = await getUserFcmTokens(userId);
     const matches = tokens.includes(sent);
 
@@ -789,13 +1000,31 @@ export async function logout(req: Request, res: Response): Promise<void> {
       // Add access token to blacklist
       const accessTokenExpiry = new Date();
       accessTokenExpiry.setMinutes(accessTokenExpiry.getMinutes() + 15); // Access token expires in 15 minutes
-      await TokenBlacklistService.addToBlacklist(
-        accessToken,
-        userId,
-        "access",
-        accessTokenExpiry,
-        "User logout",
-      );
+
+      // TokenBlacklist.userId has an FK to Users.id. Dashboard staff sign in
+      // through this endpoint but their id comes from MenuStaff and may not
+      // exist in Users, so only blacklist when a matching Users row exists to
+      // avoid the FK violation breaking an otherwise valid logout.
+      const pool = await getPool();
+      const userExists = await pool
+        .request()
+        .input("userId", sql.Int, userId)
+        .query("SELECT TOP 1 id FROM Users WHERE id = @userId");
+
+      if (userExists.recordset.length > 0) {
+        await TokenBlacklistService.addToBlacklist(
+          accessToken,
+          userId,
+          "access",
+          accessTokenExpiry,
+          "User logout",
+        );
+      } else {
+        logger.warn(
+          "Skipping access-token blacklist: no matching Users row",
+          { userId },
+        );
+      }
     }
 
     if (refreshToken) {

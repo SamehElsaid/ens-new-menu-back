@@ -290,6 +290,14 @@ export const ApiErrors = {
     en: "This email is already used by another staff member",
     ar: "هذا البريد الإلكتروني مستخدم بالفعل من قبل موظف آخر",
   },
+  staffEmailBelongsToOwner: {
+    en: "This email belongs to an owner account and cannot be used for staff",
+    ar: "هذا البريد الإلكتروني تابع لحساب مالك ولا يمكن استخدامه لموظف",
+  },
+  staffMenuGrantsRequired: {
+    en: "Select at least one menu for this staff member",
+    ar: "اختر منيو واحدًا على الأقل لهذا الموظف",
+  },
   staffPasswordRequiresEmail: {
     en: "Email is required when setting a staff password",
     ar: "البريد الإلكتروني مطلوب عند تعيين كلمة مرور للموظف",
@@ -878,6 +886,14 @@ export const ApiErrors = {
     en: "Select at least one customer",
     ar: "اختر عميلاً واحداً على الأقل",
   },
+  broadcastEmailsRequired: {
+    en: "Enter at least one test email",
+    ar: "أدخل بريداً إلكترونياً واحداً على الأقل للاختبار",
+  },
+  broadcastEmailsInvalid: {
+    en: "One or more test emails are invalid",
+    ar: "يوجد بريد إلكتروني غير صالح في قائمة الاختبار",
+  },
   broadcastSubjectRequired: {
     en: "Email subject is required",
     ar: "عنوان الرسالة مطلوب",
@@ -1042,6 +1058,10 @@ export const ApiErrors = {
   lastDashboardAccessRole: {
     en: "Cannot remove the last role that has dashboard access",
     ar: "لا يمكن حذف آخر دور يملك صلاحية دخول لوحة التحكم",
+  },
+  defaultRoleReadOnly: {
+    en: "Default roles cannot be edited or deleted. Duplicate the role to get an editable copy.",
+    ar: "الأدوار الافتراضية لا يمكن تعديلها أو حذفها. انسخ الدور للحصول على نسخة قابلة للتعديل.",
   },
   invalidRoleId: {
     en: "A valid role must be selected",

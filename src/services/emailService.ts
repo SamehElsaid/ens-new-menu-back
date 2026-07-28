@@ -643,16 +643,13 @@ export async function sendSubscriptionEmail(
   });
 }
 
-function messageToHtml(message: string): string {
-  return message
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean)
-    .map(
-      (block) =>
-        `<p style="margin:0 0 14px; font-size:15px; line-height:1.75;">${escapeHtml(block).replace(/\n/g, "<br>")}</p>`,
-    )
-    .join("");
+/**
+ * Admin broadcast HTML is the full email document (no brand wrapper).
+ * Use {{name}} in the HTML to insert the recipient's escaped name.
+ */
+function applyBroadcastPlaceholders(html: string, name: string): string {
+  const safeName = escapeHtml(name);
+  return html.replace(/\{\{\s*name\s*\}\}/gi, safeName).trim();
 }
 
 export async function sendAdminMessageEmail(
@@ -660,25 +657,11 @@ export async function sendAdminMessageEmail(
   name: string,
   subject: string,
   message: string,
-  locale: "ar" | "en" = "ar",
+  _locale: "ar" | "en" = "ar",
 ): Promise<boolean> {
-  const isArabic = locale === "ar";
-  const safeName = escapeHtml(name);
-  const bodyHtml = messageToHtml(message);
-
-  const content = isArabic
-    ? `
-    <h2 style="margin:0 0 12px; font-size:22px; font-weight:800; color:${BRAND.royal};">مرحباً ${safeName}،</h2>
-    ${bodyHtml}
-  `
-    : `
-    <h2 style="margin:0 0 12px; font-size:22px; font-weight:800; color:${BRAND.royal};">Hello ${safeName},</h2>
-    ${bodyHtml}
-  `;
-
   return sendEmail({
     to,
     subject,
-    html: emailTemplate(content, isArabic),
+    html: applyBroadcastPlaceholders(message, name),
   });
 }

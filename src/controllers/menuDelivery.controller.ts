@@ -5,13 +5,16 @@ import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
 import {
-  assertMenuOwnedByUser,
   fetchMenuDeliverySettings,
   getMenuOwnerPhone,
   MENU_DELIVERY_GOVERNORATE_COLUMNS,
   normalizeDeliveryMode,
 } from "../services/menuDelivery.service";
-import { hasCapability } from "../services/planCapabilities.service";
+import { menuOwnerHasCapability } from "../services/planCapabilities.service";
+import { getMenuAccessForRequest } from "../utils/menuAccess";
+
+/** Delivery section: owner or a staff role granting `delivery:view`. */
+const DELIVERY_PERMISSION = "delivery:view";
 
 function parseOptionalCoord(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -47,8 +50,8 @@ async function assertMenuAccess(
   res: Response,
 ): Promise<number | null> {
   const menuId = parseMenuIdParam(req);
-  const userId = req.user!.userId;
-  if (!(await assertMenuOwnedByUser(menuId, userId))) {
+  const access = await getMenuAccessForRequest(req, menuId, DELIVERY_PERMISSION);
+  if (!access.ok) {
     sendApiError(res, req, 404, ApiErrors.menuNotFound);
     return null;
   }
@@ -121,7 +124,7 @@ export async function updateMenuDeliverySettings(
       const mode = normalizeDeliveryMode(deliveryMode);
       if (
         mode === "distance" &&
-        !(await hasCapability(req.user!.userId, "advancedDeliveryMaps"))
+        !(await menuOwnerHasCapability(menuId, "advancedDeliveryMaps"))
       ) {
         sendApiError(res, req, 403, ApiErrors.proFeatureOnly, {
           code: "PLAN_CAPABILITY_REQUIRED",

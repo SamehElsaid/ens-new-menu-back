@@ -1,9 +1,9 @@
 import { Request, Response } from "express";
-import { getPool, sql } from "../config/database";
 import { logger } from "../utils/logger";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { logMenuActivitySafe } from "../services/menuActivityLog.service";
+import { getMenuAccessForRequest } from "../utils/menuAccess";
 import {
   createRole,
   deleteRole,
@@ -14,17 +14,13 @@ import {
   type RoleServiceError,
 } from "../services/menuStaffRoles.service";
 
-async function assertMenuOwner(
-  userId: number,
-  menuId: number,
-): Promise<boolean> {
-  const pool = await getPool();
-  const check = await pool
-    .request()
-    .input("menuId", sql.Int, menuId)
-    .input("userId", sql.Int, userId)
-    .query("SELECT id FROM Menus WHERE id = @menuId AND userId = @userId");
-  return check.recordset.length > 0;
+/**
+ * Role management is available to the menu owner or a staff member whose role
+ * grants `staff:manage` (owner/admin always pass in the authorization service).
+ */
+async function canManageRoles(req: Request, menuId: number): Promise<boolean> {
+  const access = await getMenuAccessForRequest(req, menuId, "staff:manage");
+  return access.ok;
 }
 
 function sendRoleError(
@@ -51,6 +47,9 @@ function sendRoleError(
     case "last_dashboard_access_role":
       sendApiError(res, req, 409, ApiErrors.lastDashboardAccessRole);
       return;
+    case "default_role_read_only":
+      sendApiError(res, req, 409, ApiErrors.defaultRoleReadOnly);
+      return;
     case "no_fields":
       sendApiError(res, req, 400, ApiErrors.noFieldsToUpdate);
       return;
@@ -64,10 +63,9 @@ export async function listStaffRoles(
   res: Response,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const menuId = parseInt(req.params.menuId, 10);
 
-    if (!(await assertMenuOwner(userId, menuId))) {
+    if (!(await canManageRoles(req, menuId))) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
@@ -85,11 +83,10 @@ export async function getStaffRoleById(
   res: Response,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const menuId = parseInt(req.params.menuId, 10);
     const roleId = parseInt(req.params.roleId, 10);
 
-    if (!(await assertMenuOwner(userId, menuId))) {
+    if (!(await canManageRoles(req, menuId))) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
@@ -111,16 +108,20 @@ export async function createStaffRole(
   res: Response,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const menuId = parseInt(req.params.menuId, 10);
-    const { name, permissions } = req.body;
+    const { name, nameEn, permissions, loginPortal } = req.body;
 
-    if (!(await assertMenuOwner(userId, menuId))) {
+    if (!(await canManageRoles(req, menuId))) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
-    const role = await createRole(menuId, name, permissions);
+    const role = await createRole(menuId, {
+      name,
+      nameEn,
+      permissions,
+      loginPortal,
+    });
     res.status(201).json({ role });
 
     void logMenuActivitySafe(req, menuId, {
@@ -151,19 +152,20 @@ export async function updateStaffRole(
   res: Response,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const menuId = parseInt(req.params.menuId, 10);
     const roleId = parseInt(req.params.roleId, 10);
-    const { name, permissions } = req.body;
+    const { name, nameEn, permissions, loginPortal } = req.body;
 
-    if (!(await assertMenuOwner(userId, menuId))) {
+    if (!(await canManageRoles(req, menuId))) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
 
     const { role, before } = await updateRole(menuId, roleId, {
       name,
+      nameEn,
       permissions,
+      loginPortal,
     });
     res.json({ role });
 
@@ -195,11 +197,10 @@ export async function deleteStaffRole(
   res: Response,
 ): Promise<void> {
   try {
-    const userId = req.user!.userId;
     const menuId = parseInt(req.params.menuId, 10);
     const roleId = parseInt(req.params.roleId, 10);
 
-    if (!(await assertMenuOwner(userId, menuId))) {
+    if (!(await canManageRoles(req, menuId))) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }

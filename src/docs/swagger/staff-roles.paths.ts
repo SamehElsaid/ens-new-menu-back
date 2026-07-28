@@ -6,7 +6,7 @@
  *     summary: Staff permission catalog
  *     description: |
  *       Static catalog of assignable staff permissions (RBAC). Roles are dynamic
- *       per-menu, but the set of permissions is fixed in code. Human labels are
+ *       per-account (owner), but the set of permissions is fixed in code. Human labels are
  *       resolved on the client via i18n using `labelKey` / `descriptionKey`.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     responses:
@@ -31,7 +31,7 @@
  *   get:
  *     tags: [Staff]
  *     summary: List staff roles
- *     description: Dynamic per-menu roles (RBAC). **Pro plan** required.
+ *     description: Account-scoped staff roles (RBAC) via the menu's owner. Prefer `/api/dashboard/staff-roles`. **Pro plan** required.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - $ref: '#/components/parameters/menuId'
@@ -46,6 +46,7 @@
  *                   name: "Cashier"
  *                   permissions: ["dashboard:access", "orders:view", "orders:confirm", "orders:complete"]
  *                   isDefault: true
+ *                   loginPortal: "dashboard"
  *                   staffCount: 2
  *
  *   post:
@@ -53,7 +54,8 @@
  *     summary: Create staff role
  *     description: |
  *       Permissions must be keys from `GET /api/staff-permissions/catalog`.
- *       Missing dependencies are auto-included on save.
+ *       Missing dependencies are auto-included on save. `loginPortal` selects
+ *       which login surface the role uses (`staff_app` default, or `dashboard`).
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - $ref: '#/components/parameters/menuId'
@@ -64,6 +66,7 @@
  *           example:
  *             name: "Food preparer"
  *             permissions: ["orders:prepare"]
+ *             loginPortal: "staff_app"
  *     responses:
  *       201:
  *         content:
@@ -75,6 +78,7 @@
  *                 name: "Food preparer"
  *                 permissions: ["orders:view", "orders:prepare"]
  *                 isDefault: false
+ *                 loginPortal: "staff_app"
  *                 staffCount: 0
  *       400:
  *         description: Invalid permission or missing name
@@ -103,6 +107,7 @@
  *                 name: "Cashier"
  *                 permissions: ["dashboard:access", "orders:view", "orders:complete"]
  *                 isDefault: true
+ *                 loginPortal: "dashboard"
  *                 staffCount: 2
  *       404:
  *         description: Role not found
@@ -110,7 +115,8 @@
  *     tags: [Staff]
  *     summary: Update staff role
  *     description: |
- *       Editing cannot remove the last role that grants `dashboard:access`.
+ *       Permissions must be keys from `GET /api/staff-permissions/catalog`.
+ *       `loginPortal` may be updated to `staff_app` or `dashboard`.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - $ref: '#/components/parameters/menuId'
@@ -124,6 +130,7 @@
  *           example:
  *             name: "Senior cashier"
  *             permissions: ["orders:view", "orders:confirm", "orders:complete"]
+ *             loginPortal: "dashboard"
  *     responses:
  *       200:
  *         content:
@@ -135,15 +142,15 @@
  *                 name: "Senior cashier"
  *                 permissions: ["dashboard:access", "orders:view", "orders:confirm", "orders:complete"]
  *                 isDefault: true
+ *                 loginPortal: "dashboard"
  *                 staffCount: 2
  *       409:
- *         description: Role name exists or last dashboard-access role
+ *         description: Role name already exists
  *   delete:
  *     tags: [Staff]
  *     summary: Delete staff role
  *     description: |
- *       Fails when the role is still assigned to staff, or when it is the last
- *       role granting `dashboard:access`.
+ *       Fails when the role is still assigned to staff.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - $ref: '#/components/parameters/menuId'
@@ -158,7 +165,7 @@
  *             example:
  *               message: "Role deleted successfully"
  *       409:
- *         description: Role in use or last dashboard-access role
+ *         description: Role in use
  */
 
 export {};

@@ -4,6 +4,7 @@ import { parseAnalyticsPeriod } from "../utils/analyticsPeriod";
 import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { logger } from "../utils/logger";
+import { getMenuAccessForRequest } from "../utils/menuAccess";
 
 export async function getMenuAnalytics(
   req: Request,
@@ -16,11 +17,19 @@ export async function getMenuAnalytics(
       return;
     }
 
+    // Owner or a staff member whose role grants `analytics:view`. Analytics is
+    // always computed against the menu OWNER, so pass the resolved owner id.
+    const access = await getMenuAccessForRequest(req, menuId, "analytics:view");
+    if (!access.ok) {
+      sendApiError(res, req, 403, ApiErrors.menuNotFoundOrAccess);
+      return;
+    }
+
     const period = parseAnalyticsPeriod(req.query.period, "7d");
     const data = await buildMenuAnalyticsResponse(
       menuId,
-      req.user!.userId,
-      req.user!.role,
+      access.ownerUserId,
+      "owner",
       period,
     );
     res.json(data);

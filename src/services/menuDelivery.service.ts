@@ -127,7 +127,9 @@ export async function fetchMenuDeliverySettings(
   };
 }
 
-export async function getMenuDeliveryMode(menuId: number): Promise<DeliveryMode> {
+export async function getMenuDeliveryMode(
+  menuId: number,
+): Promise<DeliveryMode> {
   await ensureDeliverySchema();
   const pool = await getPool();
   const r = await pool.request().input("menuId", sql.Int, menuId).query(`
@@ -176,9 +178,7 @@ export async function getEffectiveMenuDeliveryModesForMenus(
     }
     map.set(
       row.id,
-      canUseMaps
-        ? normalizeDeliveryMode(row.deliveryMode)
-        : "governorates",
+      canUseMaps ? normalizeDeliveryMode(row.deliveryMode) : "governorates",
     );
   }
 
@@ -207,8 +207,7 @@ export async function resolveBranchDeliveryQuote(
   const result = await pool
     .request()
     .input("menuId", sql.Int, menuId)
-    .input("branchId", sql.Int, branchId)
-    .query(`
+    .input("branchId", sql.Int, branchId).query(`
       SELECT
         b.latitude,
         b.longitude,

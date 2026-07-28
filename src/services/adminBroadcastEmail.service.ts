@@ -9,7 +9,9 @@ import {
 } from "../utils/adminUserFilters";
 
 const MAX_BROADCAST_RECIPIENTS = 500;
+const MAX_TEST_RECIPIENTS = 20;
 const SEND_DELAY_MS = 120;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
 export type BroadcastRecipient = {
   id: number;
@@ -26,11 +28,62 @@ function normalizeUserIds(userIds: unknown): number[] {
   return [...new Set(userIds.map((id) => Number(id)).filter((id) => id > 0))];
 }
 
+export function parseBroadcastEmails(value: unknown): {
+  emails: string[];
+  invalid: string[];
+} {
+  const rawParts: string[] = [];
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      rawParts.push(...String(item ?? "").split(/[\s,;]+/));
+    }
+  } else if (typeof value === "string" && value.trim()) {
+    rawParts.push(...value.split(/[\s,;]+/));
+  }
+
+  const emails: string[] = [];
+  const invalid: string[] = [];
+  const seen = new Set<string>();
+
+  for (const part of rawParts) {
+    const email = part.trim().toLowerCase();
+    if (!email) continue;
+    if (!EMAIL_RE.test(email)) {
+      invalid.push(part.trim());
+      continue;
+    }
+    if (seen.has(email)) continue;
+    seen.add(email);
+    emails.push(email);
+    if (emails.length >= MAX_TEST_RECIPIENTS) break;
+  }
+
+  return { emails, invalid };
+}
+
+function recipientsFromEmails(emails: string[]): BroadcastRecipient[] {
+  return emails.map((email, index) => ({
+    id: index + 1,
+    name: email.split("@")[0] || "Test",
+    email,
+  }));
+}
+
 export async function getBroadcastRecipients(options: {
   audience: BroadcastAudience;
   userIds?: number[];
+  emails?: string[];
   limit?: number;
 }): Promise<BroadcastRecipient[]> {
+  if (options.audience === "test") {
+    const emails = (options.emails ?? [])
+      .map((email) => String(email).trim().toLowerCase())
+      .filter(Boolean)
+      .slice(0, MAX_TEST_RECIPIENTS);
+    return recipientsFromEmails(emails);
+  }
+
   const pool = await getPool();
   const whereConditions = getBaseBroadcastUserConditions();
   const request = pool.request();
@@ -74,31 +127,38 @@ export async function getBroadcastRecipients(options: {
 export async function previewBroadcastRecipients(options: {
   audience: BroadcastAudience;
   userIds?: number[];
+  emails?: string[];
 }) {
+  const maxRecipients =
+    options.audience === "test" ? MAX_TEST_RECIPIENTS : MAX_BROADCAST_RECIPIENTS;
   const recipients = await getBroadcastRecipients({
     ...options,
-    limit: MAX_BROADCAST_RECIPIENTS,
+    limit: maxRecipients,
   });
 
   return {
     count: recipients.length,
     sample: recipients.slice(0, 8),
-    capped: recipients.length >= MAX_BROADCAST_RECIPIENTS,
-    maxRecipients: MAX_BROADCAST_RECIPIENTS,
+    capped: recipients.length >= maxRecipients,
+    maxRecipients,
   };
 }
 
 export async function sendBroadcastEmail(options: {
   audience: BroadcastAudience;
   userIds?: number[];
+  emails?: string[];
   subject: string;
   message: string;
   locale: "ar" | "en";
 }) {
+  const maxRecipients =
+    options.audience === "test" ? MAX_TEST_RECIPIENTS : MAX_BROADCAST_RECIPIENTS;
   const recipients = await getBroadcastRecipients({
     audience: options.audience,
     userIds: options.userIds,
-    limit: MAX_BROADCAST_RECIPIENTS,
+    emails: options.emails,
+    limit: maxRecipients,
   });
 
   if (!recipients.length) {
@@ -139,7 +199,7 @@ export async function sendBroadcastEmail(options: {
     sent,
     failed,
     failures: failures.slice(0, 10),
-    capped: recipients.length >= MAX_BROADCAST_RECIPIENTS,
-    maxRecipients: MAX_BROADCAST_RECIPIENTS,
+    capped: recipients.length >= maxRecipients,
+    maxRecipients,
   };
 }

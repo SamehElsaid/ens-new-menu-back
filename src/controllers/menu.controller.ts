@@ -349,7 +349,8 @@ function parseCopyFlag(raw: unknown, defaultValue: boolean): boolean {
  * Optional flags (default: products false; settings/design/media/address true):
  * `copyProducts`, `copySettings`, `copyDesign`, `copyMedia`, `copyAddress`.
  * Logo is always copied when present (required to create a menu).
- * Does not copy staff, tables, ads, or group membership.
+ * Staff ROLES are always copied (falling back to defaults when the source has
+ * none). Does not copy staff members, tables, ads, or group membership.
  */
 export async function copyMenu(req: Request, res: Response): Promise<void> {
   try {
@@ -1125,6 +1126,14 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
       return newMenuId;
     });
 
+    // Roles are account-scoped — never copy menu-anchored role rows.
+    if (!isIdString) {
+      const newNumericMenuId = Number(menuId);
+      if (Number.isFinite(newNumericMenuId)) {
+        await ensureDefaultRolesForMenu(newNumericMenuId);
+      }
+    }
+
     void logMenuActivitySafe(req, Number(menuId), {
       action: "MENU_COPIED",
       targetType: "menu",
@@ -1189,11 +1198,11 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
           en.name as nameEn, en.description as descriptionEn
         FROM Menus m
         ${MENU_GROUP_JOIN_SQL}
-        INNER JOIN MenuStaff s ON s.menuId = m.id AND s.id = @staffId
+        INNER JOIN MenuStaff s ON s.id = @staffId
+        INNER JOIN dbo.MenuStaffGrants g ON g.staffId = s.id AND g.menuId = m.id
         LEFT JOIN MenuTranslations ar ON m.id = ar.menuId AND ar.locale = 'ar'
         LEFT JOIN MenuTranslations en ON m.id = en.menuId AND en.locale = 'en'
         WHERE m.id = @id
-          AND LOWER(LTRIM(RTRIM(ISNULL(s.role, '')))) IN ('cashier', 'casher')
       `);
     } else {
       result = await pool
@@ -1219,11 +1228,9 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       `);
     }
 
+    // Staff reach this only through a menu grant, so "no rows" means the menu
+    // is not theirs — same answer as a missing menu, and it leaks nothing.
     if (result.recordset.length === 0) {
-      if (isStaff) {
-        sendApiError(res, req, 403, ApiErrors.staffCashierRequired);
-        return;
-      }
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
@@ -1744,6 +1751,39 @@ export async function toggleMenuStatus(
 }
 
 // Delete menu
+// export async function deleteMenu(req: Request, res: Response): Promise<void> {
+//   try {
+//     if (req.user?.role === ROLES.STAFF) {
+//       sendApiError(res, req, 403, {
+//         en: "Only the menu owner can delete this menu.",
+//         ar: "يستطيع مالك القائمة فقط حذفها.",
+//       });
+//       return;
+//     }
+
+//     const userId = req.user!.userId;
+//     const { id } = req.params;
+
+//     const pool = await getPool();
+
+//     const result = await pool
+//       .request()
+//       .input("id", sql.Int, parseInt(id))
+//       .input("userId", sql.Int, userId)
+//       .query("DELETE FROM Menus WHERE id = @id AND userId = @userId");
+
+//     if (result.rowsAffected[0] === 0) {
+//       sendApiError(res, req, 404, ApiErrors.menuNotFound);
+//       return;
+//     }
+
+//     res.json({ message: "Menu deleted successfully" });
+//   } catch (error) {
+//     logger.error("Delete menu error:", error);
+//     sendApiError(res, req, 500, ApiErrors.failedDeleteMenu);
+//   }
+// }
+
 export async function deleteMenu(req: Request, res: Response): Promise<void> {
   try {
     if (req.user?.role === ROLES.STAFF) {
@@ -1755,20 +1795,64 @@ export async function deleteMenu(req: Request, res: Response): Promise<void> {
     }
 
     const userId = req.user!.userId;
-    const { id } = req.params;
-
+    const menuId = parseInt(req.params.id, 10);
     const pool = await getPool();
 
-    const result = await pool
+    // Confirm the menu belongs to the requester before touching anything.
+    const owned = await pool
       .request()
-      .input("id", sql.Int, parseInt(id))
+      .input("id", sql.Int, menuId)
       .input("userId", sql.Int, userId)
-      .query("DELETE FROM Menus WHERE id = @id AND userId = @userId");
+      .query(`SELECT id FROM Menus WHERE id = @id AND userId = @userId`);
 
-    if (result.rowsAffected[0] === 0) {
+    if (!owned.recordset.length) {
       sendApiError(res, req, 404, ApiErrors.menuNotFound);
       return;
     }
+
+    // Grants -> staff -> roles -> menu inside one transaction. Staff must go
+    // before the roles to release FK_MenuStaff_Role; wrapping it prevents a
+    // mid-failure from leaving a half-deleted menu. Staff and roles are
+    // account-level now, so only what this menu leaves orphaned is removed.
+    await executeTransaction(async (transaction) => {
+      await transaction
+        .request()
+        .input("id", sql.Int, menuId)
+        .query(`DELETE FROM dbo.MenuStaffGrants WHERE menuId = @id`);
+
+      await transaction
+        .request()
+        .input("id", sql.Int, menuId)
+        .query(`
+          DELETE s
+          FROM MenuStaff s
+          WHERE s.menuId = @id
+            AND NOT EXISTS (
+              SELECT 1 FROM dbo.MenuStaffGrants g WHERE g.staffId = s.id
+            )
+        `);
+
+      // Survivors still working on other menus must not keep a dangling anchor.
+      await transaction
+        .request()
+        .input("id", sql.Int, menuId)
+        .query(`
+          UPDATE s
+          SET s.menuId = (
+            SELECT MIN(g.menuId) FROM dbo.MenuStaffGrants g WHERE g.staffId = s.id
+          )
+          FROM MenuStaff s
+          WHERE s.menuId = @id
+        `);
+
+      // Roles belong to the account catalog and are no longer anchored to menus.
+
+      await transaction
+        .request()
+        .input("id", sql.Int, menuId)
+        .input("userId", sql.Int, userId)
+        .query(`DELETE FROM Menus WHERE id = @id AND userId = @userId`);
+    });
 
     res.json({ message: "Menu deleted successfully" });
   } catch (error) {
@@ -1776,7 +1860,6 @@ export async function deleteMenu(req: Request, res: Response): Promise<void> {
     sendApiError(res, req, 500, ApiErrors.failedDeleteMenu);
   }
 }
-
 // Check slug availability and get similar suggestions
 export async function checkSlugAvailability(
   req: Request,

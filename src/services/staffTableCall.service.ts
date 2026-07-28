@@ -48,6 +48,27 @@ import { parseGeoCoord } from "../utils/geoDistance";
 
 export type StaffOrderType = "table" | "delivery";
 
+/** Limit staff list/history queries to one channel, or both when `"all"`. */
+export type StaffOrderChannelFilter = StaffOrderType | "all";
+
+/**
+ * SQL predicate for `orderType` / legacy `tableNumber = 'delivery'`.
+ * Alias is optional (e.g. `c.` when joining).
+ */
+function orderChannelWhereSql(
+  filter: StaffOrderChannelFilter | undefined,
+  alias = "",
+): string {
+  if (!filter || filter === "all") return "1 = 1";
+  const col = `${alias}orderType`;
+  const tableCol = `${alias}tableNumber`;
+  const isDelivery = `
+    LOWER(LTRIM(RTRIM(ISNULL(${col}, N'')))) = N'delivery'
+    OR LOWER(LTRIM(RTRIM(ISNULL(${tableCol}, N'')))) = N'delivery'
+  `;
+  return filter === "delivery" ? `(${isDelivery})` : `NOT (${isDelivery})`;
+}
+
 /** Guest intent: food order, waiter ping, or bill request. */
 export type StaffRequestKind = "order" | "waiter" | "bill";
 
@@ -138,6 +159,9 @@ export type GuestStaffCallOptions = {
   branchId?: number | null;
   customerLat?: number | null;
   customerLng?: number | null;
+  /** Delivery area label for distance mode (same fields as governorate zones). */
+  governorateNameAr?: string | null;
+  governorateNameEn?: string | null;
 };
 
 export function parseStaffRequestKind(raw: unknown): StaffRequestKind {
@@ -219,6 +243,12 @@ function parseCustomerPhone(
 function parseOrderNotes(raw: unknown): string | null {
   if (raw == null) return null;
   const trimmed = String(raw).trim().slice(0, 500);
+  return trimmed.length ? trimmed : null;
+}
+
+function parseDeliveryAreaName(raw: unknown): string | null {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim().slice(0, 255);
   return trimmed.length ? trimmed : null;
 }
 
@@ -330,7 +360,9 @@ function coerceStaffOrderLineSize(raw: unknown): MenuItemSize | undefined {
   return { nameAr: ar, nameEn: en, price };
 }
 
-function coerceStaffOrderLineVariant(raw: unknown): MenuItemVariant | undefined {
+function coerceStaffOrderLineVariant(
+  raw: unknown,
+): MenuItemVariant | undefined {
   if (raw == null || raw === "") return undefined;
   const normalized = normalizeMenuItemVariantsInput([raw]);
   if (normalized?.length === 1) return normalized[0];
@@ -354,27 +386,31 @@ function coerceStaffOrderLineVariant(raw: unknown): MenuItemVariant | undefined 
   return { labelAr: ar, labelEn: en, price };
 }
 
-function parseStaffOrderLineSize(
-  raw: unknown,
-): { ok: true; value: MenuItemSize | undefined } {
+function parseStaffOrderLineSize(raw: unknown): {
+  ok: true;
+  value: MenuItemSize | undefined;
+} {
   if (raw === null || raw === undefined || raw === "") {
     return { ok: true, value: undefined };
   }
   return { ok: true, value: coerceStaffOrderLineSize(raw) };
 }
 
-function parseStaffOrderLineVariant(
-  raw: unknown,
-): { ok: true; value: MenuItemVariant | undefined } {
+function parseStaffOrderLineVariant(raw: unknown): {
+  ok: true;
+  value: MenuItemVariant | undefined;
+} {
   if (raw === null || raw === undefined || raw === "") {
     return { ok: true, value: undefined };
   }
   return { ok: true, value: coerceStaffOrderLineVariant(raw) };
 }
 
-function pickStaffOrderItemOptions(
-  o: Record<string, unknown>,
-): { ok: true; size?: MenuItemSize; variant?: MenuItemVariant } {
+function pickStaffOrderItemOptions(o: Record<string, unknown>): {
+  ok: true;
+  size?: MenuItemSize;
+  variant?: MenuItemVariant;
+} {
   const sizeParsed = parseStaffOrderLineSize(o.size);
   const variantParsed = parseStaffOrderLineVariant(o.variant);
   return {
@@ -435,10 +471,7 @@ async function fetchMenuOrderCharges(menuId: number): Promise<{
   try {
     await ensureMenuWifiTaxServiceSchema();
     const pool = await getPool();
-    const result = await pool
-      .request()
-      .input("id", sql.Int, menuId)
-      .query(`
+    const result = await pool.request().input("id", sql.Int, menuId).query(`
         SELECT
           ISNULL(taxEnabled, 0) AS taxEnabled,
           taxPercent,
@@ -1003,14 +1036,14 @@ export async function processGuestStaffCall(
       nameEn: string;
       price: number;
     } | null = null;
-    let distanceDelivery:
-      | {
-          branchId: number;
-          distanceKm: number;
-          deliveryFee: number;
-          maxDeliveryRadiusKm: number | null;
-        }
-      | null = null;
+    let distanceDelivery: {
+      branchId: number;
+      distanceKm: number;
+      deliveryFee: number;
+      maxDeliveryRadiusKm: number | null;
+      governorateNameAr: string | null;
+      governorateNameEn: string | null;
+    } | null = null;
 
     if (isDeliveryOrder) {
       await ensureDeliverySchema();
@@ -1044,18 +1077,34 @@ export async function processGuestStaffCall(
           return { ok: false, error: "INVALID_BRANCH" };
         }
 
+        let governorateNameAr = parseDeliveryAreaName(
+          options?.governorateNameAr,
+        );
+        let governorateNameEn = parseDeliveryAreaName(
+          options?.governorateNameEn,
+        );
+        if (governorateNameAr || governorateNameEn) {
+          governorateNameAr = governorateNameAr || governorateNameEn;
+          governorateNameEn = governorateNameEn || governorateNameAr;
+        }
+
         distanceDelivery = {
           branchId: branchResult.delivery.branchId,
           distanceKm: branchResult.delivery.quote.distanceKm,
           deliveryFee: branchResult.delivery.quote.deliveryFee ?? 0,
           maxDeliveryRadiusKm: branchResult.delivery.quote.maxDeliveryRadiusKm,
+          governorateNameAr,
+          governorateNameEn,
         };
       } else {
         const governorateId = governorateIdFromOptions;
         if (!governorateId) {
           return { ok: false, error: "INVALID_PAYLOAD" };
         }
-        const govResult = await resolveDeliveryGovernorate(menuId, governorateId);
+        const govResult = await resolveDeliveryGovernorate(
+          menuId,
+          governorateId,
+        );
         if (!govResult.ok) {
           return { ok: false, error: "INVALID_GOVERNORATE" };
         }
@@ -1175,9 +1224,7 @@ export async function processGuestStaffCall(
                   orderTotal: appended.orderTotal,
                   status: appended.status,
                   pendingGuestAddition: true,
-                  ...(existingPendingBill
-                    ? { pendingBillRequest: true }
-                    : {}),
+                  ...(existingPendingBill ? { pendingBillRequest: true } : {}),
                 },
               ),
             }),
@@ -1418,6 +1465,17 @@ export async function processGuestStaffCall(
                   deliveryFee: distanceDelivery.deliveryFee,
                   maxDeliveryRadiusKm: distanceDelivery.maxDeliveryRadiusKm,
                   deliveryMode: "distance",
+                  ...(distanceDelivery.governorateNameAr ||
+                  distanceDelivery.governorateNameEn
+                    ? {
+                        governorateNameAr:
+                          distanceDelivery.governorateNameAr ||
+                          distanceDelivery.governorateNameEn,
+                        governorateNameEn:
+                          distanceDelivery.governorateNameEn ||
+                          distanceDelivery.governorateNameAr,
+                      }
+                    : {}),
                 }
               : {}),
           }),
@@ -1537,17 +1595,22 @@ export async function getStaffPushTokensForMenu(
     const meta = await getMenuStaffColumnMeta();
     if (!meta.expoTokenColumnQuoted) return [];
 
-    const activeClause = meta.activeColumnQuoted
-      ? `AND (${meta.activeColumnQuoted} = 1 OR ${meta.activeColumnQuoted} IS NULL)`
+    const tokenCol = `s.${meta.expoTokenColumnQuoted}`;
+    const activeCol = meta.activeColumnQuoted
+      ? `s.${meta.activeColumnQuoted}`
+      : null;
+    const activeClause = activeCol
+      ? `AND (${activeCol} = 1 OR ${activeCol} IS NULL)`
       : "";
 
+    // Grants, not the legacy MenuStaff.menuId anchor, decide who works here.
     const pool = await getPool();
     const r = await pool.request().input("menuId", sql.Int, menuId).query(`
-        SELECT ${meta.expoTokenColumnQuoted} AS token
-        FROM MenuStaff
-        WHERE menuId = @menuId
-          AND ${meta.expoTokenColumnQuoted} IS NOT NULL
-          AND LEN(${meta.expoTokenColumnQuoted}) > 0
+        SELECT DISTINCT ${tokenCol} AS token
+        FROM MenuStaff s
+        INNER JOIN dbo.MenuStaffGrants g ON g.staffId = s.id AND g.menuId = @menuId
+        WHERE ${tokenCol} IS NOT NULL
+          AND LEN(${tokenCol}) > 0
           ${activeClause}
       `);
 
@@ -1989,8 +2052,7 @@ export async function getStaffTableCallSnapshot(
           c.lastEditedAt,
           sm.${nameCol} AS lastEditedByName
         FROM StaffTableCalls c
-        LEFT JOIN MenuStaff sm
-          ON sm.id = c.lastEditedByStaffId AND sm.menuId = c.menuId
+        LEFT JOIN MenuStaff sm ON sm.id = c.lastEditedByStaffId
         WHERE c.id = @id AND c.menuId = @menuId
       `);
     } else {
@@ -2045,10 +2107,12 @@ export async function getStaffTableCallSnapshot(
 export async function getPendingStaffTableCalls(
   menuId: number,
   limit = 100,
+  channel: StaffOrderChannelFilter = "all",
 ): Promise<StaffTableCallRow[]> {
   try {
     await ensureStaffTableCallsOrderTypeSchema();
     const pool = await getPool();
+    const channelSql = orderChannelWhereSql(channel);
     const result = await pool
       .request()
       .input("menuId", sql.Int, menuId)
@@ -2073,6 +2137,7 @@ export async function getPendingStaffTableCalls(
             status = N'pending'
             OR (status IS NULL AND acknowledgedAt IS NULL)
           )
+          AND ${channelSql}
         ORDER BY createdAt ASC
       `);
     const charges = await fetchMenuOrderCharges(menuId);
@@ -2096,6 +2161,7 @@ export async function getStaffTableCallsHistory(
   menuId: number,
   page = 1,
   limit = 20,
+  channel: StaffOrderChannelFilter = "all",
 ): Promise<StaffTableCallHistoryPage> {
   try {
     await ensureStaffTableCallsOrderTypeSchema();
@@ -2103,12 +2169,15 @@ export async function getStaffTableCallsHistory(
     const safePage = Math.max(1, Math.floor(page));
     const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 500);
     const offset = (safePage - 1) * safeLimit;
+    const channelSql = orderChannelWhereSql(channel);
+    const channelSqlAliased = orderChannelWhereSql(channel, "c.");
 
     const totalResult = await pool.request().input("menuId", sql.Int, menuId)
       .query(`
         SELECT COUNT(*) as total
         FROM StaffTableCalls
         WHERE menuId = @menuId
+          AND ${channelSql}
       `);
     const total = Number(totalResult.recordset[0]?.total ?? 0);
 
@@ -2138,9 +2207,9 @@ export async function getStaffTableCallsHistory(
           c.lastEditedAt,
           sm.${nameCol} AS lastEditedByName
         FROM StaffTableCalls c
-        LEFT JOIN MenuStaff sm
-          ON sm.id = c.lastEditedByStaffId AND sm.menuId = c.menuId
+        LEFT JOIN MenuStaff sm ON sm.id = c.lastEditedByStaffId
         WHERE c.menuId = @menuId
+          AND ${channelSqlAliased}
         ORDER BY c.createdAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -2163,6 +2232,7 @@ export async function getStaffTableCallsHistory(
           status
         FROM StaffTableCalls
         WHERE menuId = @menuId
+          AND ${channelSql}
         ORDER BY createdAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -2620,9 +2690,7 @@ export async function clearStaffTableAndDeliveryCallsForUser(
   try {
     const pool = await getPool();
 
-    const menusResult = await pool
-      .request()
-      .input("userId", sql.Int, userId)
+    const menusResult = await pool.request().input("userId", sql.Int, userId)
       .query(`
         SELECT id FROM Menus WHERE userId = @userId
       `);
@@ -2716,7 +2784,10 @@ export type GuestOpenTableOrderCall = {
 async function assertGuestTableOrderAccess(
   menuId: number,
   tableNumber: string,
-): Promise<{ ok: true; tableNumber: string } | { ok: false; error: GuestOpenTableOrderError }> {
+): Promise<
+  | { ok: true; tableNumber: string }
+  | { ok: false; error: GuestOpenTableOrderError }
+> {
   if (!Number.isFinite(menuId) || menuId <= 0) {
     return { ok: false, error: "INVALID_PAYLOAD" };
   }
@@ -2802,7 +2873,10 @@ export async function getGuestOpenTableOrder(
     return access;
   }
   try {
-    const openCall = await findOpenTableCallForTable(menuId, access.tableNumber);
+    const openCall = await findOpenTableCallForTable(
+      menuId,
+      access.tableNumber,
+    );
     return {
       ok: true,
       call: openCall ? toGuestOpenTableOrderCall(openCall) : null,
@@ -2840,7 +2914,10 @@ export async function replaceGuestPendingTableOrder(
   }
 
   try {
-    const openCall = await findOpenTableCallForTable(menuId, access.tableNumber);
+    const openCall = await findOpenTableCallForTable(
+      menuId,
+      access.tableNumber,
+    );
     if (!openCall) {
       return { ok: false, error: "NOT_FOUND" };
     }
