@@ -35,6 +35,7 @@ function buildSwaggerOptions(): swaggerJsdoc.Options {
         { name: "Health", description: "Server health" },
         { name: "Auth", description: "User authentication" },
         { name: "Google Auth", description: "Google OAuth" },
+        { name: "Apple Auth", description: "Sign in with Apple" },
         { name: "VerifyKit", description: "WhatsApp phone verification" },
         { name: "Staff Auth", description: "Menu staff login & table calls" },
         { name: "Public", description: "Public menu & landing endpoints" },

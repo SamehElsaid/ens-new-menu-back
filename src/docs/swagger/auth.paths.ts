@@ -197,6 +197,55 @@
  *     responses:
  *       200:
  *         description: Google config
+ *
+ * /api/auth/apple:
+ *   post:
+ *     tags: [Apple Auth]
+ *     summary: Authenticate with Apple (identityToken)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [identityToken]
+ *             properties:
+ *               identityToken: { type: string, description: Apple identity JWT }
+ *               token: { type: string, description: Alias for identityToken }
+ *               email: { type: string, format: email, description: Fallback email (first sign-in) }
+ *               name:
+ *                 type: object
+ *                 properties:
+ *                   firstName: { type: string }
+ *                   lastName: { type: string }
+ *               locale: { type: string, enum: [ar, en] }
+ *     responses:
+ *       200:
+ *         description: Authenticated
+ *
+ * /api/auth/apple/config:
+ *   get:
+ *     tags: [Apple Auth]
+ *     summary: Get Apple Sign In client config
+ *     responses:
+ *       200:
+ *         description: Apple config
+ *
+ * /api/auth/apple/notifications:
+ *   post:
+ *     tags: [Apple Auth]
+ *     summary: Apple Server-to-Server notifications webhook
+ *     description: Absolute HTTPS URL to paste in Apple Developer Console (App ID → Sign in with Apple → Server-to-Server Notification Endpoint)
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               payload: { type: string, description: Apple-signed JWT }
+ *     responses:
+ *       200:
+ *         description: Received
  */
 
 export {};
