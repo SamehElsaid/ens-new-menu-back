@@ -14,6 +14,8 @@ const publicRoutes = [
   "/health",
   ...(isSwaggerEnabled() ? ["/api-docs"] : []),
   "/api/verifykit",
+  // Apple Sign In server-to-server notifications (no x-api-key)
+  "/api/auth/apple/notifications",
   "/api/public",
   "/api/public/app-version",
   "/api/public/app-version/latest",
