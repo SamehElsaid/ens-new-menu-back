@@ -706,6 +706,30 @@ export const ApiErrors = {
     en: "Failed to get Google configuration",
     ar: "فشل جلب إعدادات Google",
   },
+  appleTokenRequired: {
+    en: "Apple identityToken (or token) is required",
+    ar: "مطلوب Apple identityToken أو token",
+  },
+  invalidAppleToken: {
+    en: "Invalid Apple token",
+    ar: "رمز Apple غير صالح",
+  },
+  appleNotConfigured: {
+    en: "Apple Sign In is not configured on the server",
+    ar: "تسجيل الدخول عبر Apple غير مهيأ على الخادم",
+  },
+  appleEmailRequired: {
+    en: "Apple email is required for the first sign-in. Please try again and share your email.",
+    ar: "البريد الإلكتروني من Apple مطلوب عند أول تسجيل دخول. حاول مرة أخرى وشارك بريدك.",
+  },
+  failedAppleAuth: {
+    en: "Failed to authenticate with Apple",
+    ar: "فشل المصادقة مع Apple",
+  },
+  failedAppleConfig: {
+    en: "Failed to get Apple configuration",
+    ar: "فشل جلب إعدادات Apple",
+  },
   accountTemporarilyLocked: {
     en: "Account is temporarily locked",
     ar: "تم قفل الحساب مؤقتًا",
