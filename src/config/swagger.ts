@@ -54,6 +54,7 @@ function buildSwaggerOptions(): swaggerJsdoc.Options {
         { name: "Structure", description: "Structure image upload" },
         { name: "CMS", description: "Promo, search info, meta data" },
         { name: "Admin", description: "Platform admin panel — users, plans, vouchers, analytics, follow-ups (admin JWT required)" },
+        { name: "Webhooks", description: "External provider webhooks (Svix / gateway signatures — no JWT)" },
       ],
       components: {
         securitySchemes: {

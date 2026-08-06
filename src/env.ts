@@ -62,6 +62,10 @@ console.log(
 );
 console.log(`   EMAIL_FROM: ${process.env.EMAIL_FROM?.trim() || "⚠️ Not set"}`);
 console.log(
+  `   RESEND_WEBHOOK_SECRET: ${process.env.RESEND_WEBHOOK_SECRET?.trim() ? "✅ Set" : "⚠️ Not set"}`,
+);
+console.log(`   INBOUND_FORWARD_TO: ${process.env.INBOUND_FORWARD_TO?.trim()}`);
+console.log(
   `   FRONTEND_URL: ${process.env.FRONTEND_URL?.trim() || "http://localhost:3000 (default)"}`,
 );
 console.log(

@@ -31,6 +31,7 @@ import { ensureMenuGroupSchema } from "./menuGroup.schema";
 import { ensureBranchDeliverySchema } from "./branchDelivery.schema";
 import { ensureRatingsSchema } from "./ratings.schema";
 import { ensurePlanCapabilitiesSchema } from "./planCapabilities.schema";
+import { ensureInboundEmailForwardSchema } from "./inboundEmailForward.schema";
 
 export { ensureAdminActivityLogSchema } from "./adminActivityLog.schema";
 export { ensureAdminCustomerSchema } from "./adminCustomer.schema";
@@ -67,6 +68,7 @@ export { ensureMenuGroupSchema } from "./menuGroup.schema";
 export { ensureBranchDeliverySchema } from "./branchDelivery.schema";
 export { ensureRatingsSchema } from "./ratings.schema";
 export { ensurePlanCapabilitiesSchema } from "./planCapabilities.schema";
+export { ensureInboundEmailForwardSchema } from "./inboundEmailForward.schema";
 
 /** Runs all idempotent DB schema migrations on startup (after pool is connected). */
 export async function ensureDatabaseSchemas(): Promise<void> {
@@ -103,6 +105,7 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "menuGroup", run: ensureMenuGroupSchema },
     { name: "branchDelivery", run: ensureBranchDeliverySchema },
     { name: "ratings", run: ensureRatingsSchema },
+    { name: "inboundEmailForward", run: ensureInboundEmailForwardSchema },
   ];
 
   for (const step of steps) {
