@@ -98,6 +98,18 @@ export const ApiErrors = {
     en: "Menu logo is required",
     ar: "شعار المنيو مطلوب",
   },
+  invalidGoogleReviewsUrl: {
+    en: "Please enter a valid Google Maps or Google Reviews link.",
+    ar: "يرجى إدخال رابط صالح من Google Maps أو Google Reviews.",
+  },
+  googleReviewsUrlRequired: {
+    en: "A Google Reviews link is required when the review button is enabled.",
+    ar: "رابط تقييمات جوجل مطلوب عند تفعيل زر التقييم.",
+  },
+  invalidGoogleReviewsPosition: {
+    en: "Invalid Google Reviews button position.",
+    ar: "موضع زر تقييمات جوجل غير صالح.",
+  },
   failedCreateMenu: {
     en: "Failed to create menu",
     ar: "فشل إنشاء المنيو",

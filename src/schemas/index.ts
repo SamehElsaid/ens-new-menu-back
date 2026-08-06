@@ -10,6 +10,7 @@ import { ensureMenuItemVariantsSchema } from "./menuItemVariants.schema";
 import { ensureMenuAuditLogSchema } from "./menuAuditLog.schema";
 import { ensureMenuChatbotSchema } from "./menuChatbot.schema";
 import { ensureMenuWifiTaxServiceSchema } from "./menuWifiTaxService.schema";
+import { ensureMenuGoogleReviewsSchema } from "./menuGoogleReviews.schema";
 import { ensureMenuStaffSchema } from "./menuStaff.schema";
 import { ensureMenuStaffRolesSchema } from "./menuStaffRoles.schema";
 import { ensureMenuStaffGrantsSchema } from "./menuStaffGrants.schema";
@@ -42,6 +43,7 @@ export { ensureMenuItemVariantsSchema } from "./menuItemVariants.schema";
 export { ensureMenuAuditLogSchema } from "./menuAuditLog.schema";
 export { ensureMenuChatbotSchema } from "./menuChatbot.schema";
 export { ensureMenuWifiTaxServiceSchema } from "./menuWifiTaxService.schema";
+export { ensureMenuGoogleReviewsSchema } from "./menuGoogleReviews.schema";
 export { ensureMenuStaffSchema } from "./menuStaff.schema";
 export {
   ensureMenuStaffRolesSchema,
@@ -93,6 +95,7 @@ export async function ensureDatabaseSchemas(): Promise<void> {
     { name: "menuAuditLog", run: ensureMenuAuditLogSchema },
     { name: "menuChatbot", run: ensureMenuChatbotSchema },
     { name: "menuWifiTaxService", run: ensureMenuWifiTaxServiceSchema },
+    { name: "menuGoogleReviews", run: ensureMenuGoogleReviewsSchema },
     { name: "deprecatedMenuThemes", run: migrateDeprecatedMenuThemes },
     { name: "domainTransfer", run: ensureDomainTransferSchema },
     { name: "subscriptionExtras", run: ensureSubscriptionExtrasSchema },

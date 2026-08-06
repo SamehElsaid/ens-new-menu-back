@@ -129,6 +129,8 @@
  *     description: |
  *       Returns public menu bootstrap including optional WiFi (when wifiEnabled),
  *       taxEnabled/taxPercent, and serviceEnabled/servicePercent for checkout totals.
+ *       Also includes Google Reviews CTA settings when configured
+ *       (googleReviewsEnabled, url, position, button text, showIcon, openInNewTab).
  *       Optional `table` / `tableNumber` / `tableId` resolve a dine-in session only when
  *       that table exists and is active; inactive tables leave `menu.table` null so the
  *       guest falls back to the regular menu (clients should strip the query param).
