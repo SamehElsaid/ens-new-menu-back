@@ -542,6 +542,10 @@ export const ApiErrors = {
     en: "Password is incorrect",
     ar: "كلمة المرور غير صحيحة",
   },
+  passwordRequired: {
+    en: "Password is required",
+    ar: "كلمة المرور مطلوبة",
+  },
   failedDeleteAccount: {
     en: "Failed to delete account",
     ar: "فشل حذف الحساب",

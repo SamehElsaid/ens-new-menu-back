@@ -198,7 +198,13 @@ router.post(
 // DELETE /api/user/account - Delete user account
 router.delete(
   "/account",
-  validate([body("password").notEmpty()]),
+  validate([
+    body("password")
+      .optional({ values: "falsy" })
+      .isString()
+      .trim()
+      .isLength({ min: 1 }),
+  ]),
   userController.deleteAccount,
 );
 

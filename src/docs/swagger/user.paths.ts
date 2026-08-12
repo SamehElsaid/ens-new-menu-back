@@ -447,23 +447,30 @@
  *   delete:
  *     tags: [User]
  *     summary: Delete account permanently
- *     description: Requires password confirmation. Deletes user and associated data.
+ *     description: >
+ *       Permanently deletes the authenticated user and associated data.
+ *       `password` is required only for email/password accounts (when Users.password is set).
+ *       Google/Apple-only accounts can omit it; the Bearer JWT from requireAuth is sufficient.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     requestBody:
- *       required: true
+ *       required: false
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: [password]
  *             properties:
- *               password: { type: string, example: "MyPassword123" }
+ *               password:
+ *                 type: string
+ *                 example: "MyPassword123"
+ *                 description: Required only for email/password accounts
  *     responses:
  *       200:
  *         content:
  *           application/json:
  *             example:
  *               message: "Account deleted successfully"
+ *       400:
+ *         description: Password required for email/password accounts (passwordRequired)
  *       401:
  *         description: Invalid password
  */
