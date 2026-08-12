@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs/promises";
 import sharp from "sharp";
 import { v4 as uuidv4 } from "uuid";
-import { getPool, sql } from "../config/database";
+import { getPool, sql, executeTransaction } from "../config/database";
 import bcrypt from "bcryptjs";
 import { logger } from "../utils/logger";
 import { getImageUrl } from "../utils/urlHelper";
@@ -20,6 +20,7 @@ import { getPlansWithCustomDisplay } from "../services/plans.service";
 import { getUserPlanCapabilities } from "../services/planCapabilities.service";
 import { ensureRestaurantNameSchema } from "../schemas/restaurantName.schema";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
+import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { ROLES } from "../config/constants";
 import {
   getMenuStaffColumnMeta,
@@ -902,7 +903,6 @@ export async function deleteAccount(
 
     const pool = await getPool();
 
-    // Verify password
     const userResult = await pool
       .request()
       .input("userId", sql.Int, userId)
@@ -913,21 +913,57 @@ export async function deleteAccount(
       return;
     }
 
-    const isValid = await bcrypt.compare(
-      password,
-      userResult.recordset[0].password,
-    );
+    const storedHash = userResult.recordset[0].password as string | null;
+    const hasPassword =
+      storedHash != null && String(storedHash).trim().length > 0;
 
-    if (!isValid) {
-      sendApiError(res, req, 401, ApiErrors.passwordIncorrect);
-      return;
+    // Password required only when the account has one (email/password users).
+    // Google/Apple-only users rely on the already-verified requireAuth JWT.
+    if (hasPassword) {
+      if (
+        password === undefined ||
+        password === null ||
+        String(password).trim().length === 0
+      ) {
+        sendApiError(res, req, 400, ApiErrors.passwordRequired);
+        return;
+      }
+
+      const isValid = await bcrypt.compare(password, storedHash);
+      if (!isValid) {
+        sendApiError(res, req, 401, ApiErrors.passwordIncorrect);
+        return;
+      }
     }
 
-    // Delete user (CASCADE will delete all related data)
-    await pool
-      .request()
-      .input("userId", sql.Int, userId)
-      .query("DELETE FROM Users WHERE id = @userId");
+    // Invalidate current access token before hard-delete (same pattern as logout)
+    const authHeader = req.headers.authorization;
+    const accessToken = authHeader?.substring(7); // Remove 'Bearer '
+    if (accessToken) {
+      const accessTokenExpiry = new Date();
+      accessTokenExpiry.setMinutes(accessTokenExpiry.getMinutes() + 15);
+      await TokenBlacklistService.addToBlacklist(
+        accessToken,
+        userId,
+        "access",
+        accessTokenExpiry,
+        "Account deletion",
+      );
+    }
+
+    // Explicitly remove SocialAccounts first (no schema-managed cascade found),
+    // then delete the user (RefreshTokens and other FKs cascade as today).
+    await executeTransaction(async (transaction) => {
+      await transaction
+        .request()
+        .input("userId", sql.Int, userId)
+        .query("DELETE FROM SocialAccounts WHERE userId = @userId");
+
+      await transaction
+        .request()
+        .input("userId", sql.Int, userId)
+        .query("DELETE FROM Users WHERE id = @userId");
+    });
 
     res.json({ message: "Account deleted successfully" });
   } catch (error) {
