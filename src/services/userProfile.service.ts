@@ -8,6 +8,10 @@ const AUTH_USER_PROFILE_QUERY = `
     u.id, u.email, u.name, u.restaurantName, u.role, u.phoneNumber, u.deliveryPhone, u.deliveryOn,
     u.country,
     u.dateOfBirth, u.gender, u.address, u.profileImage,
+    u.password,
+    CASE WHEN EXISTS (
+      SELECT 1 FROM SocialAccounts sa WHERE sa.userId = u.id
+    ) THEN 1 ELSE 0 END AS hasSocialAccount,
     u.isEmailVerified, u.isPhoneVerified, u.phoneVerifiedAt, u.createdAt,
     u.isSuspended, u.suspendedReason,
     s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
@@ -33,6 +37,8 @@ export function formatAuthUserProfile(profile: {
   gender: string | null;
   address: string | null;
   profileImage: string | null;
+  password?: string | null;
+  hasSocialAccount?: boolean | number | null;
   isEmailVerified: boolean;
   isPhoneVerified?: boolean | number | null;
   phoneVerifiedAt?: Date | null;
@@ -61,6 +67,8 @@ export function formatAuthUserProfile(profile: {
     gender: profile.gender,
     address: profile.address,
     profileImage: profile.profileImage,
+    hasPassword:
+      Boolean(profile.password?.trim()) && !Boolean(profile.hasSocialAccount),
     isEmailVerified: profile.isEmailVerified,
     isPhoneVerified: Boolean(profile.isPhoneVerified),
     phoneVerifiedAt: profile.phoneVerifiedAt ?? null,
