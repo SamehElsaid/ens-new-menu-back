@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs/promises";
 import sharp from "sharp";
 import { v4 as uuidv4 } from "uuid";
-import { getPool, sql } from "../config/database";
+import { getPool, sql, executeTransaction } from "../config/database";
 import bcrypt from "bcryptjs";
 import { logger } from "../utils/logger";
 import { getImageUrl } from "../utils/urlHelper";
@@ -20,7 +20,9 @@ import { getPlansWithCustomDisplay } from "../services/plans.service";
 import { getUserPlanCapabilities } from "../services/planCapabilities.service";
 import { ensureRestaurantNameSchema } from "../schemas/restaurantName.schema";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
+import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { ROLES } from "../config/constants";
+import { permanentlyDeleteOwnerAccount } from "../services/accountDeletion.service";
 import {
   getMenuStaffColumnMeta,
   normalizeStaffRow,
@@ -902,7 +904,6 @@ export async function deleteAccount(
 
     const pool = await getPool();
 
-    // Verify password
     const userResult = await pool
       .request()
       .input("userId", sql.Int, userId)
@@ -913,25 +914,131 @@ export async function deleteAccount(
       return;
     }
 
-    const isValid = await bcrypt.compare(
-      password,
-      userResult.recordset[0].password,
-    );
+    const storedHash = userResult.recordset[0].password as string | null;
+    const hasPassword =
+      storedHash != null && String(storedHash).trim().length > 0;
 
-    if (!isValid) {
-      sendApiError(res, req, 401, ApiErrors.passwordIncorrect);
-      return;
+    // Password required only when the account has one (email/password users).
+    // Google/Apple-only users rely on the already-verified requireAuth JWT.
+    if (hasPassword) {
+      if (
+        password === undefined ||
+        password === null ||
+        String(password).trim().length === 0
+      ) {
+        sendApiError(res, req, 400, ApiErrors.passwordRequired);
+        return;
+      }
+
+      const isValid = await bcrypt.compare(password, storedHash);
+      if (!isValid) {
+        sendApiError(res, req, 401, ApiErrors.passwordIncorrect);
+        return;
+      }
     }
 
-    // Delete user (CASCADE will delete all related data)
-    await pool
-      .request()
-      .input("userId", sql.Int, userId)
-      .query("DELETE FROM Users WHERE id = @userId");
+    // Invalidate current access token before hard-delete (same pattern as logout)
+    const authHeader = req.headers.authorization;
+    const accessToken = authHeader?.substring(7); // Remove 'Bearer '
+    if (accessToken) {
+      const accessTokenExpiry = new Date();
+      accessTokenExpiry.setMinutes(accessTokenExpiry.getMinutes() + 15);
+      await TokenBlacklistService.addToBlacklist(
+        accessToken,
+        userId,
+        "access",
+        accessTokenExpiry,
+        "Account deletion",
+      );
+    }
+
+    // Explicitly remove SocialAccounts first (no schema-managed cascade found),
+    // then delete the user (RefreshTokens and other FKs cascade as today).
+    await executeTransaction(async (transaction) => {
+      await transaction
+        .request()
+        .input("userId", sql.Int, userId)
+        .query("DELETE FROM SocialAccounts WHERE userId = @userId");
+
+      await transaction
+        .request()
+        .input("userId", sql.Int, userId)
+        .query("DELETE FROM Users WHERE id = @userId");
+    });
 
     res.json({ message: "Account deleted successfully" });
   } catch (error) {
     logger.error("Delete account error:", error);
+    sendApiError(res, req, 500, ApiErrors.failedDeleteAccount);
+  }
+}
+
+// Menu-owner self-service deletion. Kept separate from the legacy /account flow.
+export async function deleteMyAccount(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (req.user?.role !== ROLES.USER) {
+      sendApiError(res, req, 403, ApiErrors.accountDeletionOwnersOnly);
+      return;
+    }
+
+    const userId = req.user.userId;
+    const password =
+      typeof req.body.password === "string" ? req.body.password : "";
+    const confirmation =
+      typeof req.body.confirmation === "string" ? req.body.confirmation : "";
+    const pool = await getPool();
+    const userResult = await pool
+      .request()
+      .input("userId", sql.Int, userId)
+      .query(`
+        SELECT
+          password,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM dbo.SocialAccounts
+            WHERE userId = @userId
+          ) THEN 1 ELSE 0 END AS hasSocialAccount
+        FROM dbo.Users
+        WHERE id = @userId
+      `);
+
+    if (userResult.recordset.length === 0) {
+      sendApiError(res, req, 404, ApiErrors.userNotFound);
+      return;
+    }
+
+    const normalizedConfirmation = confirmation.trim().toLowerCase();
+    if (
+      normalizedConfirmation !== "delete account" &&
+      normalizedConfirmation !== "حذف الحساب"
+    ) {
+      sendApiError(res, req, 400, ApiErrors.accountDeletionConfirmationMismatch);
+      return;
+    }
+
+    const storedPassword = userResult.recordset[0].password as string | null;
+    const hasPassword =
+      Boolean(storedPassword?.trim()) &&
+      !Boolean(userResult.recordset[0].hasSocialAccount);
+    if (hasPassword && !password.trim()) {
+      sendApiError(res, req, 400, ApiErrors.passwordRequiredForDeletion);
+      return;
+    }
+
+    if (
+      hasPassword &&
+      !(await bcrypt.compare(password, storedPassword as string))
+    ) {
+      sendApiError(res, req, 401, ApiErrors.passwordIncorrect);
+      return;
+    }
+
+    await permanentlyDeleteOwnerAccount(userId);
+    res.json({ message: "Account and all related data deleted successfully" });
+  } catch (error) {
+    logger.error("Self-service account deletion error:", error);
     sendApiError(res, req, 500, ApiErrors.failedDeleteAccount);
   }
 }

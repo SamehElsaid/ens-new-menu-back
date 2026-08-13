@@ -23,11 +23,18 @@ import { logMenuActivitySafe } from "../services/menuActivityLog.service";
 import { generateMenuUuid } from "../utils/menuIdentifier";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
 import { ensureMenuWifiTaxServiceSchema } from "../schemas/menuWifiTaxService.schema";
+import { ensureMenuGoogleReviewsSchema } from "../schemas/menuGoogleReviews.schema";
 import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
 import {
   normalizeOptionalEnabled,
   normalizePercent,
 } from "../utils/normalizeOptionalEnabled";
+import {
+  isGoogleReviewsPosition,
+  isValidGoogleReviewsUrl,
+  normalizeGoogleReviewsPosition,
+  normalizeGoogleReviewsUrl,
+} from "../utils/googleReviewsUrl";
 import { normalizeMenuTheme } from "../constants/menuThemes";
 import { enforceActiveMenuLimitOnActivation } from "../middleware/planLimits";
 import { ensureMenuGroupSchema } from "../schemas/menuGroup.schema";
@@ -41,6 +48,16 @@ const MENU_WIFI_TAX_SERVICE_SELECT_SQL = `
   m.taxPercent,
   ISNULL(m.serviceEnabled, 0) as serviceEnabled,
   m.servicePercent
+`;
+
+const MENU_GOOGLE_REVIEWS_SELECT_SQL = `
+  ISNULL(m.googleReviewsEnabled, 0) as googleReviewsEnabled,
+  m.googleReviewsUrl,
+  ISNULL(m.googleReviewsPosition, N'bottom') as googleReviewsPosition,
+  m.googleReviewsButtonTextAr,
+  m.googleReviewsButtonTextEn,
+  ISNULL(m.googleReviewsShowIcon, 1) as googleReviewsShowIcon,
+  ISNULL(m.googleReviewsOpenInNewTab, 1) as googleReviewsOpenInNewTab
 `;
 
 function attachWifiTaxServiceFields(
@@ -58,6 +75,36 @@ function attachWifiTaxServiceFields(
     taxPercent: normalizePercent(menu.taxPercent),
     serviceEnabled: normalizeOptionalEnabled(menu.serviceEnabled),
     servicePercent: normalizePercent(menu.servicePercent),
+  };
+}
+
+function attachGoogleReviewsFields(
+  menu: Record<string, unknown>,
+): Record<string, unknown> {
+  const position = normalizeGoogleReviewsPosition(menu.googleReviewsPosition);
+
+  return {
+    ...menu,
+    googleReviewsEnabled: normalizeOptionalEnabled(menu.googleReviewsEnabled),
+    googleReviewsUrl:
+      typeof menu.googleReviewsUrl === "string" && menu.googleReviewsUrl.trim()
+        ? menu.googleReviewsUrl.trim()
+        : null,
+    googleReviewsPosition: position,
+    googleReviewsButtonTextAr:
+      typeof menu.googleReviewsButtonTextAr === "string"
+        ? menu.googleReviewsButtonTextAr
+        : null,
+    googleReviewsButtonTextEn:
+      typeof menu.googleReviewsButtonTextEn === "string"
+        ? menu.googleReviewsButtonTextEn
+        : null,
+    googleReviewsShowIcon: normalizeOptionalEnabled(
+      menu.googleReviewsShowIcon ?? true,
+    ),
+    googleReviewsOpenInNewTab: normalizeOptionalEnabled(
+      menu.googleReviewsOpenInNewTab ?? true,
+    ),
   };
 }
 
@@ -397,6 +444,7 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
 
     await ensureMenuChatbotSchema();
     await ensureMenuWifiTaxServiceSchema();
+    await ensureMenuGoogleReviewsSchema();
     await ensureMenuGroupSchema();
     await ensureDeliverySchema();
 
@@ -425,6 +473,13 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
           m.wifiName, m.wifiPassword,
           ISNULL(m.taxEnabled, 0) as taxEnabled, m.taxPercent,
           ISNULL(m.serviceEnabled, 0) as serviceEnabled, m.servicePercent,
+          ISNULL(m.googleReviewsEnabled, 0) as googleReviewsEnabled,
+          m.googleReviewsUrl,
+          ISNULL(m.googleReviewsPosition, N'bottom') as googleReviewsPosition,
+          m.googleReviewsButtonTextAr,
+          m.googleReviewsButtonTextEn,
+          ISNULL(m.googleReviewsShowIcon, 1) as googleReviewsShowIcon,
+          ISNULL(m.googleReviewsOpenInNewTab, 1) as googleReviewsOpenInNewTab,
           m.footerLogo, m.footerDescriptionEn, m.footerDescriptionAr,
           m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
           m.addressEn, m.addressAr, m.phone, m.workingHours,
@@ -700,6 +755,53 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
           copySettings && typeof source.deliveryMode === "string"
             ? source.deliveryMode
             : "governorates",
+        )
+        .input(
+          "googleReviewsEnabled",
+          sql.Bit,
+          copySettings && source.googleReviewsEnabled ? 1 : 0,
+        )
+        .input(
+          "googleReviewsUrl",
+          sql.NVarChar(500),
+          copySettings ? strOrNull(source.googleReviewsUrl) : null,
+        )
+        .input(
+          "googleReviewsPosition",
+          sql.NVarChar(32),
+          copySettings
+            ? normalizeGoogleReviewsPosition(source.googleReviewsPosition)
+            : "bottom",
+        )
+        .input(
+          "googleReviewsButtonTextAr",
+          sql.NVarChar(200),
+          copySettings ? strOrNull(source.googleReviewsButtonTextAr) : null,
+        )
+        .input(
+          "googleReviewsButtonTextEn",
+          sql.NVarChar(200),
+          copySettings ? strOrNull(source.googleReviewsButtonTextEn) : null,
+        )
+        .input(
+          "googleReviewsShowIcon",
+          sql.Bit,
+          copySettings
+            ? source.googleReviewsShowIcon === false ||
+              source.googleReviewsShowIcon === 0
+              ? 0
+              : 1
+            : 1,
+        )
+        .input(
+          "googleReviewsOpenInNewTab",
+          sql.Bit,
+          copySettings
+            ? source.googleReviewsOpenInNewTab === false ||
+              source.googleReviewsOpenInNewTab === 0
+              ? 0
+              : 1
+            : 1,
         ).query(`
           UPDATE Menus SET
             chatbotEnabled = @chatbotEnabled,
@@ -725,7 +827,14 @@ export async function copyMenu(req: Request, res: Response): Promise<void> {
             deliveryPhone = @deliveryPhone,
             deliveryWhatsAppOn = @deliveryWhatsAppOn,
             deliveryMode = @deliveryMode,
-            deliveryLegacyUserSeedDone = 1
+            deliveryLegacyUserSeedDone = 1,
+            googleReviewsEnabled = @googleReviewsEnabled,
+            googleReviewsUrl = @googleReviewsUrl,
+            googleReviewsPosition = @googleReviewsPosition,
+            googleReviewsButtonTextAr = @googleReviewsButtonTextAr,
+            googleReviewsButtonTextEn = @googleReviewsButtonTextEn,
+            googleReviewsShowIcon = @googleReviewsShowIcon,
+            googleReviewsOpenInNewTab = @googleReviewsOpenInNewTab
           WHERE id = @menuId
         `);
 
@@ -1169,6 +1278,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
   try {
     await ensureMenuChatbotSchema();
     await ensureMenuWifiTaxServiceSchema();
+    await ensureMenuGoogleReviewsSchema();
     await ensureMenuGroupSchema();
     const auth = req.user!;
     const userId = auth.userId;
@@ -1193,6 +1303,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
           m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
           m.addressEn, m.addressAr, m.phone, m.workingHours,
           ${MENU_WIFI_TAX_SERVICE_SELECT_SQL},
+          ${MENU_GOOGLE_REVIEWS_SELECT_SQL},
           ${MENU_GROUP_SELECT_SQL},
           ar.name as nameAr, ar.description as descriptionAr,
           en.name as nameEn, en.description as descriptionEn
@@ -1217,6 +1328,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
           m.socialFacebook, m.socialInstagram, m.socialTwitter, m.socialWhatsapp,
           m.addressEn, m.addressAr, m.phone, m.workingHours,
           ${MENU_WIFI_TAX_SERVICE_SELECT_SQL},
+          ${MENU_GOOGLE_REVIEWS_SELECT_SQL},
           ${MENU_GROUP_SELECT_SQL},
           ar.name as nameAr, ar.description as descriptionAr,
           en.name as nameEn, en.description as descriptionEn
@@ -1241,6 +1353,7 @@ export async function getMenuById(req: Request, res: Response): Promise<void> {
       chatbotEnabled: normalizeChatbotEnabled(menu.chatbotEnabled),
       theme: normalizeMenuTheme(menu.theme as string | null),
     });
+    menu = attachGoogleReviewsFields(menu);
 
     // Parse workingHours if it's a JSON string
     if (menu.workingHours && typeof menu.workingHours === "string") {
@@ -1372,11 +1485,19 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
       addressAr,
       phone,
       workingHours,
+      googleReviewsEnabled,
+      googleReviewsUrl,
+      googleReviewsPosition,
+      googleReviewsButtonTextAr,
+      googleReviewsButtonTextEn,
+      googleReviewsShowIcon,
+      googleReviewsOpenInNewTab,
     } = req.body;
 
     const touched: string[] = [];
     await ensureMenuChatbotSchema();
     await ensureMenuWifiTaxServiceSchema();
+    await ensureMenuGoogleReviewsSchema();
 
     if (
       isActive === true &&
@@ -1396,6 +1517,58 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
         });
         return;
       }
+    }
+
+    const willEnableGoogleReviews = googleReviewsEnabled === true;
+
+    let normalizedGoogleReviewsUrl: string | null | undefined;
+    if (googleReviewsUrl !== undefined) {
+      const raw =
+        typeof googleReviewsUrl === "string" ? googleReviewsUrl.trim() : "";
+      if (!raw) {
+        normalizedGoogleReviewsUrl = null;
+      } else if (!isValidGoogleReviewsUrl(raw)) {
+        sendApiError(res, req, 400, ApiErrors.invalidGoogleReviewsUrl);
+        return;
+      } else {
+        normalizedGoogleReviewsUrl = normalizeGoogleReviewsUrl(raw);
+      }
+    }
+
+    if (willEnableGoogleReviews) {
+      if (normalizedGoogleReviewsUrl === null) {
+        sendApiError(res, req, 400, ApiErrors.googleReviewsUrlRequired);
+        return;
+      }
+      if (normalizedGoogleReviewsUrl === undefined) {
+        const pool = await getPool();
+        const current = await pool
+          .request()
+          .input("id", sql.Int, menuId)
+          .input("userId", sql.Int, userId).query(`
+            SELECT googleReviewsUrl
+            FROM Menus
+            WHERE id = @id AND userId = @userId
+          `);
+        const existingUrl = current.recordset[0]?.googleReviewsUrl;
+        if (
+          typeof existingUrl !== "string" ||
+          !existingUrl.trim() ||
+          !isValidGoogleReviewsUrl(existingUrl)
+        ) {
+          sendApiError(res, req, 400, ApiErrors.googleReviewsUrlRequired);
+          return;
+        }
+      }
+    }
+
+    if (
+      googleReviewsPosition !== undefined &&
+      googleReviewsPosition !== "floating" &&
+      !isGoogleReviewsPosition(googleReviewsPosition)
+    ) {
+      sendApiError(res, req, 400, ApiErrors.invalidGoogleReviewsPosition);
+      return;
     }
 
     await executeTransaction(async (transaction) => {
@@ -1589,6 +1762,88 @@ export async function updateMenu(req: Request, res: Response): Promise<void> {
           "workingHours",
           sql.NVarChar(sql.MAX),
           workingHours ? JSON.stringify(workingHours) : null,
+        );
+      }
+
+      if (googleReviewsEnabled !== undefined) {
+        touched.push("googleReviewsEnabled");
+        menuUpdates.push("googleReviewsEnabled = @googleReviewsEnabled");
+        menuRequest.input(
+          "googleReviewsEnabled",
+          sql.Bit,
+          googleReviewsEnabled ? 1 : 0,
+        );
+      }
+
+      if (normalizedGoogleReviewsUrl !== undefined) {
+        touched.push("googleReviewsUrl");
+        menuUpdates.push("googleReviewsUrl = @googleReviewsUrl");
+        menuRequest.input(
+          "googleReviewsUrl",
+          sql.NVarChar(500),
+          normalizedGoogleReviewsUrl,
+        );
+      }
+
+      if (googleReviewsPosition !== undefined) {
+        touched.push("googleReviewsPosition");
+        menuUpdates.push("googleReviewsPosition = @googleReviewsPosition");
+        menuRequest.input(
+          "googleReviewsPosition",
+          sql.NVarChar(32),
+          normalizeGoogleReviewsPosition(googleReviewsPosition),
+        );
+      }
+
+      if (googleReviewsButtonTextAr !== undefined) {
+        touched.push("googleReviewsButtonTextAr");
+        menuUpdates.push(
+          "googleReviewsButtonTextAr = @googleReviewsButtonTextAr",
+        );
+        menuRequest.input(
+          "googleReviewsButtonTextAr",
+          sql.NVarChar(200),
+          typeof googleReviewsButtonTextAr === "string" &&
+            googleReviewsButtonTextAr.trim()
+            ? googleReviewsButtonTextAr.trim().slice(0, 200)
+            : null,
+        );
+      }
+
+      if (googleReviewsButtonTextEn !== undefined) {
+        touched.push("googleReviewsButtonTextEn");
+        menuUpdates.push(
+          "googleReviewsButtonTextEn = @googleReviewsButtonTextEn",
+        );
+        menuRequest.input(
+          "googleReviewsButtonTextEn",
+          sql.NVarChar(200),
+          typeof googleReviewsButtonTextEn === "string" &&
+            googleReviewsButtonTextEn.trim()
+            ? googleReviewsButtonTextEn.trim().slice(0, 200)
+            : null,
+        );
+      }
+
+      if (googleReviewsShowIcon !== undefined) {
+        touched.push("googleReviewsShowIcon");
+        menuUpdates.push("googleReviewsShowIcon = @googleReviewsShowIcon");
+        menuRequest.input(
+          "googleReviewsShowIcon",
+          sql.Bit,
+          googleReviewsShowIcon ? 1 : 0,
+        );
+      }
+
+      if (googleReviewsOpenInNewTab !== undefined) {
+        touched.push("googleReviewsOpenInNewTab");
+        menuUpdates.push(
+          "googleReviewsOpenInNewTab = @googleReviewsOpenInNewTab",
+        );
+        menuRequest.input(
+          "googleReviewsOpenInNewTab",
+          sql.Bit,
+          googleReviewsOpenInNewTab ? 1 : 0,
         );
       }
 

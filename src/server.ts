@@ -63,6 +63,7 @@ import {
 import { requireAdmin } from "./middleware/auth.middleware";
 import { isSwaggerEnabled } from "./utils/devFlags";
 import { getSwaggerSpec } from "./config/swagger";
+import webhookRoutes from "./routes/webhook.routes";
 
 // ------------------------------------------------------------------
 
@@ -125,6 +126,10 @@ app.use(
     ],
   }),
 );
+
+// ------------------------------------------------------------------
+// Resend inbound webhook — raw body BEFORE express.json (Svix verify)
+app.use("/api/webhooks", webhookRoutes);
 
 // ------------------------------------------------------------------
 // Body parsers

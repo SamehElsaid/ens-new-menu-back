@@ -17,12 +17,16 @@ import { attachParsedMenuItemOptionsList } from "../utils/menuItemVariants";
 import { ensureDeliverySchema } from "../schemas/delivery.schema";
 import { ensureMenuChatbotSchema } from "../schemas/menuChatbot.schema";
 import { ensureMenuWifiTaxServiceSchema } from "../schemas/menuWifiTaxService.schema";
+import { ensureMenuGoogleReviewsSchema } from "../schemas/menuGoogleReviews.schema";
 import { ensureRatingsSchema } from "../schemas/ratings.schema";
 import { normalizeChatbotEnabled } from "../utils/normalizeChatbotEnabled";
 import {
   normalizeOptionalEnabled,
   normalizePercent,
 } from "../utils/normalizeOptionalEnabled";
+import {
+  normalizeGoogleReviewsPosition,
+} from "../utils/googleReviewsUrl";
 import { normalizeMenuTheme } from "../constants/menuThemes";
 import { fetchMenuDeliverySettings } from "../services/menuDelivery.service";
 import {
@@ -163,6 +167,33 @@ export const getAllPublicMenus = async (req: Request, res: Response) => {
 const PUBLIC_MENU_INITIAL_ITEMS_LIMIT = 30;
 const CATALOG_PAGE_SIZE = 30;
 
+function mapPublicGoogleReviewsFields(menu: Record<string, unknown>) {
+  const position = normalizeGoogleReviewsPosition(menu.googleReviewsPosition);
+
+  return {
+    googleReviewsEnabled: normalizeOptionalEnabled(menu.googleReviewsEnabled),
+    googleReviewsUrl:
+      typeof menu.googleReviewsUrl === "string" && menu.googleReviewsUrl.trim()
+        ? menu.googleReviewsUrl.trim()
+        : null,
+    googleReviewsPosition: position,
+    googleReviewsButtonTextAr:
+      typeof menu.googleReviewsButtonTextAr === "string"
+        ? menu.googleReviewsButtonTextAr
+        : null,
+    googleReviewsButtonTextEn:
+      typeof menu.googleReviewsButtonTextEn === "string"
+        ? menu.googleReviewsButtonTextEn
+        : null,
+    googleReviewsShowIcon: normalizeOptionalEnabled(
+      menu.googleReviewsShowIcon ?? true,
+    ),
+    googleReviewsOpenInNewTab: normalizeOptionalEnabled(
+      menu.googleReviewsOpenInNewTab ?? true,
+    ),
+  };
+}
+
 function buildMenuItemsOrderClause(
   hasCategoryId: boolean,
   hasCategoriesTable: boolean,
@@ -197,6 +228,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
 
     await ensureMenuChatbotSchema();
     await ensureMenuWifiTaxServiceSchema();
+    await ensureMenuGoogleReviewsSchema();
 
     const pool = await getPool();
 
@@ -220,6 +252,13 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           m.taxPercent,
           ISNULL(m.serviceEnabled, 0) as serviceEnabled,
           m.servicePercent,
+          ISNULL(m.googleReviewsEnabled, 0) as googleReviewsEnabled,
+          m.googleReviewsUrl,
+          ISNULL(m.googleReviewsPosition, N'bottom') as googleReviewsPosition,
+          m.googleReviewsButtonTextAr,
+          m.googleReviewsButtonTextEn,
+          ISNULL(m.googleReviewsShowIcon, 1) as googleReviewsShowIcon,
+          ISNULL(m.googleReviewsOpenInNewTab, 1) as googleReviewsOpenInNewTab,
           m.userId,
           m.footerLogo,
           m.footerDescriptionEn,
@@ -286,6 +325,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
             taxPercent: normalizePercent(menu.taxPercent),
             serviceEnabled: normalizeOptionalEnabled(menu.serviceEnabled),
             servicePercent: normalizePercent(menu.servicePercent),
+            ...mapPublicGoogleReviewsFields(menu),
             locale: menu.locale,
             ownerPlanType: menu.ownerPlanType || "free",
             footerLogo: getImageUrl(menu.footerLogo),
@@ -594,6 +634,7 @@ export const getPublicMenu = async (req: Request, res: Response) => {
           taxPercent: normalizePercent(menu.taxPercent),
           serviceEnabled: normalizeOptionalEnabled(menu.serviceEnabled),
           servicePercent: normalizePercent(menu.servicePercent),
+          ...mapPublicGoogleReviewsFields(menu),
           locale: menu.locale,
           ownerPlanType: menu.ownerPlanType || "free", // Add owner's plan type
           footerLogo: getImageUrl(menu.footerLogo),

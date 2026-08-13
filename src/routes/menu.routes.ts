@@ -252,6 +252,28 @@ router.put(
       .trim()
       .isLength({ max: 50 }),
     body("workingHours").optional(),
+    body("googleReviewsEnabled").optional().isBoolean(),
+    body("googleReviewsUrl")
+      .optional({ nullable: true, checkFalsy: true })
+      .isString()
+      .trim()
+      .isLength({ max: 500 }),
+    body("googleReviewsPosition")
+      .optional()
+      .isString()
+      .isIn(["top", "bottom", "after_order"]),
+    body("googleReviewsButtonTextAr")
+      .optional({ nullable: true, checkFalsy: true })
+      .isString()
+      .trim()
+      .isLength({ max: 200 }),
+    body("googleReviewsButtonTextEn")
+      .optional({ nullable: true, checkFalsy: true })
+      .isString()
+      .trim()
+      .isLength({ max: 200 }),
+    body("googleReviewsShowIcon").optional().isBoolean(),
+    body("googleReviewsOpenInNewTab").optional().isBoolean(),
   ]),
   menuController.updateMenu,
 );

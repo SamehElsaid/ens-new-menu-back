@@ -98,6 +98,18 @@ export const ApiErrors = {
     en: "Menu logo is required",
     ar: "شعار المنيو مطلوب",
   },
+  invalidGoogleReviewsUrl: {
+    en: "Please enter a valid Google Maps or Google Reviews link.",
+    ar: "يرجى إدخال رابط صالح من Google Maps أو Google Reviews.",
+  },
+  googleReviewsUrlRequired: {
+    en: "A Google Reviews link is required when the review button is enabled.",
+    ar: "رابط تقييمات جوجل مطلوب عند تفعيل زر التقييم.",
+  },
+  invalidGoogleReviewsPosition: {
+    en: "Invalid Google Reviews button position.",
+    ar: "موضع زر تقييمات جوجل غير صالح.",
+  },
   failedCreateMenu: {
     en: "Failed to create menu",
     ar: "فشل إنشاء المنيو",
@@ -529,6 +541,22 @@ export const ApiErrors = {
   passwordIncorrect: {
     en: "Password is incorrect",
     ar: "كلمة المرور غير صحيحة",
+  },
+  passwordRequired: {
+    en: "Password is required",
+    ar: "كلمة المرور مطلوبة",
+  },
+  passwordRequiredForDeletion: {
+    en: "Enter your current password to delete your account",
+    ar: "أدخل كلمة المرور الحالية لحذف حسابك",
+  },
+  accountDeletionOwnersOnly: {
+    en: "Only a menu owner can delete their full account",
+    ar: "يمكن لمالك المنيو فقط حذف حسابه بالكامل",
+  },
+  accountDeletionConfirmationMismatch: {
+    en: 'Type "DELETE ACCOUNT" to confirm deletion',
+    ar: 'اكتب "حذف الحساب" لتأكيد الحذف',
   },
   failedDeleteAccount: {
     en: "Failed to delete account",

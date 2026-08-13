@@ -56,7 +56,8 @@
  *       (defaults: products false; settings/design/media/address true).
  *       Logo is always copied when present (required to create a menu).
  *       copyProducts copies categories and items; copySettings covers wifi/tax/
- *       service/social/hours/delivery; copyDesign covers theme and customizations;
+ *       service, chatbot, socials, Google Reviews CTA, delivery flags, and hours;
+ *       copyDesign covers theme and customizations;
  *       copyMedia covers footer logo; copyAddress covers address and phone.
  *       Does not copy staff, tables, ads, or group membership.
  *       Subject to the same active menu plan limit as create.
@@ -238,6 +239,8 @@
  *     description: |
  *       Updates menu profile and optional settings. WiFi (name/password), tax percent,
  *       and service percent are optional and gated by their enabled flags (default off).
+ *       Google Reviews CTA fields (url, position, button text, icon, openInNewTab) are
+ *       optional; enabling requires a valid Google Maps or Google Reviews URL.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -257,6 +260,15 @@
  *               taxPercent: { type: number, nullable: true, minimum: 0, maximum: 100 }
  *               serviceEnabled: { type: boolean }
  *               servicePercent: { type: number, nullable: true, minimum: 0, maximum: 100 }
+ *               googleReviewsEnabled: { type: boolean }
+ *               googleReviewsUrl: { type: string, nullable: true, maxLength: 500 }
+ *               googleReviewsPosition:
+ *                 type: string
+ *                 enum: [top, bottom, after_order]
+ *               googleReviewsButtonTextAr: { type: string, nullable: true, maxLength: 200 }
+ *               googleReviewsButtonTextEn: { type: string, nullable: true, maxLength: 200 }
+ *               googleReviewsShowIcon: { type: boolean }
+ *               googleReviewsOpenInNewTab: { type: boolean }
  *           example:
  *             wifiEnabled: true
  *             wifiName: Guest-WiFi
@@ -265,6 +277,13 @@
  *             taxPercent: 14
  *             serviceEnabled: false
  *             servicePercent: 12
+ *             googleReviewsEnabled: true
+ *             googleReviewsUrl: https://g.page/r/example/review
+ *             googleReviewsPosition: bottom
+ *             googleReviewsButtonTextAr: قيّم تجربتك على Google
+ *             googleReviewsButtonTextEn: Rate your experience on Google
+ *             googleReviewsShowIcon: true
+ *             googleReviewsOpenInNewTab: true
  *     responses:
  *       200:
  *         description: Updated
@@ -272,6 +291,8 @@
  *           application/json:
  *             example:
  *               message: Menu updated successfully
+ *       400:
+ *         description: Invalid Google Reviews URL or missing URL when enabled
  *   delete:
  *     tags: [Menus]
  *     summary: Delete menu

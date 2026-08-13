@@ -447,7 +447,42 @@
  *   delete:
  *     tags: [User]
  *     summary: Delete account permanently
- *     description: Requires password confirmation. Deletes user and associated data.
+ *     description: >
+ *       Permanently deletes the authenticated user and associated data.
+ *       `password` is required only for email/password accounts (when Users.password is set).
+ *       Google/Apple-only accounts can omit it; the Bearer JWT from requireAuth is sufficient.
+ *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               password:
+ *                 type: string
+ *                 example: "MyPassword123"
+ *                 description: Required only for email/password accounts
+ *     responses:
+ *       200:
+ *         content:
+ *           application/json:
+ *             example:
+ *               message: "Account deleted successfully"
+ *       400:
+ *         description: Password required for email/password accounts (passwordRequired)
+ *       401:
+ *         description: Invalid password
+ *
+ * /api/user/delete-my-account:
+ *   delete:
+ *     tags: [User]
+ *     summary: Permanently delete the authenticated menu-owner account
+ *     description: >
+ *       Self-service owner deletion. Deletes the owner, every owned menu,
+ *       menu content, staff, permissions, orders, analytics, subscriptions,
+ *       social-account links, tokens, uploads, and all other related data.
+ *       This endpoint is separate from the legacy `/api/user/account` flow.
  *     security: [{ ApiKeyAuth: [], BearerAuth: [] }]
  *     requestBody:
  *       required: true
@@ -455,17 +490,25 @@
  *         application/json:
  *           schema:
  *             type: object
- *             required: [password]
+ *             required: [confirmation]
  *             properties:
- *               password: { type: string, example: "MyPassword123" }
+ *               confirmation:
+ *                 type: string
+ *                 enum: [DELETE ACCOUNT, حذف الحساب]
+ *                 description: Localized destructive confirmation phrase
+ *               password:
+ *                 type: string
+ *                 maxLength: 200
+ *                 description: Required only when the account has a password
  *     responses:
  *       200:
- *         content:
- *           application/json:
- *             example:
- *               message: "Account deleted successfully"
+ *         description: Account and all related data deleted
+ *       400:
+ *         description: Current password is required
  *       401:
- *         description: Invalid password
+ *         description: Invalid password or authentication
+ *       403:
+ *         description: Only menu owners can use this endpoint
  */
 
 export {};

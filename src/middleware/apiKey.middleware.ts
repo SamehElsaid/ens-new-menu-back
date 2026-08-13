@@ -24,6 +24,8 @@ const publicRoutes = [
   // EasyKash return URL + webhook (secured by gateway ref / HMAC, not x-api-key)
   "/api/payment/redirect",
   "/api/payment/easykash/callback",
+  // Resend inbound email webhook (Svix signature, not x-api-key)
+  "/api/webhooks/resend",
   ...(isPaymentTestRoutesEnabled()
     ? ["/api/payment/easykash/callback/test", "/api/payment/test"]
     : []),
