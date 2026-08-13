@@ -208,4 +208,20 @@ router.delete(
   userController.deleteAccount,
 );
 
+// DELETE /api/user/delete-my-account - Menu owner self-service full deletion
+router.delete(
+  "/delete-my-account",
+  validate([
+    body("confirmation")
+      .isString()
+      .trim()
+      .isLength({ min: 1, max: 100 }),
+    body("password")
+      .optional({ values: "falsy" })
+      .isString()
+      .isLength({ max: 200 }),
+  ]),
+  userController.deleteMyAccount,
+);
+
 export default router;

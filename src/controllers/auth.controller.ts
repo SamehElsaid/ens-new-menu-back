@@ -498,6 +498,10 @@ export async function login(req: Request, res: Response): Promise<void> {
         SELECT 
           u.id, u.email, u.name, u.restaurantName, u.role, u.phoneNumber, u.country,
           u.dateOfBirth, u.gender, u.address, u.profileImage,
+          u.password,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM SocialAccounts sa WHERE sa.userId = u.id
+          ) THEN 1 ELSE 0 END AS hasSocialAccount,
           u.isEmailVerified, u.isPhoneVerified, u.phoneVerifiedAt, u.createdAt,
           s.planId, s.billingCycle, p.name as planName, p.maxMenus, p.maxProductsPerMenu
         FROM Users u
@@ -552,6 +556,9 @@ export async function login(req: Request, res: Response): Promise<void> {
         gender: profile.gender,
         address: profile.address,
         profileImage: profile.profileImage,
+        hasPassword:
+          Boolean(profile.password?.trim()) &&
+          !Boolean(profile.hasSocialAccount),
         isEmailVerified: profile.isEmailVerified,
         isPhoneVerified: Boolean(profile.isPhoneVerified),
         phoneVerifiedAt: profile.phoneVerifiedAt ?? null,

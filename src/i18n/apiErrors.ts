@@ -546,6 +546,18 @@ export const ApiErrors = {
     en: "Password is required",
     ar: "كلمة المرور مطلوبة",
   },
+  passwordRequiredForDeletion: {
+    en: "Enter your current password to delete your account",
+    ar: "أدخل كلمة المرور الحالية لحذف حسابك",
+  },
+  accountDeletionOwnersOnly: {
+    en: "Only a menu owner can delete their full account",
+    ar: "يمكن لمالك المنيو فقط حذف حسابه بالكامل",
+  },
+  accountDeletionConfirmationMismatch: {
+    en: 'Type "DELETE ACCOUNT" to confirm deletion',
+    ar: 'اكتب "حذف الحساب" لتأكيد الحذف',
+  },
   failedDeleteAccount: {
     en: "Failed to delete account",
     ar: "فشل حذف الحساب",

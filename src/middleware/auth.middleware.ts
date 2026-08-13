@@ -6,6 +6,7 @@ import { sendApiError } from "../utils/apiErrorResponse";
 import { ApiErrors } from "../i18n/apiErrors";
 import { TokenBlacklistService } from "../services/tokenBlacklist.service";
 import { logger } from "../utils/logger";
+import { getPool, sql } from "../config/database";
 
 // Extend Express Request type
 declare global {
@@ -14,6 +15,15 @@ declare global {
       user?: TokenPayload;
     }
   }
+}
+
+async function authenticatedUserExists(userId: number): Promise<boolean> {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input("userId", sql.Int, userId)
+    .query("SELECT TOP 1 id FROM dbo.Users WHERE id = @userId");
+  return result.recordset.length > 0;
 }
 
 export async function verifyToken(
@@ -39,13 +49,17 @@ export async function verifyToken(
     }
 
     const decoded = verifyAccessToken(token);
-    req.user = decoded;
 
     // Staff JWT uses userId = MenuStaff.id — do not run owner subscription expiry on it
     if (decoded.role !== ROLES.STAFF) {
+      if (!(await authenticatedUserExists(decoded.userId))) {
+        sendApiError(res, req, 401, ApiErrors.invalidToken);
+        return;
+      }
       await checkAndExpireUserSubscription(decoded.userId);
     }
 
+    req.user = decoded;
     next();
   } catch (error) {
     const status = error instanceof jwt.TokenExpiredError ? 405 : 401;
@@ -99,6 +113,12 @@ export async function optionalAuth(
       return next();
     }
     const decoded = verifyAccessToken(token);
+    if (
+      decoded.role !== ROLES.STAFF &&
+      !(await authenticatedUserExists(decoded.userId))
+    ) {
+      return next();
+    }
     req.user = decoded;
   } catch {
     /* ignore — optional auth */
